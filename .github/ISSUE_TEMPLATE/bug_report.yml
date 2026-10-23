@@ -1,0 +1,51 @@
+name: Something isn't right
+description: A bug, a crash, or a screen that looks wrong on your R1.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. These four things let us find most problems quickly.
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - HiBy R1
+        - HiBy R1, newer unit (AIC8800 wireless chip)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: firmware
+    attributes:
+      label: HiBy firmware under the boot menu
+      description: The boot menu shows it when you hold Volume Down at power-on. The 1.1 boot menu is built on 2.0.
+      options:
+        - "2.0"
+        - "1.6"
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: GabagoolOS version
+      description: The version you downloaded, or the update name shown at the top of Settings (for example "Game on then").
+      placeholder: 1.1 Game on then
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. A screenshot helps (hold Power and press Volume Up; they land in /Screenshots).
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: sloppy.log
+      description: Attach `.rockbox/sloppy/sloppy.log` from the card (drag the file in here). It names the wireless chip near the top.
+    validations:
+      required: true

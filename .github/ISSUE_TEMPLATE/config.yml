@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install and update guide
+    url: https://github.com/BlueDreams666/gabagoolOS/releases/latest
+    about: The README in each release has every install step and the way back to stock.
