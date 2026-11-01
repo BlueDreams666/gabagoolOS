@@ -25,6 +25,12 @@ with the source release, and the paths below refer to that tree.
   `COPYING` files are beside them.
 - The Game Boy core in `apps/sloppy/gb` is Rockbox's **rockboy** (from gnuboy),
   GPL v2.
+- For Ogg, Opus and FLAC internet radio, copies of Rockbox's decoders:
+  **Tremor** (Xiph.org, BSD-style, `apps/sloppy/tremor/COPYING`), **libopus**
+  (Xiph.org and Skype, BSD, in each file's header, `apps/sloppy/opus`) and the
+  FLAC decoder from Rockbox's libffmpegFLAC (LGPL v2.1 or later,
+  `apps/sloppy/flac/COPYING`). Each folder's `README.gabagool` lists what
+  changed.
 
 ## Fonts (SIL Open Font License 1.1)
 
@@ -32,7 +38,8 @@ with the source release, and the paths below refer to that tree.
 - **Shrikhand**, Jonny Pinhorn.
 - **Noto Sans Hebrew**, **Noto Sans Arabic** and **Noto Sans SC**
   (Simplified Chinese, plus the traditional forms and Japanese kanji in the
-  letter packs), Google.
+  letter packs), **Noto Sans KR** (Korean) and **Noto Sans Thai**, Google and
+  the Noto Project Authors.
 - **Montserrat** (LVGL's built-in symbol font), Julieta Ulanovsky.
 
 Licence texts: `sloppy-dev/fonts-src/` and `apps/sloppy/fonts/`.
@@ -59,7 +66,14 @@ Licence texts: `sloppy-dev/fonts-src/` and `apps/sloppy/fonts/`.
   directory. **ip-api.com** answers "which country am I in" for Radio near you.
 - **AutoEq** by Jaakko Pasanen (https://github.com/jaakkopasanen/AutoEq):
   headphone correction profiles, fetched from GitHub.
-- **ListenBrainz** (https://listenbrainz.org): scrobbling, with your own token.
+- **MusicBrainz** (https://musicbrainz.org) and the **Cover Art Archive**
+  (https://coverartarchive.org): finding and fetching missing album covers.
+- **ListenBrainz** (https://listenbrainz.org) and **Last.fm**
+  (https://www.last.fm): scrobbling, with your own account.
+- **Apple's podcast directory** (iTunes Search) for finding podcasts, and the
+  feeds you add.
+- Your own **Subsonic / Navidrome** and **Audiobookshelf** servers, when you
+  sign in to one.
 - **NTP** (pool.ntp.org, time.windows.com): the clock.
 
 No analytics, no tracking, no accounts with us.

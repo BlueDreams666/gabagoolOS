@@ -32,9 +32,10 @@
 
 GabagoolOS replaces the R1's screens with its own: a tile, card or list home, a
 library that stays smooth at tens of thousands of songs, Now Playing with synced
-lyrics, a parametric equalizer with AutoEq, internet radio, audiobooks with
-bookmarks, Bluetooth and AirPlay. The extras (games, a pocket pet, a quiz) are
-there if you want them and out of the way if you don't.
+lyrics, a parametric equalizer with AutoEq, internet radio, podcasts,
+audiobooks, e-books, your own Navidrome or Audiobookshelf server, Bluetooth and
+AirPlay. The extras (games, a pocket pet, a quiz) are there if you want them and
+out of the way if you don't.
 
 ## Have a look
 
@@ -95,15 +96,19 @@ its own test harness. No mock-ups. The covers are the harness's plain test art.
 <td valign="top"><img src="assets/icon-sound.png" width="44" alt=""><br><b>Sound</b><br>A 10-band parametric EQ, any filter in any band, AutoEq by headphone name, and HiBy Music app EQ files.</td>
 </tr>
 <tr>
-<td valign="top"><img src="assets/icon-radio.png" width="44" alt=""><br><b>Radio</b><br>Thousands of stations from radio-browser: near you, by genre, saved. MP3 and AAC, and it reconnects a dropped station.</td>
-<td valign="top"><img src="assets/icon-audiobooks.png" width="44" alt=""><br><b>Audiobooks</b><br>Continue listening, chapters, bookmarks, a speed for each book, and sleep at the chapter's end.</td>
+<td valign="top"><img src="assets/icon-radio.png" width="44" alt=""><br><b>Radio</b><br>Thousands of stations from radio-browser: near you, by genre, saved. MP3, AAC, FLAC, Ogg and HLS, and it reconnects a dropped station.</td>
+<td valign="top"><img src="assets/icon-audiobooks.png" width="44" alt=""><br><b>Audiobooks</b><br>Continue listening, chapters, bookmarks, a speed for each book, sleep at the chapter's end, and Audiobookshelf sync.</td>
 </tr>
 <tr>
-<td valign="top"><img src="assets/icon-wireless.png" width="44" alt=""><br><b>Wireless</b><br>Bluetooth out and in, AirPlay, DLNA, Wi-Fi file transfer, and a phone remote in any browser.</td>
+<td valign="top"><img src="assets/icon-podcasts.png" width="44" alt=""><br><b>Podcasts, servers and books</b><br>Podcasts from Apple's directory or any feed, your Navidrome or Subsonic server with an offline cache, and an EPUB reader.</td>
+<td valign="top"><img src="assets/icon-taste.png" width="44" alt=""><br><b>Your taste</b><br>Swipe songs you love or skip. It remembers every swipe, learns what you like, and plays you a mix of it. Last.fm and ListenBrainz scrobbling too.</td>
+</tr>
+<tr>
+<td valign="top"><img src="assets/icon-wireless.png" width="44" alt=""><br><b>Wireless</b><br>Bluetooth out and in, AirPlay, DLNA, Wi-Fi file transfer, LocalSend, and a phone remote that pairs with a code.</td>
 <td valign="top"><img src="assets/icon-buttons.png" width="44" alt=""><br><b>Buttons</b><br>Hold to seek, press twice for an action, and a sleep timer one tap away that remembers its length.</td>
 </tr>
 <tr>
-<td valign="top"><img src="assets/icon-keyboard.png" width="44" alt=""><br><b>Keyboard</b><br>Glide typing in 12 languages, pinyin, and an interface in 7 languages, right to left included.</td>
+<td valign="top"><img src="assets/icon-keyboard.png" width="44" alt=""><br><b>Keyboard</b><br>Glide typing in 12 languages, pinyin, a T9 keypad, an interface in 7 languages with right to left, and Chinese, Japanese, Korean and Thai letters.</td>
 <td valign="top"><img src="assets/icon-look.png" width="44" alt=""><br><b>Your look</b><br>Four themes, three homes, any accent colour, and Settings as a grouped list with search.</td>
 </tr>
 <tr>
@@ -160,8 +165,8 @@ so than have you guess. What matters is whether it works, so it is tested the
 boring way:
 
 - **A screen audit.** A harness drives every screen in every theme, language and
-  text size, more than 16,000 screens in 196 combinations, and fails on anything
-  clipped, overlapping, too faint or too small to tap. The current count is zero.
+  text size, 32,256 screens in 196 combinations, and fails on anything clipped,
+  overlapping, too faint or too small to tap. The current count is zero.
 - **Fuzzing.** Random taps, swipes and key presses across every screen, many
   seeds, looking for crashes and hangs.
 - **AddressSanitizer.** The whole interface runs under ASan to catch memory
@@ -181,8 +186,10 @@ write to the R1's internal memory. The boot menu is HiBy's own firmware 2.0
 update with three small additions (the boot menu, a script that mounts the card,
 and a boot logo). Like any official update it holds only the kernel, byte for
 byte HiBy's, and the system image. There is no recovery or bootloader image in
-it, and HiBy's own updater installs it. Flashing firmware always carries some
-risk, so keep HiBy's official file to hand.
+it, and HiBy's own updater installs it. While the R1 is plugged into a computer
+in USB mode, GabagoolOS writes nothing to the card. Updates on the player only
+install if they carry the release signature. Flashing firmware always carries
+some risk, so keep HiBy's official file to hand.
 </details>
 
 <details>
@@ -200,8 +207,11 @@ are welcome. Playback and everything else don't depend on the wireless chip.
 <br>
 
 No. It goes online only when you turn on Wi-Fi and use a feature that needs it:
-lyrics (LRCLIB), internet radio (radio-browser), AutoEq profiles (GitHub),
-ListenBrainz (your own token) and the clock (NTP).
+lyrics (LRCLIB), covers (MusicBrainz and the Cover Art Archive), internet radio
+(radio-browser, and ip-api.com for "near you"), podcasts (Apple's directory and
+the feeds you add), AutoEq profiles (GitHub), scrobbling (Last.fm or
+ListenBrainz, your own account), your own Navidrome or Audiobookshelf server,
+and the clock (NTP). The phone remote only answers phones you've paired.
 </details>
 
 <details>
@@ -223,12 +233,15 @@ GabagoolOS stands on the work of many people:
   WillNHT, built on **[bahusoid's Rockbox Audiobook Mod](https://github.com/bahusoid/rockbox)**:
   the R1 port, the audiobook library and many device fixes.
 - **[LVGL](https://lvgl.io)** (MIT), which draws the interface, with lodepng
-  (zlib) and stb_image. **libmad** and **FAAD2** (GPL) for internet radio.
+  (zlib) and stb_image. For internet radio, **libmad** and **FAAD2** (GPL), and
+  Rockbox's copies of **Tremor** and **libopus** (BSD) and its FLAC decoder
+  (LGPL).
 - Fonts under the SIL Open Font License: **Source Sans 3**, **Shrikhand**,
-  **Noto Sans** Hebrew, Arabic and SC, and **Montserrat** for symbols.
-- **LRCLIB** for lyrics, **radio-browser** for stations, **AutoEq** by Jaakko
-  Pasanen for headphone profiles, **ListenBrainz**, and the **Unicode Unihan**
-  database for the pinyin keyboard.
+  **Noto Sans** Hebrew, Arabic, SC, KR and Thai, and **Montserrat** for symbols.
+- **LRCLIB** for lyrics, **MusicBrainz** and the **Cover Art Archive** for
+  covers, **radio-browser** for stations, **AutoEq** by Jaakko Pasanen for
+  headphone profiles, **Last.fm** and **ListenBrainz**, and the **Unicode
+  Unihan** database for the pinyin keyboard.
 
 Everything, with licences, is in [NOTICE.md](NOTICE.md).
 
