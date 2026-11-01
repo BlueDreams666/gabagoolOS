@@ -48,6 +48,15 @@ its own test harness. No mock-ups. The covers are the harness's plain test art.
   <br><sub>Cards &nbsp;·&nbsp; Tiles &nbsp;·&nbsp; List, in the Zule theme</sub>
 </p>
 
+<h3 align="center">New in 1.1</h3>
+<p align="center">
+  <img src="assets/gallery-new.png" width="837" alt="Your taste: a deck of songs to swipe, with undo, skip, keep and love buttons; Now Playing with a waveform seek bar; a podcast's page with Play, Refresh and its episodes.">
+  <br><sub>Your taste &nbsp;·&nbsp; A waveform seek bar &nbsp;·&nbsp; Podcasts</sub>
+  <br><br>
+  <img src="assets/gallery-new2.png" width="837" alt="An album from a Navidrome server with Play and Shuffle; the e-book reader in its sepia look; arranging the control centre, with a handle to drag each shortcut and a cross to take it out.">
+  <br><sub>Your Navidrome server &nbsp;·&nbsp; The e-book reader &nbsp;·&nbsp; Arrange the control centre</sub>
+</p>
+
 <h3 align="center">Your music, first</h3>
 <p align="center">
   <img src="assets/gallery-music.png" width="837" alt="The Music menu with For you, Songs, Albums, Artists, Playlists, Loved, Genres and Years; the Songs list with an A to Z rail showing the letter M; an album page washed in its cover's colour, with Play and Shuffle.">
@@ -62,7 +71,7 @@ its own test harness. No mock-ups. The covers are the harness's plain test art.
 
 <h3 align="center">Settings and sound</h3>
 <p align="center">
-  <img src="assets/gallery-settings.png" width="837" alt="Settings as a grouped list with search; the parametric equalizer with a ten-band curve, preamp, auto level and an AutoEq headphone profile; the control centre with sixteen shortcuts and brightness and volume sliders.">
+  <img src="assets/gallery-settings.png" width="837" alt="Settings as a grouped list with search; the parametric equalizer with a ten-band curve, preamp, auto level and an AutoEq headphone profile; the control centre with its shortcuts, brightness and volume sliders and the playing song.">
   <br><sub>Settings &nbsp;·&nbsp; Parametric EQ with AutoEq &nbsp;·&nbsp; The control centre</sub>
 </p>
 
