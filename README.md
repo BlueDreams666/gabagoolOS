@@ -48,6 +48,14 @@ its own test harness. No mock-ups. The covers are the harness's plain test art.
   <br><sub>Cards &nbsp;·&nbsp; Tiles &nbsp;·&nbsp; List, in the Zule theme</sub>
 </p>
 
+<h3 align="center">The house special</h3>
+<p align="center">
+  <img src="assets/gallery-special.png" width="285" alt="The Tiles home with the house special tile: a photo with the caption Gabagool? Ova haaaa!, above the apps list and a mini player.">
+  <br><b>Gabagool? Ova haaaa!</b>
+  <br><sub>Every Tiles home comes with one tile you didn't order. Tap it. You'll see.<br>
+  Not in the mood? Hide it like any other tile. Nobody's offended. Much.</sub>
+</p>
+
 <h3 align="center">New in 1.1</h3>
 <p align="center">
   <img src="assets/gallery-new.png" width="837" alt="Your taste: a deck of songs to swipe, with undo, skip, keep and love buttons; Now Playing with a waveform seek bar; a podcast's page with Play, Refresh and its episodes.">
@@ -95,6 +103,8 @@ its own test harness. No mock-ups. The covers are the harness's plain test art.
 
 ## What's inside
 
+<sub><i>Gabagool, mozzarell', the works.</i></sub>
+
 <table>
 <tr>
 <td width="50%" valign="top"><img src="assets/icon-library.png" width="44" alt=""><br><b>Library</b><br>Smooth with tens of thousands of songs. Sorting that skips "The" and puts 2 before 10, Genres and Years, a heading per disc, an A to Z rail.</td>
@@ -128,6 +138,8 @@ its own test harness. No mock-ups. The covers are the harness's plain test art.
 
 ## Install
 
+> *"A wrong decision is better than indecision."* ― Tony Soprano
+
 The full guide, with every step and what each file does, is in the README that
 comes with [each release](https://github.com/BlueDreams666/gabagoolOS/releases/latest).
 Read it before you flash anything. In short:
@@ -144,6 +156,8 @@ The R1 then starts straight into GabagoolOS. **Hold Volume Down while you power
 on** to choose the HiBy player instead.
 
 ### Going back to stock
+
+> *"'Remember when' is the lowest form of conversation."* ― Tony Soprano
 
 1. Copy HiBy's official 2.0 or 1.6 file to the card root as `r1.upt`.
 2. Hold Volume Down at power-on, open the HiBy player, and run
@@ -184,6 +198,14 @@ boring way:
   original filters and a double-precision reference at four sample rates.
 
 The code will be here for anyone to read.
+</details>
+
+<details>
+<summary><b>Why "gabagool"?</b></summary>
+<br>
+
+It's capicola, the way they say it in *The Sopranos*. Tap the house special
+tile on the Tiles home. Ova haaaa!
 </details>
 
 <details>
@@ -234,6 +256,8 @@ GabagoolOS version, and `.rockbox/sloppy/sloppy.log` from the card.
 
 ## Credits
 
+> *"Those who want respect, give respect."* ― Tony Soprano
+
 GabagoolOS stands on the work of many people:
 
 - **[Rockbox](https://www.rockbox.org)** (GPL v2+): playback, codecs, DSP, the
@@ -262,6 +286,6 @@ GabagoolOS is free software under the GNU General Public License, version 2 or
 <br>
 
 <p align="center">
-  <sub>GabagoolOS is a fan project. It is not made or supported by HiBy.<br>
+  <sub>GabagoolOS is a fan project. It is not made or supported by HiBy, and has nothing to do with HBO or <i>The Sopranos</i>.<br>
   Flashing firmware is at your own risk; keep HiBy's official file to hand.</sub>
 </p>
