@@ -1,7 +1,7 @@
 <a href="https://github.com/BlueDreams666/gabagoolOS/releases/latest">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png">
-  <img src="assets/hero-light.png" width="880" alt="gabagoolOS 1.1, Game on then. A neon sign reads: gabagool? ova haaaa! Your R1 just got made: a faster, nicer way to use your HiBy R1, built on Rockbox, open source, running from your SD card. Beside it, three R1s showing the Music page, the Tiles home and Now Playing.">
+  <img src="assets/hero-light.png" width="880" alt="gabagoolOS 1.1, Game on then. A neon sign reads: gabagool? ova haaaa! Your R1 just got made: fast, pretty new software for your HiBy R1. It runs from your SD card, and it's open source. Beside it, three R1s showing the Music page, the Tiles home and Now Playing.">
 </picture>
 </a>
 
@@ -9,32 +9,30 @@
 [How to install](#no-funny-business) &nbsp;·&nbsp;
 [Questions](#you-got-questions)
 
-We love the HiBy R1. It's tiny, it sounds great, and it was cheap. The software
-it ships with, less so. So we made our own.
+The HiBy R1 is a lovely little music player. Tiny, colourful, sounds great.
+The software? Not so much. So we made new software for it.
 
-GabagoolOS gives the R1 a new interface from top to bottom. Your library stays
-smooth even with tens of thousands of songs, lyrics scroll along with the music,
-and there's a proper equalizer, internet radio, podcasts, audiobooks and e-books.
-It runs from the SD card and never touches your music files. If you ever want the
-stock HiBy player back, it's one button away.
+GabagoolOS is fast, pretty and packed: smooth scrolling even with a huge
+library, lyrics that follow the song, a real equalizer, radio, podcasts,
+audiobooks and more. It lives on your SD card, never touches your music, and
+the original HiBy software is always one button away.
 
 ## made fresh daily
 
-The stuff you use every day, made fast and easy to get to.
+Everything you'd want from a music player, and it's quick.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/fresh-dark.png">
-  <img src="assets/fresh-light.png" width="880" alt="Ten features. Library: stays smooth with tens of thousands of songs; The Beatles file under B, track 2 comes before track 10, and an A to Z rail shows where you are. Lyrics: lines light up as the song plays, from your own files or downloaded. Sound: a 10-band equalizer, or a ready-made profile for your headphones. Radio: thousands of stations, and podcasts from any feed. Audiobooks: chapters, bookmarks, a speed for each book, Audiobookshelf sync, and an e-book reader. Wireless: Bluetooth, AirPlay, your own Navidrome server, Wi-Fi file transfer, and your phone as a remote. Keyboard: glide typing in 12 languages, and the whole thing in 7. Now Playing: love, shuffle and repeat, the file's quality, the time and battery. Buttons: hold to skip through a song, press twice for a shortcut, a sleep timer one tap away. Your look: Dark, Light, True dark or Zule, a tile, card or list home, any accent colour.">
+  <img src="assets/fresh-light.png" width="880" alt="What it does. Library: Super smooth, even with tens of thousands of songs. And it sorts properly: The Beatles live under B. Lyrics: Words light up as the song plays. Sound: A real equalizer, plus one-tap presets for your headphones. Radio: Thousands of stations, and any podcast you like. Audiobooks: Picks up right where you left off, with chapters and bookmarks. E-books too. Wireless: Bluetooth, AirPlay, Wi-Fi transfers, and your phone as a remote. Keyboard: Swipe to type, in 12 languages. Now playing: Big covers, with love, shuffle and repeat right there. Buttons: Hold to skip through a song. Press twice for a shortcut. Your look: Four themes, three home screens, any colour you like.">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/menu-dark.png">
-  <img src="assets/menu-light.png" width="880" alt="Sliced thin, a menu board of the little things. Sorting: The Beatles under B, track 2 before 10. Lyrics: from .lrc files, tags or online. Equalizer: 10 bands, shaped any way. EQ presets: AutoEq and HiBy Music files. Radio: picks a dropped station back up. Audiobooks: its own speed for every book. Sleep timer: remembers how long you like. Remote: your phone's browser. Homes: tiles, cards or a list. Themes: four, in any accent colour. Languages: 7 on screen, 12 to type in. Key lock: Volume down and Power.">
+  <img src="assets/menu-light.png" width="880" alt="Sliced thin: the little things, done right. Sorting: The Beatles under B. Track order: 2 comes before 10. Lyrics: from your files or online. Equalizer: shape it any way you like. Radio: reconnects by itself. Audiobooks: a speed for every book. Sleep timer: remembers how long you like. Remote: your phone. Home screen: tiles, cards or a list. Themes: four, in any colour. Languages: 7 to read, 12 to type. Key lock: Volume down + Power.">
 </picture>
 
-There are games too, if you want them: 2048, Sudoku, Snake, chess, a little pet,
-a music quiz, and Doom and Game Boy games (bring your own cartridges). None of it
-runs unless you open it, and you can hide all of it.
+Oh, and there are games. 2048, Sudoku, Snake, chess, a tiny pet, a music quiz,
+even Doom and Game Boy. Not your thing? Hide them with one tap.
 
 ## the house special
 
@@ -42,10 +40,9 @@ runs unless you open it, and you can hide all of it.
 
 ## today's specials
 
-What's new in 1.1. Swipe through songs and it figures out what you like. See
-the whole song as a waveform and jump anywhere in it. Podcasts, e-books, your own
-Navidrome or Audiobookshelf server, Last.fm scrobbling, a control centre you can
-rearrange, and a phone remote that pairs with a code.
+New in 1.1: swipe through songs like a dating app and it learns your taste.
+Plus podcasts, e-books, a waveform you can scrub through, and your phone as a
+remote.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/case-new-dark.png">
@@ -54,8 +51,7 @@ rearrange, and a phone remote that pairs with a code.
 
 ## from the display case
 
-These are real screens, not mock-ups. Each one is captured at the R1's own
-480 × 800 by the same tool we test with.
+Real screens from the real thing. No mock-ups.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/case-homes-dark.png">
@@ -74,36 +70,34 @@ These are real screens, not mock-ups. Each one is captured at the R1's own
 
 ## we keep the books
 
-We built it with AI help, so we test it hard. And we use it every day on our own two R1s.
+We test every screen so you don't run into anything weird.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/books-dark.png">
-  <img src="assets/books-light.png" width="880" alt="How we check it. 32,256 screens checked in every theme, language and text size, with nothing cut off, overlapping, too faint or too small to tap. Monkey tests: thousands of random taps, swipes and button presses on every screen. Memory checks: the whole interface run under a memory checker. EQ maths: the equalizer checked against Rockbox's original filters at four sample rates.">
+  <img src="assets/books-light.png" width="880" alt="How we check it. 32,256: screens checked, so nothing is ever cut off or too small to tap. monkey tests: thousands of random taps and swipes, hunting for crashes before you find them. memory checks: hidden bugs caught on a computer, not on your player. sound checks: the equalizer tested to sound exactly right.">
 </picture>
 
 ## no funny business
 
-Each [release](https://github.com/BlueDreams666/gabagoolOS/releases/latest)
-comes with a full guide that explains every step and every file. Please read it
-before you flash anything. The short version:
+It takes about ten minutes. Each [release](https://github.com/BlueDreams666/gabagoolOS/releases/latest)
+has a step-by-step guide, so give it a read first. The short version:
 
-1. **Get ready.** Charge to at least 50% and back up your card. Download HiBy's
-   official R1 firmware from their help centre too. That's your way back.
-2. **Install the boot menu (just once).** Move any other `.upt` files off the
-   card. Copy `GabagoolOS-1.1-boot-menu.upt` to the top of the card and rename it
-   `r1.upt`. Then, in the HiBy player, go to System > Firmware update > Via SD card.
-3. **Copy GabagoolOS over.** Unzip `GabagoolOS-1.1-HiBy-R1.zip` onto the top of
-   the card (you'll get a hidden `.rockbox` folder and a `Games` folder), then restart.
+1. **Get ready.** Charge your R1, back up your card, and download HiBy's own
+   firmware from their website. That's your safety net.
+2. **Add the boot menu (once).** Copy `GabagoolOS-1.1-boot-menu.upt` to your
+   card, rename it `r1.upt`, then on the R1 go to
+   System > Firmware update > Via SD card.
+3. **Add GabagoolOS.** Unzip `GabagoolOS-1.1-HiBy-R1.zip` onto your card and
+   restart.
 
-From then on the R1 starts straight into GabagoolOS. To use the HiBy player
-instead, **hold Volume Down while you turn it on**.
+That's it! Your R1 now starts in GabagoolOS. Want the HiBy software instead?
+**Hold Volume Down while you turn it on.**
 
 ### changed your mind? forget about it
 
-1. Copy HiBy's official 2.0 or 1.6 firmware to the top of the card as `r1.upt`.
-2. Hold Volume Down while you turn the R1 on, open the HiBy player, and go to
-   System > Firmware update > Via SD card.
-3. Delete the `.rockbox` folder if you want the space back. Your music stays put.
+No hard feelings. Copy HiBy's own firmware to your card as `r1.upt`, hold
+Volume Down while you turn the R1 on, and run the update from the HiBy menu.
+Delete the `.rockbox` folder if you want the space back. Your music stays put.
 
 ## you got questions?
 
@@ -111,30 +105,23 @@ instead, **hold Volume Down while you turn it on**.
 <summary><b>Is it Rockbox?</b></summary>
 <br>
 
-Underneath, yes. [Rockbox](https://www.rockbox.org) has been running on music
-players for over twenty years, and it still does the playback, the file formats,
-the sound processing and the library. GabagoolOS is the touch interface on top,
-plus a lot of R1-specific work. We started from WillNHT's R1 port and bahusoid's
-Audiobook Mod. Same licence as Rockbox: GPL v2 or later.
+Under the hood, yes! [Rockbox](https://www.rockbox.org) has powered music
+players for over twenty years and handles the playback. GabagoolOS is the
+brand new touch interface on top, made for the R1.
 </details>
 
 <details>
 <summary><b>Was it made with AI?</b></summary>
 <br>
 
-Yes, a lot of it. We decided what to build, reviewed it, and tested it on our
-own R1s every day. We'd rather tell you than have you wonder. What matters is
-whether it works, so here's how we check:
+Yes, a lot of it. We planned it, checked it and use it every day on our own
+R1s. We'd rather just tell you. Here's how we make sure it works:
 
-- **Every screen, every way.** A tool opens all 32,256 combinations of screen,
-  theme, language and text size and flags anything cut off, overlapping, too
-  faint or too small to tap. Right now it finds nothing.
-- **Monkey tests.** Thousands of random taps, swipes and button presses on every
-  screen, looking for crashes and freezes.
-- **Memory checks.** The whole interface runs under a memory checker
-  (AddressSanitizer), so memory bugs get caught on a Mac, not on your player.
-- **EQ maths.** The equalizer is checked against Rockbox's original filters at
-  four sample rates.
+- **Every screen, checked.** All 32,256 combinations of screen, theme,
+  language and text size, so nothing's cut off or too small to tap.
+- **Monkey tests.** Thousands of random taps and swipes, hunting for crashes.
+- **Memory checks.** Hidden bugs get caught on a computer, not on your player.
+- **Sound checks.** The equalizer is tested to sound exactly right.
 
 All the code will be here for anyone to read.
 </details>
@@ -143,90 +130,68 @@ All the code will be here for anyone to read.
 <summary><b>Why "gabagool"?</b></summary>
 <br>
 
-It's capicola, the way they say it in *The Sopranos*. Tap the house special
-tile on the Tiles home. Ova haaaa!
+It's how they say "capicola" in *The Sopranos*. Find the house special tile on
+the Tiles home and give it a tap. Ova haaaa!
 </details>
 
 <details>
-<summary><b>Is it safe to install?</b></summary>
+<summary><b>Is it safe?</b></summary>
 <br>
 
-As safe as flashing firmware gets. GabagoolOS lives on the SD card in a
-`.rockbox` folder and never writes to the R1's internal memory. The boot menu is
-HiBy's own 2.0 update with three small things added: the menu itself, a script
-that mounts the card, and a boot logo. The kernel inside is HiBy's, byte for
-byte, there's no bootloader or recovery image in it, and HiBy's own updater
-installs it.
-
-A few more things we were careful about. While the R1 is plugged into a computer,
-GabagoolOS doesn't write to the card at all. Updates on the player only install
-if they're signed by us. Still, flashing always carries some risk, so keep HiBy's
-official file somewhere safe.
+As safe as these things get. GabagoolOS lives on your SD card and doesn't
+mess with the R1's built-in software. The boot menu is HiBy's own update with
+a small menu added, installed by HiBy's own updater. And you can always go
+back. Just keep HiBy's firmware file somewhere safe, like with any update.
 </details>
 
 <details>
-<summary><b>Which players does it support?</b></summary>
+<summary><b>Which players does it work on?</b></summary>
 <br>
 
-Just the HiBy R1. It's made for the R1's screen, buttons and hardware. Newer
-R1s have a different wireless chip (the AIC8800). They should work through
-HiBy 2.0's own drivers, but we haven't had one to try yet. If you have one,
-please tell us how it goes. Everything apart from Wi-Fi and Bluetooth works the
-same either way.
+Just the HiBy R1 for now. Got one of the newest R1s? Some have a different
+Wi-Fi chip we haven't tried yet. Everything should work, but please tell us
+how it goes!
 </details>
 
 <details>
 <summary><b>Does it phone home?</b></summary>
 <br>
 
-No. It only goes online when you turn on Wi-Fi and use something that needs it:
-lyrics (LRCLIB), covers (MusicBrainz and the Cover Art Archive), internet radio
-(radio-browser, and ip-api.com for "near you"), podcasts (Apple's directory and
-the feeds you add), AutoEq profiles (GitHub), scrobbling (Last.fm or
-ListenBrainz, your own account), your own Navidrome or Audiobookshelf server,
-and the clock (NTP). The phone remote only answers phones you've paired.
+Nope. No tracking, no accounts, no ads. It only goes online when you turn on
+Wi-Fi and use something that needs the internet, like lyrics, radio, podcasts
+or album covers. The full list is in [NOTICE.md](NOTICE.md).
 </details>
 
 <details>
-<summary><b>Something went wrong. What should I send?</b></summary>
+<summary><b>Something broke. Now what?</b></summary>
 <br>
 
-Sorry about that! [Open an issue](https://github.com/BlueDreams666/gabagoolOS/issues/new/choose)
-and tell us which HiBy firmware you're on (1.6 or 2.0, it's in the boot menu)
-and which GabagoolOS version you have. Attach `.rockbox/sloppy/sloppy.log` from
-the card too. It tells us what the player was doing.
+Sorry about that! [Tell us here](https://github.com/BlueDreams666/gabagoolOS/issues/new/choose).
+It helps a lot if you attach the log file from your card:
+`.rockbox/sloppy/sloppy.log`.
 </details>
 
 ## the family
 
-None of this would exist without these people and projects:
+Big thanks to the people and projects this is built on:
 
-- **[Rockbox](https://www.rockbox.org)** (GPL v2+): playback, codecs, DSP, the
-  database, plugins, Doom and the Game Boy core.
-- **[Rockbox for the HiBy R1](https://github.com/WillNHT/rockbox-hiby-r1)** by
-  WillNHT, built on **[bahusoid's Rockbox Audiobook Mod](https://github.com/bahusoid/rockbox)**:
-  the R1 port, the audiobook library and many device fixes.
-- **[LVGL](https://lvgl.io)** (MIT), which draws the interface, with lodepng
-  (zlib) and stb_image. For internet radio, **libmad** and **FAAD2** (GPL), and
-  Rockbox's copies of **Tremor** and **libopus** (BSD) and its FLAC decoder
-  (LGPL).
-- Fonts under the SIL Open Font License: **Source Sans 3**, **Shrikhand**,
-  **Noto Sans** Hebrew, Arabic, SC, KR and Thai, and **Montserrat** for symbols.
-- **LRCLIB** for lyrics, **MusicBrainz** and the **Cover Art Archive** for
-  covers, **radio-browser** for stations, **AutoEq** by Jaakko Pasanen for
-  headphone profiles, **Last.fm** and **ListenBrainz**, and the **Unicode
-  Unihan** database for the pinyin keyboard.
+- **[Rockbox](https://www.rockbox.org)**, which plays your music
+- **[WillNHT's R1 port](https://github.com/WillNHT/rockbox-hiby-r1)** and
+  **[bahusoid's Audiobook Mod](https://github.com/bahusoid/rockbox)**, where
+  GabagoolOS started
+- **[LVGL](https://lvgl.io)**, which draws everything you see
+- **LRCLIB** for lyrics, **MusicBrainz** for covers, **radio-browser** for
+  stations and **AutoEq** for headphone presets
 
-Everything, with licences, is in [NOTICE.md](NOTICE.md).
+The full list, with licences, is in [NOTICE.md](NOTICE.md).
 
 ## licence
 
-GabagoolOS is free software under the GNU General Public License, version 2 or
-(at your option) any later version, like Rockbox. See [LICENSE](LICENSE).
+Open source under the GPL (v2 or later), just like Rockbox. See [LICENSE](LICENSE).
 
 <br>
 
 <p align="center">
-  <sub>GabagoolOS is a fan project. It is not made or supported by HiBy, and has nothing to do with HBO or <i>The Sopranos</i>.<br>
-  Flashing firmware is at your own risk; keep HiBy's official file to hand.</sub>
+  <sub>Made by fans. Not made by or affiliated with HiBy, HBO or <i>The Sopranos</i>.<br>
+  Installing custom firmware is at your own risk.</sub>
 </p>
