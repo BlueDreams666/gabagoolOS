@@ -6,7 +6,6 @@
 </a>
 
 **[Download 1.1](https://github.com/BlueDreams666/gabagoolOS/releases/latest)** &nbsp;·&nbsp;
-[Website](https://bluedreams666.github.io/gabagoolOS/) &nbsp;·&nbsp;
 [How to install](#no-funny-business) &nbsp;·&nbsp;
 [Questions](#you-got-questions)
 
@@ -63,7 +62,7 @@ its own test harness. No mock-ups. The covers are the harness's plain test art.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/case-listen-dark.png">
-  <img src="assets/case-listen-light.png" width="880" alt="Listening. Now Playing with love, a FLAC badge, shuffle, repeat and volume. Synced lyrics over the blurred cover. An album page washed in its cover's colour. The parametric equalizer with a ten-band curve and an AutoEq profile.">
+  <img src="assets/case-listen-light.png" width="880" alt="Listening. Now Playing with love, a FLAC badge, shuffle, repeat and volume. Cover Flow, flipping through album covers. An album page washed in its cover's colour. The parametric equalizer with a ten-band curve and an AutoEq profile.">
 </picture>
 
 <picture>
