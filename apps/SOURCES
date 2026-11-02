@@ -1,0 +1,531 @@
+#ifdef ROCKBOX_HAS_LOGF
+logfdisp.c
+#endif
+action.c
+#ifdef HAVE_RTC_ALARM
+alarm_menu.c
+#endif
+abrepeat.c
+bookmark.c
+core_keymap.c
+debug_menu.c
+filetypes.c
+fileop.c
+#ifdef HAVE_TOUCHSCREEN
+gesture.c
+stick.c
+stick_config.c
+stick_glue.c
+rpkeys.c
+#endif
+#ifdef HAVE_COMPOSITOR
+canvas.c
+canvas_glue.c
+#endif
+language.c
+main.c
+menu.c
+menus/menu_common.c
+menus/display_menu.c
+menus/theme_menu.c
+menus/plugin_menu.c
+#if CONFIG_TUNER
+menus/radio_menu.c
+#endif
+#ifdef HAVE_WM8978
+menus/audiohw_eq_menu.c
+#endif
+menus/eq_menu.c
+buffering.c
+voice_thread.c
+rbcodec_helpers.c
+menus/main_menu.c
+menus/main_menu_layout.c
+audiobooks/abdb.c
+audiobooks/abprogress.c
+audiobooks/ab_play.c
+pradio.c
+audiobooks/ab_ui.c
+emoji.c
+playlist_cover.c
+lyrics.c
+#ifdef HAVE_VIDEO
+video/video_lib.c
+video/video_surface.c
+video/video_art.c
+video/screensaver.c
+menus/video_menu.c
+#endif
+#ifdef HAVE_COVER_VIEWS
+gui/covers.c
+gui/coverview.c
+#endif
+#ifdef HIBY_LINUX
+menus/hiby_bluetooth_menu.c
+#endif
+menus/playback_menu.c
+menus/playlist_menu.c
+#ifdef HAVE_RECORDING
+menus/recording_menu.c
+#endif
+menus/settings_menu.c
+menus/sound_menu.c
+#if CONFIG_RTC
+menus/time_menu.c
+#endif
+misc.c
+open_plugin.c
+onplay.c
+playlist.c
+playlist_catalog.c
+playlist_viewer.c
+plugin.c
+root_menu.c
+screens.c
+settings.c
+settings_list.c
+#if defined(HIBY_LINUX) && !defined(SIMULATOR)
+hiby_bluetooth.c
+#endif
+shortcuts.c
+status.c
+cuesheet.c
+talk.c
+tree.c
+#ifdef HAVE_TAGCACHE
+tagtree.c
+#endif
+filetree.c
+#ifdef IPOD_ACCESSORY_PROTOCOL
+iap/iap-core.c
+iap/iap-lingo0.c
+#ifdef HAVE_LINE_REC
+iap/iap-lingo1.c
+#endif
+iap/iap-lingo2.c
+iap/iap-lingo3.c
+iap/iap-lingo4.c
+#if CONFIG_TUNER
+iap/iap-lingo7.c
+#endif
+#endif
+screen_access.c
+gui/icon.c
+gui/list.c
+gui/line.c
+gui/bitmap/list.c
+gui/bitmap/list-skinned.c
+gui/option_select.c
+#ifdef HAVE_PITCHCONTROL
+gui/pitchscreen.c
+#endif
+#ifdef HAVE_QUICKSCREEN
+gui/quickscreen.c
+#endif
+gui/folder_select.c
+#if defined(HAVE_BACKLIGHT) || !defined(HAS_BUTTON_HOLD)
+gui/mask_select.c
+#endif
+
+gui/wps.c
+gui/scrollbar.c
+gui/splash.c
+gui/statusbar.c
+gui/statusbar-skinned.c
+#if (CONFIG_PLATFORM&PLATFORM_ANDROID)
+hosted/android/yesno.c
+hosted/android/notification.c
+#else
+gui/yesno.c
+#endif
+gui/viewport.c
+
+gui/skin_engine/skin_art_fx.c
+gui/skin_engine/skin_backdrops.c
+gui/skin_engine/skin_display.c
+gui/skin_engine/skin_engine.c
+gui/skin_engine/skin_layer.c
+gui/skin_engine/skin_lyrics.c
+gui/skin_engine/skin_parser.c
+gui/skin_engine/skin_render.c
+gui/skin_engine/skin_tokens.c
+#ifdef HAVE_TOUCHSCREEN
+gui/skin_engine/skin_touchsupport.c
+#endif
+
+#if (LCD_DEPTH > 1) || (defined(HAVE_REMOTE_LCD) && (LCD_REMOTE_DEPTH > 1))
+gui/backdrop.c
+#endif
+
+recorder/bmp.c
+recorder/icons.c
+#if (CONFIG_PLATFORM&PLATFORM_ANDROID)
+hosted/android/keyboard.c
+#else
+recorder/keyboard.c
+#endif
+recorder/peakmeter.c
+#if defined(HAVE_ALBUMART) || defined(HAVE_JPEG)
+recorder/resize.c
+#endif
+#ifdef HAVE_JPEG
+recorder/jpeg_load.c
+#ifdef CPU_ARM
+recorder/jpeg_idct_arm.S
+#endif
+#endif
+#ifdef HAVE_PNG
+recorder/png_load.c
+#endif
+#ifdef HAVE_ALBUMART
+recorder/albumart.c
+#endif
+#ifdef HAVE_LCD_COLOR
+gui/color_picker.c
+#endif
+
+#ifdef HAVE_RECORDING
+recorder/recording.c
+#endif
+
+#if CONFIG_TUNER
+radio/radio.c
+radio/presets.c
+radio/radio_skin.c
+#ifdef HAVE_ALBUMART
+radio/radioart.c
+#endif
+#endif
+
+#if INPUT_SRC_CAPS != 0
+audio_path.c
+#endif /* INPUT_SRC_CAPS != 0 */
+audio_thread.c
+pcmbuf.c
+codec_thread.c
+playback.c
+codecs.c
+#ifndef HAVE_HARDWARE_BEEP
+beep.c
+#endif
+#ifdef HAVE_RECORDING
+enc_config.c
+recorder/pcm_record.c
+#endif
+#ifdef USB_ENABLE_HID
+usb_keymaps.c
+#endif
+#ifndef USB_NONE
+gui/usb_screen.c
+#endif
+#ifdef HAVE_TAGCACHE
+tagcache.c
+#endif
+#ifdef HAVE_TOUCHSCREEN
+keymaps/keymap-touchscreen.c
+#endif
+#if (CONFIG_KEYPAD == IRIVER_H100_PAD) \
+    || (CONFIG_KEYPAD == IRIVER_H300_PAD)
+keymaps/keymap-h1x0_h3x0.c
+#elif ((CONFIG_KEYPAD == IPOD_4G_PAD) \
+    || (CONFIG_KEYPAD == IPOD_3G_PAD) \
+    || (CONFIG_KEYPAD == IPOD_1G2G_PAD))
+keymaps/keymap-ipod.c
+#elif CONFIG_KEYPAD == IAUDIO_X5M5_PAD
+keymaps/keymap-x5.c
+#elif CONFIG_KEYPAD == IAUDIO_M3_PAD
+keymaps/keymap-m3.c
+#elif CONFIG_KEYPAD == GIGABEAT_PAD
+keymaps/keymap-gigabeat.c
+#elif CONFIG_KEYPAD == GIGABEAT_S_PAD
+keymaps/keymap-gigabeat-s.c
+#elif CONFIG_KEYPAD == IRIVER_H10_PAD
+keymaps/keymap-h10.c
+#elif CONFIG_KEYPAD == SANSA_E200_PAD
+keymaps/keymap-e200.c
+#elif CONFIG_KEYPAD == SANSA_C200_PAD
+keymaps/keymap-c200.c
+#elif CONFIG_KEYPAD == SANSA_M200_PAD
+keymaps/keymap-m200.c
+#elif CONFIG_KEYPAD == SANSA_CLIP_PAD
+keymaps/keymap-clip.c
+#elif CONFIG_KEYPAD == MROBE500_PAD
+keymaps/keymap-mr500.c
+#elif CONFIG_KEYPAD == MROBE100_PAD
+keymaps/keymap-mr100.c
+#elif CONFIG_KEYPAD == COWON_D2_PAD
+keymaps/keymap-cowond2.c
+#elif CONFIG_KEYPAD == MEIZU_M6SL_PAD
+keymaps/keymap-meizu-m6sl.c
+#elif CONFIG_KEYPAD == MEIZU_M6SP_PAD
+keymaps/keymap-meizu-m6sp.c
+#elif CONFIG_KEYPAD == CREATIVEZVM_PAD
+keymaps/keymap-creativezvm.c
+#elif CONFIG_KEYPAD == CREATIVEZV_PAD
+keymaps/keymap-creativezv.c
+#elif CONFIG_KEYPAD == CREATIVE_ZENXFI2_PAD
+keymaps/keymap-zenxfi2.c
+#elif CONFIG_KEYPAD == CREATIVE_ZENXFI3_PAD
+keymaps/keymap-zenxfi3.c
+#elif CONFIG_KEYPAD == PHILIPS_SA9200_PAD
+keymaps/keymap-sa9200.c
+#elif CONFIG_KEYPAD == PHILIPS_HDD1630_PAD
+keymaps/keymap-hdd1630.c
+#elif CONFIG_KEYPAD == PHILIPS_HDD6330_PAD
+keymaps/keymap-hdd6330.c
+#elif CONFIG_KEYPAD == SANSA_FUZE_PAD
+keymaps/keymap-fuze.c
+#elif CONFIG_KEYPAD == ONDAVX747_PAD
+keymaps/keymap-ondavx747.c
+#elif CONFIG_KEYPAD == ONDAVX777_PAD
+keymaps/keymap-ondavx777.c
+#elif CONFIG_KEYPAD == ONDAVX767_PAD
+keymaps/keymap-ondavx767.c
+#elif (CONFIG_KEYPAD == SAMSUNG_YH820_PAD) \
+    || (CONFIG_KEYPAD == SAMSUNG_YH92X_PAD)
+keymaps/keymap-yh8xx_yh9xx.c
+#elif CONFIG_KEYPAD == MINI2440_PAD
+keymaps/keymap-mini2440.c
+#elif CONFIG_KEYPAD == PBELL_VIBE500_PAD
+keymaps/keymap-vibe500.c
+#elif CONFIG_KEYPAD == MPIO_HD200_PAD
+keymaps/keymap-mpio-hd200.c
+#elif CONFIG_KEYPAD == MPIO_HD300_PAD
+keymaps/keymap-mpio-hd300.c
+#elif CONFIG_KEYPAD == ANDROID_PAD
+keymaps/keymap-android.c
+#elif CONFIG_KEYPAD == SDL_PAD
+keymaps/keymap-sdl.c
+#elif CONFIG_KEYPAD == SANSA_FUZEPLUS_PAD
+keymaps/keymap-fuzeplus.c
+#elif CONFIG_KEYPAD == RK27XX_GENERIC_PAD
+keymaps/keymap-rk27xx-generic.c
+#elif CONFIG_KEYPAD == HM60X_PAD
+keymaps/keymap-hm60x.c
+#elif CONFIG_KEYPAD == HM801_PAD
+keymaps/keymap-hm801.c
+#elif CONFIG_KEYPAD == SANSA_CONNECT_PAD
+keymaps/keymap-sansa-connect.c
+#elif CONFIG_KEYPAD == SAMSUNG_YPR0_PAD
+keymaps/keymap-ypr0.c
+#elif CONFIG_KEYPAD == CREATIVE_ZEN_PAD
+keymaps/keymap-zen.c
+#elif CONFIG_KEYPAD == MA_PAD
+keymaps/keymap-ma.c
+#elif CONFIG_KEYPAD == SONY_NWZ_PAD
+keymaps/keymap-nwz.c
+#elif CONFIG_KEYPAD == SONY_NWZA860_PAD
+keymaps/keymap-nwza860.c
+#elif CONFIG_KEYPAD == IHIFI_PAD
+keymaps/keymap-ihifi.c
+#elif CONFIG_KEYPAD == IHIFI_770_PAD
+keymaps/keymap-ihifi770.c
+#elif CONFIG_KEYPAD == IHIFI_800_PAD
+keymaps/keymap-ihifi800.c
+#elif CONFIG_KEYPAD == SAMSUNG_YPR1_PAD
+keymaps/keymap-ypr1.c
+#elif CONFIG_KEYPAD == DX50_PAD
+keymaps/keymap-dx50.c
+#elif CONFIG_KEYPAD == AGPTEK_ROCKER_PAD
+keymaps/keymap-agptekrocker.c
+#elif CONFIG_KEYPAD == XDUOO_X3_PAD
+keymaps/keymap-xduoox3.c
+#elif CONFIG_KEYPAD == XDUOO_X3II_PAD
+keymaps/keymap-xduoox3ii.c
+#elif CONFIG_KEYPAD == XDUOO_X20_PAD
+keymaps/keymap-xduoox20.c
+#elif CONFIG_KEYPAD == FIIO_M3K_LINUX_PAD
+keymaps/keymap-fiiom3klinux.c
+#elif CONFIG_KEYPAD == FIIO_M3K_PAD
+keymaps/keymap-fiiom3k.c
+#elif CONFIG_KEYPAD == EROSQ_PAD
+keymaps/keymap-erosq.c
+#elif CONFIG_KEYPAD == SHANLING_Q1_PAD
+keymaps/keymap-shanlingq1.c
+#elif CONFIG_KEYPAD == ECHO_R1_PAD
+keymaps/keymap-echor1.c
+#elif CONFIG_KEYPAD == SURFANS_F28_PAD
+keymaps/keymap-surfansf28.c
+#elif CONFIG_KEYPAD == RG_NANO_PAD
+keymaps/keymap-rgnano.c
+#elif CONFIG_KEYPAD == CTRU_PAD
+keymaps/keymap-ctru.c
+#elif CONFIG_KEYPAD == HIBY_R3PROII_PAD
+keymaps/keymap-hibyr3proii.c
+#elif CONFIG_KEYPAD == HIBY_R1_PAD
+keymaps/keymap-hibyr1.c
+#endif
+
+#ifdef HAVE_SLOPPY_UI
+sloppy/sloppy.c
+sloppy/sloppy_net.c
+sloppy/sloppy_ota.c
+sloppy/sloppy_epub.c
+sloppy/sloppy_share.c
+sloppy/sloppy_libjob.c
+sloppy/flac/decoder.c
+sloppy/tremor/bitwise.c
+sloppy/tremor/block.c
+sloppy/tremor/codebook.c
+sloppy/tremor/floor0.c
+sloppy/tremor/floor1.c
+sloppy/tremor/framing.c
+sloppy/tremor/info.c
+sloppy/tremor/mapping0.c
+sloppy/tremor/oggmalloc.c
+sloppy/tremor/registry.c
+sloppy/tremor/res012.c
+sloppy/tremor/sharedbook.c
+sloppy/tremor/synthesis.c
+sloppy/tremor/window.c
+sloppy/opus/celt/bands.c
+sloppy/opus/celt/celt.c
+sloppy/opus/celt/celt_decoder.c
+sloppy/opus/celt/celt_lpc.c
+sloppy/opus/celt/cwrs.c
+sloppy/opus/celt/entcode.c
+sloppy/opus/celt/entdec.c
+sloppy/opus/celt/entenc.c
+sloppy/opus/celt/kiss_fft.c
+sloppy/opus/celt/laplace.c
+sloppy/opus/celt/mathops.c
+sloppy/opus/celt/mdct.c
+sloppy/opus/celt/modes.c
+sloppy/opus/celt/pitch.c
+sloppy/opus/celt/quant_bands.c
+sloppy/opus/celt/rate.c
+sloppy/opus/celt/vq.c
+sloppy/opus/opus.c
+sloppy/opus/opus_decoder.c
+sloppy/opus/silk/CNG.c
+sloppy/opus/silk/LPC_analysis_filter.c
+sloppy/opus/silk/LPC_fit.c
+sloppy/opus/silk/LPC_inv_pred_gain.c
+sloppy/opus/silk/NLSF2A.c
+sloppy/opus/silk/NLSF_VQ_weights_laroia.c
+sloppy/opus/silk/NLSF_decode.c
+sloppy/opus/silk/NLSF_stabilize.c
+sloppy/opus/silk/NLSF_unpack.c
+sloppy/opus/silk/PLC.c
+sloppy/opus/silk/bwexpander.c
+sloppy/opus/silk/bwexpander_32.c
+sloppy/opus/silk/code_signs.c
+sloppy/opus/silk/dec_API.c
+sloppy/opus/silk/decode_core.c
+sloppy/opus/silk/decode_frame.c
+sloppy/opus/silk/decode_indices.c
+sloppy/opus/silk/decode_parameters.c
+sloppy/opus/silk/decode_pitch.c
+sloppy/opus/silk/decode_pulses.c
+sloppy/opus/silk/decoder_set_fs.c
+sloppy/opus/silk/gain_quant.c
+sloppy/opus/silk/init_decoder.c
+sloppy/opus/silk/lin2log.c
+sloppy/opus/silk/log2lin.c
+sloppy/opus/silk/pitch_est_tables.c
+sloppy/opus/silk/resampler.c
+sloppy/opus/silk/resampler_private_AR2.c
+sloppy/opus/silk/resampler_private_IIR_FIR.c
+sloppy/opus/silk/resampler_private_down_FIR.c
+sloppy/opus/silk/resampler_private_up2_HQ.c
+sloppy/opus/silk/resampler_rom.c
+sloppy/opus/silk/shell_coder.c
+sloppy/opus/silk/sort.c
+sloppy/opus/silk/stereo_MS_to_LR.c
+sloppy/opus/silk/stereo_decode_pred.c
+sloppy/opus/silk/sum_sqr_shift.c
+sloppy/opus/silk/table_LSF_cos.c
+sloppy/opus/silk/tables_LTP.c
+sloppy/opus/silk/tables_NLSF_CB_NB_MB.c
+sloppy/opus/silk/tables_NLSF_CB_WB.c
+sloppy/opus/silk/tables_gain.c
+sloppy/opus/silk/tables_other.c
+sloppy/opus/silk/tables_pitch_lag.c
+sloppy/opus/silk/tables_pulses_per_block.c
+sloppy/sloppy_png.c
+sloppy/gb/cpu.c
+sloppy/gb/fastmem.c
+sloppy/gb/gb_glue.c
+sloppy/gb/hw.c
+sloppy/gb/lcd.c
+sloppy/gb/lcdc.c
+sloppy/gb/loader.c
+sloppy/gb/mem.c
+sloppy/gb/rtc.c
+sloppy/gb/save.c
+sloppy/gb/sound.c
+sloppy/mad/bit.c
+sloppy/mad/frame.c
+sloppy/mad/huffman.c
+sloppy/mad/layer12.c
+sloppy/mad/layer3.c
+sloppy/mad/stream.c
+sloppy/mad/synth.c
+sloppy/faad/bits.c
+sloppy/faad/common.c
+sloppy/faad/decoder.c
+sloppy/faad/drc.c
+sloppy/faad/error.c
+sloppy/faad/filtbank.c
+sloppy/faad/hcr.c
+sloppy/faad/huffman.c
+sloppy/faad/ic_predict.c
+sloppy/faad/is.c
+sloppy/faad/lt_predict.c
+sloppy/faad/mp4.c
+sloppy/faad/ms.c
+sloppy/faad/output.c
+sloppy/faad/pns.c
+sloppy/faad/pulse.c
+sloppy/faad/rvlc.c
+sloppy/faad/specrec.c
+sloppy/faad/syntax.c
+sloppy/faad/tns.c
+sloppy/faad/lib/fft-ffmpeg.c
+sloppy/faad/lib/mdct.c
+sloppy/faad/lib/mdct_lookup.c
+sloppy/sloppy_lib.c
+sloppy/sloppy_art.c
+sloppy/fonts/ss_bold_28.c
+sloppy/fonts/ss_bold_56.c
+sloppy/fonts/sl_brand_50.c
+sloppy/fonts/sl_brand_34.c
+sloppy/fonts/ss_regular_16.c
+sloppy/fonts/ss_regular_18.c
+sloppy/fonts/ss_regular_21.c
+sloppy/fonts/ss_regular_23.c
+sloppy/fonts/ss_regular_26.c
+sloppy/fonts/ss_regular_34.c
+sloppy/fonts/ss_regular_60.c
+sloppy/fonts/ss_semibold_104.c
+sloppy/fonts/ss_regular_104.c
+sloppy/fonts/sl_count_184.c
+sloppy/fonts/sl_count_136.c
+sloppy/fonts/ss_semibold_18.c
+sloppy/fonts/ss_semibold_21.c
+sloppy/fonts/ss_semibold_23.c
+sloppy/fonts/ss_semibold_26.c
+sloppy/fonts/ss_semibold_30.c
+sloppy/fonts/ss_semibold_34.c
+sloppy/fonts/ss_semibold_38.c
+sloppy/fonts/ss_heb_regular_16.c
+sloppy/fonts/ss_heb_regular_18.c
+sloppy/fonts/ss_heb_regular_21.c
+sloppy/fonts/ss_heb_regular_23.c
+sloppy/fonts/ss_heb_regular_26.c
+sloppy/fonts/ss_heb_semibold_18.c
+sloppy/fonts/ss_heb_semibold_21.c
+sloppy/fonts/ss_heb_semibold_23.c
+sloppy/fonts/ss_heb_semibold_26.c
+sloppy/fonts/ss_heb_semibold_30.c
+sloppy/fonts/ss_heb_semibold_34.c
+sloppy/fonts/ss_heb_semibold_38.c
+sloppy/fonts/ss_heb_bold_28.c
+sloppy/fonts/ss_arabic_16.c
+sloppy/fonts/ss_arabic_18.c
+sloppy/fonts/ss_arabic_21.c
+sloppy/fonts/ss_arabic_23.c
+sloppy/fonts/ss_arabic_26.c
+sloppy/fonts/ss_arabic_28.c
+sloppy/fonts/ss_arabic_30.c
+#endif

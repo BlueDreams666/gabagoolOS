@@ -1,0 +1,7 @@
+A copy of lib/rbcodec/codecs/libmad (GPL-2.0-or-later, see COPYING), built
+into the GabagoolOS interface to decode internet radio. Two changes from the
+Rockbox copy: global.h no longer includes codeclib.h (the codec plugin
+interface, which reroutes malloc and memcpy), and the fixed-point code is
+chosen by compiler (__mips__ on the player, 64-bit C on the test build).
+synth.c's synth_full() is marked no_sanitize("array-bounds") for clang: its
+backward table offset is deliberate (Rockbox's codec runs the same code).

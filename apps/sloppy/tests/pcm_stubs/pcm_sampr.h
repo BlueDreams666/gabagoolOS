@@ -1,0 +1,3 @@
+#define SAMPR_44 44100
+#define SAMPR_48 48000
+#define SAMPR_96 96000

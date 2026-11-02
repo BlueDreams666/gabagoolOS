@@ -1,0 +1,7 @@
+A copy of lib/rbcodec/codecs/libffmpegFLAC (decoder.c, decoder.h,
+bitstream.h, golomb.h) and the two headers it takes from
+lib/rbcodec/codecs/lib (ffmpeg_get_bits.h, ffmpeg_intreadwrite.h), built into
+the GabagoolOS interface to decode FLAC internet radio (native and in Ogg).
+LGPL-2.1-or-later as in Rockbox (see COPYING). Changes from the Rockbox copy:
+codeclib.h, platform.h and codecs.h are replaced by flac_shim.h (the few
+macros and av_log2/swap16/swap32 they gave), and MAX_BLOCKSIZE is 8192.

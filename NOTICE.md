@@ -3,8 +3,7 @@
 GabagoolOS is free software under the GNU General Public License, version 2
 or (at your option) any later version. The full text is in `docs/COPYING` in the source tree; [LICENSE](LICENSE) points to it.
 
-This repository holds the project's front page for now. The source joins it
-with the source release, and the paths below refer to that tree.
+The paths below refer to the source in this repository.
 
 ## What it is built on
 

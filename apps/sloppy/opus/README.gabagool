@@ -1,0 +1,14 @@
+A copy of Rockbox's Opus decoder (lib/rbcodec/codecs/libopus: Xiph's and
+Skype's libopus, BSD licence, in each file's header) built into the
+GabagoolOS interface to decode Ogg Opus internet radio, as tremor/ is for
+Ogg Vorbis. sloppy-dev/port-opus.py makes it: the CELT, SILK and Opus
+layer sources from libopus/SOURCES and the headers they include, with their
+includes rewritten relative to each file (the interface builds every file
+with the same flags) and config.h always included. Left out: the Ogg
+framing and opus_header.c (the radio reads Ogg pages and OpusHead itself),
+the ARM, ColdFire, x86 and MIPS optimisation headers and the floating-point
+tables, which the R1 build never turns on, and Rockbox's decoder in a static
+26 KB buffer (the radio allocates its own while a stream plays). config.h
+here is Rockbox's without the codec interface: plain malloc, no IRAM, the
+same fixed-point build. Run the script again from the repository root to
+take a newer libopus.

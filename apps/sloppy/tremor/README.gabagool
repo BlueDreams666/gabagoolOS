@@ -1,0 +1,10 @@
+A copy of lib/rbcodec/codecs/libtremor (Xiph's Tremor, BSD-style licence,
+see COPYING) and the headers of the MDCT it uses from lib/rbcodec/codecs/lib
+(mdct.h, fft.h, mdct_lookup.h, codeclib_misc.h; the code itself is the copy
+in faad/lib, which the AAC decoder already builds), built into the GabagoolOS interface to decode Ogg Vorbis internet
+radio. vorbisfile.c and ctype.c are left out (the radio reads Ogg pages
+itself). Changes from the Rockbox copy: codeclib.h here is a shim for the
+codec interface (plain malloc, no IRAM, the transforms' prototypes, the byte
+order from the compiler), oggmalloc.c allocates from the C library, the ARM
+and ColdFire assembly headers are not included, and mdct_lookup.c includes
+the shim outside Rockbox builds too.

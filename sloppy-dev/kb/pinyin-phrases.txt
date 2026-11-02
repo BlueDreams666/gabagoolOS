@@ -1,0 +1,484 @@
+# Common words for the pinyin keyboard, the commonest first: syllables, then the hanzi.
+# Written for GabagoolOS. Single characters come from Unihan (gen-pinyin.py).
+wo men 我们
+ni men 你们
+ta men 他们
+shen me 什么
+zen me 怎么
+mei you 没有
+zhe ge 这个
+na ge 那个
+yi ge 一个
+ke yi 可以
+zhi dao 知道
+xi huan 喜欢
+xian zai 现在
+shi hou 时候
+yi qi 一起
+mei you 没有
+yin wei 因为
+suo yi 所以
+dan shi 但是
+ru guo 如果
+ran hou 然后
+hai shi 还是
+yi jing 已经
+ji jing 寂静
+zhen de 真的
+dui bu qi 对不起
+xie xie 谢谢
+ni hao 你好
+zai jian 再见
+mei guan xi 没关系
+bu yong xie 不用谢
+ming tian 明天
+jin tian 今天
+zuo tian 昨天
+wan shang 晚上
+zao shang 早上
+xia wu 下午
+shang wu 上午
+zhong wu 中午
+ye wan 夜晚
+yi hou 以后
+yi qian 以前
+yong yuan 永远
+yi bei zi 一辈子
+yi sheng 一生
+shi jie 世界
+sheng huo 生活
+sheng ming 生命
+ai qing 爱情
+peng you 朋友
+nv hai 女孩
+nan hai 男孩
+gu niang 姑娘
+bao bei 宝贝
+qin ai de 亲爱的
+xiang nian 想念
+si nian 思念
+hui yi 回忆
+meng xiang 梦想
+xi wang 希望
+xing fu 幸福
+kuai le 快乐
+gu du 孤独
+ji mo 寂寞
+shang xin 伤心
+yan lei 眼泪
+wei xiao 微笑
+xin dong 心动
+xin tiao 心跳
+wen rou 温柔
+mei li 美丽
+piao liang 漂亮
+tian kong 天空
+xing xing 星星
+yue liang 月亮
+tai yang 太阳
+yang guang 阳光
+da hai 大海
+hai bian 海边
+feng jing 风景
+cheng shi 城市
+gu xiang 故乡
+jia xiang 家乡
+lv xing 旅行
+qing chun 青春
+chun tian 春天
+xia tian 夏天
+qiu tian 秋天
+dong tian 冬天
+xia yu 下雨
+xue hua 雪花
+hua kai 花开
+yan hua 烟花
+liu xing 流星
+ye kong 夜空
+hei ye 黑夜
+li ming 黎明
+huang hun 黄昏
+qing ge 情歌
+yin yue 音乐
+ge qu 歌曲
+ge ci 歌词
+ge shou 歌手
+zhuan ji 专辑
+yi ren 艺人
+chang pian 唱片
+yan chang hui 演唱会
+xian chang 现场
+ban zou 伴奏
+gang qin 钢琴
+ji ta 吉他
+gu dian 古典
+liu xing 流行
+yao gun 摇滚
+jue shi 爵士
+min yao 民谣
+shuo chang 说唱
+dian zi 电子
+qing yin yue 轻音乐
+chun yin yue 纯音乐
+bo fang 播放
+zan ting 暂停
+xia yi shou 下一首
+shang yi shou 上一首
+sui ji 随机
+xun huan 循环
+dan qu 单曲
+lie biao 列表
+bo fang lie biao 播放列表
+shou cang 收藏
+xi ai 喜爱
+sou suo 搜索
+she zhi 设置
+yin liang 音量
+lan ya 蓝牙
+er ji 耳机
+dian chi 电池
+liang du 亮度
+shi jian 时间
+yu yan 语言
+jian pan 键盘
+zhong wen 中文
+ying wen 英文
+han yu 汉语
+pu tong hua 普通话
+guang dong hua 广东话
+yue yu 粤语
+ri yu 日语
+han guo 韩国
+ri ben 日本
+zhong guo 中国
+tai wan 台湾
+xiang gang 香港
+bei jing 北京
+shang hai 上海
+guang zhou 广州
+shen zhen 深圳
+cheng du 成都
+hang zhou 杭州
+wu han 武汉
+nan jing 南京
+xi an 西安
+chong qing 重庆
+tian jin 天津
+zhou jie lun 周杰伦
+wang fei 王菲
+chen yi xun 陈奕迅
+lin jun jie 林俊杰
+deng zi qi 邓紫棋
+zhang xue you 张学友
+liu de hua 刘德华
+wu yue tian 五月天
+cai yi lin 蔡依林
+xue zhi qian 薛之谦
+li rong hao 李荣浩
+mao bu yi 毛不易
+zhang jie 张杰
+hua chen yu 华晨宇
+zhou shen 周深
+li jian 李健
+pu shu 朴树
+xu song 许嵩
+wang li hong 王力宏
+tao zhe 陶喆
+sun yan zi 孙燕姿
+liang jing ru 梁静茹
+mo wen wei 莫文蔚
+na ying 那英
+deng li jun 邓丽君
+zhang guo rong 张国荣
+mei yan fang 梅艳芳
+li zong sheng 李宗盛
+luo da you 罗大佑
+cui jian 崔健
+dou wei 窦唯
+zhao lei 赵雷
+song dong ye 宋冬野
+ma di 马頔
+hu xia 胡夏
+zhang hui mei 张惠妹
+a mei 阿妹
+fang da tong 方大同
+wo ai ni 我爱你
+ai ni 爱你
+xiang ni 想你
+deng ni 等你
+pei ni 陪你
+gen ni 跟你
+ni de 你的
+wo de 我的
+ta de 他的
+ta de 她的
+zi ji 自己
+bie ren 别人
+dai biao 代表
+xiang yao 想要
+xu yao 需要
+ying gai 应该
+bi xu 必须
+neng gou 能够
+ken ding 肯定
+yi ding 一定
+ye xu 也许
+ke neng 可能
+zhi shi 只是
+zhi you 只有
+bu yao 不要
+bu shi 不是
+bu hui 不会
+bu neng 不能
+bu yong 不用
+hen duo 很多
+yi dian 一点
+yi xie 一些
+mei tian 每天
+mei ci 每次
+zui hou 最后
+di yi 第一
+kai shi 开始
+jie shu 结束
+li kai 离开
+hui lai 回来
+hui jia 回家
+chu qu 出去
+jin lai 进来
+zou le 走了
+lai le 来了
+zhi qian 之前
+zhi hou 之后
+yi zhi 一直
+zhong yu 终于
+hu ran 忽然
+tu ran 突然
+gang cai 刚才
+ma shang 马上
+yi hui er 一会儿
+dong xi 东西
+di fang 地方
+wen ti 问题
+ban fa 办法
+gong zuo 工作
+xue xi 学习
+xue sheng 学生
+lao shi 老师
+xue xiao 学校
+da xue 大学
+yi sheng 医生
+ma ma 妈妈
+ba ba 爸爸
+jie jie 姐姐
+mei mei 妹妹
+ge ge 哥哥
+di di 弟弟
+hai zi 孩子
+jia ren 家人
+fu mu 父母
+nai nai 奶奶
+ye ye 爷爷
+lao po 老婆
+lao gong 老公
+nv peng you 女朋友
+nan peng you 男朋友
+dian hua 电话
+shou ji 手机
+dian nao 电脑
+wang luo 网络
+dian ying 电影
+dian shi 电视
+you xi 游戏
+xiao shuo 小说
+gu shi 故事
+xin wen 新闻
+tian qi 天气
+chi fan 吃饭
+shui jiao 睡觉
+he shui 喝水
+ka fei 咖啡
+cha ye 茶叶
+pi jiu 啤酒
+huo guo 火锅
+mi fan 米饭
+mian tiao 面条
+jiao zi 饺子
+shui guo 水果
+ping guo 苹果
+xi gua 西瓜
+yi fu 衣服
+xie zi 鞋子
+qian bao 钱包
+huo che 火车
+fei ji 飞机
+qi che 汽车
+di tie 地铁
+ma lu 马路
+jie dao 街道
+gong yuan 公园
+shu dian 书店
+shang dian 商店
+yi yuan 医院
+ji chang 机场
+che zhan 车站
+fang jian 房间
+chuang hu 窗户
+men kou 门口
+hua yuan 花园
+shan shui 山水
+he liu 河流
+sen lin 森林
+cao yuan 草原
+sha mo 沙漠
+dao yu 岛屿
+xing qiu 星球
+yu zhou 宇宙
+ling hun 灵魂
+xin ling 心灵
+ji yi 记忆
+ming yun 命运
+yuan fen 缘分
+cheng nuo 承诺
+yong bao 拥抱
+qian shou 牵手
+wen ni 吻你
+fen shou 分手
+xiang yu 相遇
+xiang ai 相爱
+xiang shou 相守
+bie li 别离
+zai jian le 再见了
+hou lai 后来
+cong qian 从前
+na shi 那时
+na nian 那年
+shi nian 十年
+yi nian 一年
+yi tian 一天
+yi ye 一夜
+qian nian 千年
+wan nian 万年
+wu shu 无数
+wei lai 未来
+guo qu 过去
+dang xia 当下
+yong qi 勇气
+li liang 力量
+zi you 自由
+he ping 和平
+guang ming 光明
+hei an 黑暗
+wen nuan 温暖
+han leng 寒冷
+an jing 安静
+re nao 热闹
+qing song 轻松
+fang song 放松
+mang lu 忙碌
+lei le 累了
+kai xin 开心
+gao xing 高兴
+nan guo 难过
+ku le 哭了
+xiao le 笑了
+sheng qi 生气
+hai pa 害怕
+dan xin 担心
+fang xin 放心
+xiang xin 相信
+ming bai 明白
+li jie 理解
+ji de 记得
+wang ji 忘记
+fang qi 放弃
+jian chi 坚持
+nu li 努力
+cheng gong 成功
+shi bai 失败
+ji hui 机会
+xuan ze 选择
+jue ding 决定
+gai bian 改变
+fa xian 发现
+zhao dao 找到
+shi qu 失去
+yong you 拥有
+de dao 得到
+fu chu 付出
+shou hu 守护
+deng dai 等待
+qi dai 期待
+zhui qiu 追求
+fei xiang 飞翔
+ben pao 奔跑
+liu lang 流浪
+gui lai 归来
+chu fa 出发
+dao da 到达
+tiao wu 跳舞
+chang ge 唱歌
+ting ge 听歌
+xie zuo 写作
+hua hua 画画
+pai zhao 拍照
+yun dong 运动
+pao bu 跑步
+you yong 游泳
+da qiu 打球
+zu qiu 足球
+lan qiu 篮球
+chang an 长安
+jiang nan 江南
+xi hu 西湖
+chang cheng 长城
+huang he 黄河
+chang jiang 长江
+bian jie 边界
+tian ya 天涯
+hai jiao 海角
+nan fang 南方
+bei fang 北方
+dong fang 东方
+xi fang 西方
+yuan fang 远方
+shen bian 身边
+xin li 心里
+yan li 眼里
+meng li 梦里
+ye li 夜里
+yu zhong 雨中
+feng zhong 风中
+xue zhong 雪中
+hua jian 花间
+yue guang 月光
+xing guang 星光
+deng guang 灯光
+yan se 颜色
+hong se 红色
+lan se 蓝色
+lv se 绿色
+bai se 白色
+hei se 黑色
+huang se 黄色
+zi se 紫色
+fen hong 粉红
+jin se 金色
+yin se 银色
+bu zhi dao 不知道
+mei shi 没事
+hao de 好的
+ke shi 可是
+er qie 而且
+bing qie 并且
+hai you 还有
+huo zhe 或者
+na me 那么
+zhe me 这么
+wei shen me 为什么
+zen me yang 怎么样
+duo shao 多少
+ji ge 几个
+na li 哪里
+zhe li 这里
+na li 那里
+shui 谁

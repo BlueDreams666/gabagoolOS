@@ -1,0 +1,1247 @@
+/***************************************************************************
+ *             __________               __   ___.
+ *   Open      \______   \ ____   ____ |  | _\_ |__   _______  ___
+ *   Source     |       _//  _ \_/ ___\|  |/ /| __ \ /  _ \  \/  /
+ *   Jukebox    |    |   (  <_> )  \___|    < | \_\ (  <_> > <  <
+ *   Firmware   |____|_  /\____/ \___  >__|_ \|___  /\____/__/\_ \
+ *                     \/            \/     \/    \/            \/
+ * $Id$
+ *
+ * Copyright (C) 2002 by Stuart Martin
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This software is distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY
+ * KIND, either express or implied.
+ *
+ ****************************************************************************/
+
+#ifndef __SETTINGS_H__
+#define __SETTINGS_H__
+
+#include <stdbool.h>
+#include <stddef.h>
+#include "inttypes.h"
+#include "config.h"
+#include "audiohw.h" /* for the AUDIOHW_* defines */
+#include "statusbar.h" /* for the statusbar values */
+#include "quickscreen.h"
+#include "button.h"
+#include "audio.h"
+#include "dsp_proc_settings.h"
+#include "gui/list.h"
+
+struct opt_items {
+    unsigned const char* string;
+    int32_t voice_id;
+};
+
+/** Setting values defines **/
+#define MAX_FILENAME 32
+#define MAX_PATHNAME 80
+#define MAX_PATHLIST (MAX_PATHNAME*2)
+
+/* The values are assigned to the enums so that they correspond to */
+/* setting values in settings_list.c                               */
+
+/* Shared by all bookmark parameters */
+enum {
+    BOOKMARK_NO = 0,
+    BOOKMARK_YES = 1,
+};
+
+/* Auto create bookmark */
+enum {
+    BOOKMARK_ASK = 2,
+    BOOKMARK_RECENT_ONLY_YES = 3,
+    BOOKMARK_RECENT_ONLY_ASK = 4,
+};
+
+/* What holding Prev/Next does in the WPS */
+enum {
+    HOLD_SKIP_CONTINUOUS = 0,
+    HOLD_SKIP_SEEK,
+};
+
+/* Most recent bookmark */
+enum {
+    BOOKMARK_ONE_PER_PLAYLIST = 2,
+    BOOKMARK_ONE_PER_TRACK = 3,
+};
+
+enum
+{
+    TRIG_MODE_OFF = 0,
+    TRIG_MODE_NOREARM,
+    TRIG_MODE_REARM
+};
+
+enum
+{
+    TRIG_TYPE_STOP = 0,
+    TRIG_TYPE_PAUSE,
+    TRIG_TYPE_NEW_FILE
+};
+
+enum {
+    PLAYLIST_VIEWER_ENTRY_SHOW_FILE_NAME = 0,
+    PLAYLIST_VIEWER_ENTRY_SHOW_FULL_PATH = 1,
+    PLAYLIST_VIEWER_ENTRY_SHOW_ID3_TITLE_AND_ALBUM = 2,
+    PLAYLIST_VIEWER_ENTRY_SHOW_ID3_TITLE = 3
+};
+
+#ifdef HAVE_CROSSFADE
+enum {
+    CROSSFADE_ENABLE_OFF = 0,
+    CROSSFADE_ENABLE_AUTOSKIP,
+    CROSSFADE_ENABLE_MANSKIP,
+    CROSSFADE_ENABLE_SHUFFLE,
+    CROSSFADE_ENABLE_SHUFFLE_OR_MANSKIP,
+    CROSSFADE_ENABLE_ALWAYS,
+};
+#endif
+
+#ifdef HAVE_TOUCHSCREEN
+enum {
+    TOUCHSCREEN_EXEMPTIONS_OFF = 0,
+    TOUCHSCREEN_EXEMPTIONS_WPS,
+    TOUCHSCREEN_EXEMPTIONS_LISTS,
+    TOUCHSCREEN_EXEMPTIONS_WPS_AND_LISTS,
+};
+
+/* Arm zone presets. The stick is relative, so these only decide where a
+ * press is allowed to start a gesture. */
+enum {
+    STICK_ZONE_FULLSCREEN = 0,
+    STICK_ZONE_BOTTOM_HALF,
+    STICK_ZONE_PLATE,       /* a circle low enough to reach one-handed  */
+};
+
+enum {
+    STICK_PRESET_4WAY = 0,
+    STICK_PRESET_CUSTOM,    /* read from /.rockbox/stick.cfg            */
+    /* The engine handles any sector count and the table still exists, but
+     * nothing in the settings offers it while four ways is what we are
+     * actually designing for. Last on purpose: it sits past the end of the
+     * choice list, so it is unreachable from the UI without being deleted
+     * from the code. */
+    STICK_PRESET_8WAY,
+};
+
+/* How the live gesture is drawn. Behaviour is identical for all of them -
+ * this is the whole of a theme's control over the stick's looks, because
+ * the .cfg theme format can only set settings, and nothing in the skin
+ * engine can read stick state or draw on a gesture.
+ *
+ * The four correspond to the openness study's skins. */
+enum {
+    STICK_OVERLAY_ROSE = 0, /* ring, dead spot, sector edges, cap       */
+    STICK_OVERLAY_PLATE,    /* 2a: a plate at the bottom, cap rides it  */
+    STICK_OVERLAY_READOUT,  /* 2b: the rose plus mode and rate in words */
+    STICK_OVERLAY_EDGES,    /* 2c: no widget - the screen edge lights   */
+    /* The openness study's own HUD, drawn through the Canvas engine:
+     * antialiased rings, a cap that carries the word for what the gesture
+     * means and the rate under it, a hold-progress disc, and a readout
+     * pill at the top. Appended, never inserted - the numbers are what a
+     * saved config and every theme .cfg already hold. */
+    STICK_OVERLAY_CANVAS,
+    /* The same HUD with the coaching taken off - no panel behind it and no
+     * labels around the edge, which is the study's middle level. */
+    STICK_OVERLAY_CANVAS_MIN,
+};
+
+#endif
+
+enum {
+    FOLDER_ADVANCE_OFF = 0,
+    FOLDER_ADVANCE_NEXT,
+    FOLDER_ADVANCE_RANDOM,
+};
+
+/* repeat mode options */
+enum
+{
+    REPEAT_OFF = 0,
+    REPEAT_ALL,
+    REPEAT_ONE,
+    REPEAT_SHUFFLE,
+#ifdef AB_REPEAT_ENABLE
+    REPEAT_AB,
+#endif
+    NUM_REPEAT_MODES
+};
+
+/* single mode options */
+enum {
+    SINGLE_MODE_OFF = 0,
+    SINGLE_MODE_TRACK,
+    SINGLE_MODE_ALBUM,
+    SINGLE_MODE_ALBUM_ARTIST,
+    SINGLE_MODE_ARTIST,
+    SINGLE_MODE_COMPOSER,
+    SINGLE_MODE_GROUPING,
+    SINGLE_MODE_GENRE,
+    SINGLE_MODE_PLAYLIST,
+};
+
+enum
+{
+    QUEUE_HIDE = 0,
+    QUEUE_SHOW_AT_TOPLEVEL,
+    QUEUE_SHOW_IN_SUBMENU
+};
+
+enum
+{
+    BROWSER_DEFAULT_FILES = 0,
+#ifdef HAVE_TAGCACHE
+    BROWSER_DEFAULT_DB,
+#endif
+    BROWSER_DEFAULT_PL_CAT
+};
+
+#ifdef HAVE_ALBUMART
+enum
+{
+    AA_OFF = 0,
+    AA_PREFER_EMBEDDED,
+    AA_PREFER_IMAGE_FILE
+};
+#endif
+
+enum
+{
+    TAGCACHE_RAM_OFF = 0,
+    TAGCACHE_RAM_ON = 1,
+    TAGCACHE_RAM_QUICK = 2
+};
+
+/* dir filter options */
+/* Note: Any new filter modes need to be added before NUM_FILTER_MODES.
+ *       Any new rockbox browse filter modes (accessible through the menu)
+ *       must be added after NUM_FILTER_MODES. */
+enum { SHOW_ALL, SHOW_SUPPORTED, SHOW_MUSIC, SHOW_PLAYLIST, SHOW_ID3DB,
+       NUM_FILTER_MODES,
+       SHOW_WPS, SHOW_RWPS, SHOW_FMS, SHOW_RFMS, SHOW_SBS, SHOW_RSBS, SHOW_FMR, SHOW_CFG,
+       SHOW_LNG, SHOW_MOD, SHOW_FONT, SHOW_PLUGINS, SHOW_M3U};
+
+/* file and dir sort options */
+enum { SORT_ALPHA, SORT_DATE, SORT_DATE_REVERSED, SORT_TYPE, /* available as settings */
+       SORT_ALPHA_REVERSED, SORT_TYPE_REVERSED, SORT_AS_FILE }; /* internal use only */
+enum { SORT_INTERPRET_AS_DIGIT, SORT_INTERPRET_AS_NUMBER };
+
+/* recursive dir insert options */
+enum { RECURSE_OFF, RECURSE_ON, RECURSE_ASK };
+
+/* show path types */
+enum { SHOW_PATH_OFF = 0, SHOW_PATH_CURRENT, SHOW_PATH_FULL };
+
+/* scrollbar visibility/position */
+enum { SCROLLBAR_OFF = 0, SCROLLBAR_LEFT, SCROLLBAR_RIGHT };
+
+/* autoresume settings */
+enum { AUTORESUME_NEXTTRACK_NEVER = 0, AUTORESUME_NEXTTRACK_ALWAYS,
+       AUTORESUME_NEXTTRACK_CUSTOM};
+
+/* Alarm settings */
+#ifdef HAVE_RTC_ALARM
+enum {  ALARM_START_WPS = 0,
+#if CONFIG_TUNER
+        ALARM_START_FM,
+#endif
+#ifdef HAVE_RECORDING
+        ALARM_START_REC,
+#endif
+        ALARM_START_COUNT
+    };
+#if CONFIG_TUNER && defined(HAVE_RECORDING)
+#define ALARM_SETTING_TEXT "wps,fm,rec"
+#elif CONFIG_TUNER
+#define ALARM_SETTING_TEXT "wps,fm"
+#elif defined(HAVE_RECORDING)
+#define ALARM_SETTING_TEXT "wps,rec"
+#endif
+
+#endif /* HAVE_RTC_ALARM */
+
+/* Keyclick stuff */
+
+ /* Not really a setting but several files should stay synced */
+#define KEYCLICK_DURATION 2
+
+/** virtual pointer stuff.. move to another .h maybe? **/
+/* These define "virtual pointers", which could either be a literal string,
+   or a mean a string ID if the pointer is in a certain range.
+   This helps to save space for menus and options.
+
+   While using 0 as the base address is fastest/simplest,
+   it could result in a nullptr when ID==0 which C compilers try to
+   helpfully "optimize" away.
+
+   NOTE:  VIRT_PTR must point at an *invalid* address in the target
+          memory map!
+*/
+
+#define VIRT_SIZE 0xFFFF /* more than enough for our string ID range */
+#if defined(CPU_S5L87XX)
+/* 256K IRAM at 0x0 */
+#define VIRT_PTR ((unsigned char*)0x40000)
+#elif CONFIG_CPU==DM320 || CONFIG_CPU == RK27XX
+/* 4K of IRAM at 0x0 */
+#define VIRT_PTR ((unsigned char*)0x4000)
+#elif defined(CPU_TCC780X)
+/* 1K of IRAM at 0x0 */
+#define VIRT_PTR ((unsigned char*)0x1000)
+#elif CONFIG_CPU == S3C2440 || defined(CPU_PP) || CONFIG_CPU==IMX31L
+/* up to 64MB of DRAM at 0x0 */
+#define VIRT_PTR ((unsigned char*)0x4000000)
+#elif CONFIG_CPU == STM32H743
+/* 64k ITCM at 0x0 */
+#define VIRT_PTR ((unsigned char*)0x10000)
+#else
+/* offset from 0x0 slightly */
+#define VIRT_PTR ((unsigned char*)sizeof(char*))
+#endif
+
+/* form a "virtual pointer" out of a language ID */
+#define ID2P(id) (VIRT_PTR + id)
+
+/* resolve a pointer which could be a virtualized ID or a literal */
+#define P2STR(p) (char *)((p>=VIRT_PTR && p<VIRT_PTR+VIRT_SIZE) ? str(p-VIRT_PTR) : p)
+
+/* get the string ID from a virtual pointer, -1 if not virtual */
+#define P2ID(p) ((p>=VIRT_PTR && p<VIRT_PTR+VIRT_SIZE) ? p-VIRT_PTR : -1)
+
+/* !defined(HAVE_LCD_COLOR) implies HAVE_LCD_CONTRAST with default 40.
+   Explicitly define HAVE_LCD_CONTRAST in config file for newer ports for
+   simplicity. */
+
+
+
+/** function prototypes **/
+void reset_runtime(void);
+void update_runtime(void);
+void zero_runtime(void);
+void settings_load(void) INIT_ATTR;
+bool settings_load_config(const char* file, bool apply);
+/* true once if settings_load() had to fall back to the last-good config */
+bool settings_restored_from_backup(void);
+
+void status_save(bool force);
+int settings_save(void);
+
+/* defines for the options paramater */
+enum {
+    SETTINGS_SAVE_CHANGED = 0,
+    SETTINGS_SAVE_ALL,
+    SETTINGS_SAVE_THEME,
+    SETTINGS_SAVE_SOUND,
+#ifdef HAVE_RECORDING
+    SETTINGS_SAVE_RECPRESETS,
+#endif
+    SETTINGS_SAVE_EQPRESET,
+    SETTINGS_SAVE_RESUMEINFO,
+};
+bool settings_save_config(int options);
+
+struct settings_list;
+struct filename_setting;
+void reset_setting(const struct settings_list *setting, void *var);
+void settings_reset(void);
+void sound_settings_apply(void);
+
+/* call this after loading a .wps/.rwps or other skin files, so that the
+ * skin buffer is reset properly
+ */
+void settings_apply_skins(void);
+
+void settings_apply(bool read_disk);
+void settings_apply_fallback_font(void);
+void settings_apply_pm_range(void);
+void settings_display(void);
+
+enum optiontype { RB_INT, RB_BOOL };
+
+const struct settings_list* find_setting(const void* variable);
+const struct settings_list* find_setting_by_cfgname(const char* name);
+bool cfg_int_to_string(const struct settings_list *setting, int val, char* buf, int buf_len);
+bool cfg_string_to_int(const struct settings_list *setting, int* out, const char* str);
+void cfg_to_string(const struct settings_list *setting, char* buf, int buf_len);
+void string_to_cfg(const char *name, char* value, bool *theme_changed);
+
+bool copy_filename_setting(char *buf, size_t buflen, const char *input,
+                           const struct filename_setting *fs);
+bool set_bool_options(const char* string, const bool* variable,
+                      const char* yes_str, int yes_voice,
+                      const char* no_str, int no_voice,
+                      void (*function)(bool));
+
+bool set_bool(const char* string, const bool* variable);
+bool set_int(const unsigned char* string, const char* unit, int voice_unit,
+             const int* variable,
+             void (*function)(int), int step, int min, int max,
+             const char* (*formatter)(char*, size_t, int, const char*) );
+
+/* use this one if you need to create a lang from the value (i.e with TALK_ID()) */
+bool set_int_ex(const unsigned char* string, const char* unit, int voice_unit,
+             const int* variable,
+             void (*function)(int), int step, int min, int max,
+             const char* (*formatter)(char*, size_t, int, const char*),
+             int32_t (*get_talk_id)(int, int));
+
+void set_file(const char* filename, char* setting);
+
+bool set_option(const char* string, const void* variable, enum optiontype type,
+                const struct opt_items* options, int numoptions, void (*function)(int));
+
+const char* setting_get_cfgvals(const struct settings_list *setting);
+bool rename_temp_file(const char *tempfile, const char *file);
+
+/** global_settings and global_status struct definitions **/
+
+struct system_status
+{
+    int volume;     /* audio output volume in decibels range depends on the dac */
+    int resume_index;  /* index in playlist (-1 for no active resume) */
+    uint32_t resume_crc32; /* crc32 of the name of the file */
+    uint32_t resume_elapsed; /* elapsed time in last file */
+    uint32_t resume_offset; /* byte offset in mp3 file */
+#ifdef HAVE_PITCHCONTROL
+    int32_t resume_pitch;
+    int32_t resume_speed;
+#endif
+    int runtime;       /* current runtime since last charge */
+    int topruntime;    /* top known runtime */
+#ifdef HAVE_DIRCACHE
+    int dircache_size;      /* directory cache structure last size, 22 bits */
+#endif
+#if CONFIG_TUNER
+    int last_frequency;  /* Last frequency for resuming, in FREQ_STEP units,
+                            relative to MIN_FREQ */
+#endif
+    signed char last_screen;
+    int  viewer_icon_count;
+    int last_volume_change; /* tick the last volume change happened. skins use this */
+    int font_id[NB_SCREENS]; /* font id of the settings font for each screen */
+
+    bool resume_modified; /* playlist is modified (=> warn before erase) */
+#ifdef HAVE_SLOPPY_UI
+    /* the jack and Bluetooth keep their own volume: the one not in use
+     * waits here (1, above any volume, when there is none yet) */
+    int sloppy_jack_volume;
+    int sloppy_bt_volume;
+    int sloppy_volume_on_bt; /* whose volume is in use: 0 the jack, 1 Bluetooth, 2 the USB DAC */
+    int sloppy_dac_volume;   /* the USB DAC's own level, as the jack's and Bluetooth's */
+#endif
+};
+
+struct user_settings
+{
+#ifdef HAVE_SLOPPY_UI
+    bool sloppy_skull_icon;
+    int sloppy_theme;            /* 0 dark, 1 light, 2 true dark, 3 Zune */
+    int sloppy_home_style;       /* 0 cards, 1 tiles, 2 list */
+    int sloppy_accent_color;
+    int sloppy_home_wallpaper;
+    int sloppy_lock_wallpaper;
+    int sloppy_sfx_volume;       /* effects and interface sounds, 0-100 %; never music */
+    int sloppy_ui_sounds;        /* interface sounds: 0 off, 1 on */
+    int sloppy_lock_player;      /* lock screen Now Playing art: 0 big, 1 small */
+    int sloppy_sleep;            /* screen sleeps after 0: 30 s, 1: 1 min, 2: 2 min */
+    int sloppy_np_vinyl;         /* Now Playing shows a turntable: 0 off, 1 on */
+    int sloppy_boot_volume;      /* volume at power-on, 0-100 %; -1 keeps the last level */
+    int sloppy_album_through;    /* an album that ends goes on to the next one: 0 off, 1 on */
+    int sloppy_auto_np;          /* opening a song shows Now Playing: 0 off, 1 on */
+    int sloppy_np_style;         /* Now Playing: 0 glass over the cover, 1 classic black panel, 2 centred, 3 waveform seek bar on the glass */
+    int sloppy_play_key;         /* play key: 0 play/pause, 1 next, 2 previous, 3 Now Playing */
+    int sloppy_remote_keys;      /* headset and Bluetooth play/next/previous: 0 off, 1 on */
+    int sloppy_keys_dark;        /* player keys work while the screen is off: 0 off, 1 on */
+    int sloppy_lyrics_color;     /* current lyric line colour, index into the lyrics palette */
+    int sloppy_db_auto;          /* update the database at start-up: 0 off, 1 on */
+    unsigned char sloppy_qp_tiles[24]; /* control centre shortcuts in order, one letter each; a final "." when that is all of them */
+    int sloppy_wifi;             /* Wi-Fi radio: 0 off, 1 on */
+    int sloppy_airplay;          /* AirPlay receiver while Wi-Fi is on: 0 off, 1 on */
+    int sloppy_dlna;             /* DLNA renderer while Wi-Fi is on: 0 off, 1 on */
+    int sloppy_localsend;        /* receive songs with LocalSend while Wi-Fi is on: 0 off, 1 on */
+    int sloppy_receive_any;      /* LocalSend and the transfer page take files that are not songs too: 0 off, 1 on */
+    int sloppy_listenbrainz;     /* send plays to ListenBrainz over Wi-Fi: 0 off, 1 on */
+    int sloppy_scrobble_log;     /* keep the Audioscrobbler log /.scrobbler.log for Last.fm: 0 off, 1 on */
+    int sloppy_lastfm;           /* send plays to Last.fm over Wi-Fi: 0 off, 1 on */
+    int sloppy_auto_time;        /* set the clock from the internet: 0 off, 1 on */
+    unsigned char sloppy_timezone[48]; /* zoneinfo name, e.g. Europe/London; empty = system */
+    int sloppy_language;         /* 0 English, 1 Espanol, 2 Francais, 3 Deutsch, 4 Hebrew, 5 Arabic, 6 Chinese,
+                                    7 Italiano, 8 Nederlands, 9 Portugues (Brasil), 10 Polski, 11 Cestina, 12 Russian, 13 Japanese */
+    int sloppy_text_size;        /* 0 standard .. 3 largest */
+    int sloppy_gain;             /* output gain: 0 low, 1 high */
+    int sloppy_dsd_gain;         /* DSD gain compensation: 0 off, 1 +6 dB */
+    int sloppy_dac_nos;          /* the DAC's non-oversampling mode, where its driver has one: 0 off, 1 on */
+    int sloppy_digital_max;      /* 100% volume reaches full digital level (0 dB): 0 off, 1 on */
+    int sloppy_dev_overlay;      /* frame rate and system stats over the status bar: 0 off, 1 on */
+    int sloppy_next_hold;        /* holding the next key: 0 nothing, 1 previous song, 2 seek ahead while held */
+    int sloppy_pull_refresh;     /* pull the home screen down to refresh it: 0 off, 1 on */
+    int sloppy_volume_step;      /* volume steps (0.5 dB each) per press of a volume key, 1-10 */
+    int sloppy_tap_wake;         /* a tap wakes the dark screen (the LCD never sleeps): 0 off, 1 on */
+    int sloppy_swipe_typing;     /* glide across the search letters to type a word: 0 off, 1 on */
+    int sloppy_kb_first;         /* the globe key's two keyboards: KB_* + 1 (sloppy_kb.inc, KB_T9 + 1 the phone keypad, KB_JA + 1 romaji to kana); 0 or -1 the language's */
+    int sloppy_kb_second;        /* 0 or -1: English, or Hebrew when the language is English */
+    int sloppy_cf_vertical;      /* Cover Flow: 0 the player on its side, 1 upright, albums top to bottom */
+    int sloppy_notifications;    /* 1 the Notification Center keeps a history and shows banners; 0 (default) little toasts only */
+    int sloppy_songs_sort;       /* Songs: 0 A to Z, 1 Z to A, 2 recently added */
+    int sloppy_albums_sort;      /* Albums: 0 by title, 1 by artist, 2 by year, 3 recently added */
+    int sloppy_np_cover_ink;     /* Now Playing's seek bar, play button and heart: 0 the accent, 1 the cover's colour */
+    int sloppy_settings_tiles;   /* Settings: 0 (default) a grouped list, 1 tiles */
+    int sloppy_play_hold;        /* holding the play key: 0 nothing, 1 seek back while held */
+    int sloppy_play_double;      /* pressing the play key twice: 0 nothing, 1 next, 2 previous, 3 Now Playing */
+    int sloppy_next_double;      /* pressing the next key twice: 0 nothing, 1 previous, 2 play/pause */
+    int sloppy_book_next;        /* the next key, a book playing: 0 ahead 30 s, 1 back 30 s */
+    int sloppy_book_rewind;      /* a book picks up a few seconds back after a pause: 0 off, 1 on */
+    int sloppy_sleep_timer;      /* the sleep timer's length, kept for the tile: 1-4 minutes, 5 end of song, 6 end of album */
+    int sloppy_jack_limit;       /* the headphone jack's maximum volume, 10-100 %; -1: not set yet (taken from volume_limit) */
+    int sloppy_bt_limit;         /* Bluetooth's maximum volume, 10-100 % (volume_limit is the one in use) */
+    int sloppy_bt_step;          /* Bluetooth's volume button step, 1-10 (the jack's: sloppy_volume_step) */
+    int sloppy_dac_limit;        /* the USB DAC's maximum volume, 10-100 % */
+    int sloppy_dac_step;         /* the USB DAC's volume button step, 1-10 */
+    int sloppy_night_dim;        /* darker than brightness 1: a black veil, 0 none to 8 darkest */
+    int sloppy_album_badges;     /* album covers wear their quality (Lossy, CD, Hi-Res, DSD): 0 off, 1 on */
+    int sloppy_album_no_artist;  /* album grids: 0 (default) the artist under each title, 1 the title alone */
+    int sloppy_files_delete;     /* Files may delete from the card (always after a yes): 0 (default) no, 1 yes */
+    int sloppy_np_status;        /* Now Playing keeps the status bar (volume, clock, battery) over the cover: 0 off, 1 on */
+    int sloppy_love_star;        /* a favourite is marked with: 0 a heart, 1 a star */
+    int sloppy_lyrics_size;      /* lyrics: 0 small, 1 standard, 2 large, 3 extra large (on top of Text size) */
+    int sloppy_eq_preamp;        /* the EQ's preamp in tenths of a dB, -150 to +60 */
+    int sloppy_eq_auto_level;    /* the preamp comes down by itself so boosts never clip: 0 off, 1 on */
+    int sloppy_tone_temp;        /* Tone: warmer (-) or brighter (+), dB of tilt, -6 to +6 */
+    int sloppy_tone_deep;        /* Tone: deep bass, a low shelf near 40 Hz, -6 to +6 dB */
+    int sloppy_tone_thick;       /* Tone: note thickness, a wide peak near 300 Hz, -6 to +6 dB */
+    int sloppy_tone_vocal;       /* Tone: vocals, a peak near 3.2 kHz, -6 to +6 dB */
+    int sloppy_tone_sib;         /* Tone: sibilance, a narrower peak near 7 kHz, -6 to +6 dB */
+    int sloppy_tone_air;         /* Tone: air, a high shelf from 10 kHz, -6 to +6 dB */
+    int sloppy_big_icons;        /* Settings: 0 (default) 36 px icons, 1 bigger icons and rows */
+    int sloppy_artists_whole;    /* Artists: 0 (default) a tag naming several artists counts for each, 1 each tag as written */
+    int sloppy_split_off;        /* the ways of naming several artists not split on, a bit each (sloppy_tags.inc TS_*); 0 all */
+    int sloppy_genres_whole;     /* Genres: 0 (default) "Rock; Pop" counts for both, 1 each tag as written */
+    int sloppy_albums_apart;     /* 0 (default) one album's songs by different artists in one folder join as Various Artists, 1 kept apart */
+    int sloppy_sort_articles;    /* lists: 0 (default) The, A and An skipped when sorting, 1 sorted as written */
+    int sloppy_years_decades;    /* Years: 0 (default) a row a year, 1 a row a decade */
+    int sloppy_album_layout;     /* an album's page: 0 (default) its cover on its colour, 1 the cover across the page */
+    int sloppy_kb_t9;            /* the phone keypad: 1 (default) predictive, a press a letter of a dictionary word; 0 multi-tap */
+    int sloppy_flip;             /* the screen turned 180 degrees, for the keys on the other side (P65): 0 (default) off, 1 on */
+    int sloppy_car;              /* car mode (PS18): bit 0 on; bits 1-3 turn off playing on power, the big controls, turning off when it goes */
+    int sloppy_saver;            /* the screensaver while music plays (P64): 0 (default) off, 1 floating cover, 2 square cover, 3 clock */
+    int sloppy_battery_log;      /* a line on the card a minute: level, voltage, charging (PS22): 1 (default) on, 0 off */
+    int sloppy_round_corners;    /* the screen's corners masked round: 0 (default) off, 1 on */
+    int sloppy_clock_pos;        /* the status bar's clock: 0 (default) left, 1 centre, 2 right */
+    int sloppy_np_album;         /* Now Playing: 0 (default) title and artist, 1 title, artist and album */
+#endif
+    /* audio settings */
+    int balance;    /* stereo balance: -100 - +100 -100=left  0=bal +100=right  */
+    int bass;       /* bass boost/cut in decibels                               */
+    int treble;     /* treble boost/cut in decibels                             */
+    int channel_config; /* Stereo, Mono, Custom, Mono left, Mono right, Karaoke */
+    int stereo_width; /* 0-255% */
+
+#ifdef AUDIOHW_HAVE_BASS_CUTOFF
+    int bass_cutoff;
+#endif
+#ifdef AUDIOHW_HAVE_TREBLE_CUTOFF
+    int treble_cutoff;
+#endif
+
+#ifdef HAVE_CROSSFADE
+    /* Crossfade */
+    int crossfade;     /* Enable crossfade (0=off, 1=shuffle, 2=trackskip,
+                                            3=shuff&trackskip, 4=always) */
+    int crossfade_fade_in_delay;      /* Fade in delay (0-15s)             */
+    int crossfade_fade_out_delay;     /* Fade out delay (0-15s)            */
+    int crossfade_fade_in_duration;   /* Fade in duration (0-15s)          */
+    int crossfade_fade_out_duration;  /* Fade out duration (0-15s)         */
+    int crossfade_fade_out_mixmode;   /* Fade out mode (0=crossfade,1=mix) */
+#endif
+
+    /* Replaygain */
+    struct replaygain_settings replaygain_settings;
+
+    /* Crossfeed */
+    int crossfeed;                              /* crossfeed type */
+    unsigned int crossfeed_direct_gain;         /* dB x 10 */
+    unsigned int crossfeed_cross_gain;          /* dB x 10 */
+    unsigned int crossfeed_hf_attenuation;      /* dB x 10 */
+    unsigned int crossfeed_hf_cutoff;           /* Frequency in Hz */
+
+    /* EQ */
+    bool eq_enabled;            /* Enable equalizer */
+    unsigned int eq_precut;     /* dB */
+    struct eq_band_setting eq_band_settings[EQ_NUM_BANDS]; /* for each band */
+
+    /* Misc. swcodec */
+    int  beep;              /* system beep volume when changing tracks etc. */
+    int  keyclick;          /* keyclick volume */
+    int  keyclick_repeats;  /* keyclick on repeats */
+    /* which events click; see keyclick_enabled() */
+    bool keyclick_src_button;
+    bool keyclick_src_button_repeat;
+    bool keyclick_src_stick_arming;
+    bool keyclick_src_stick_armed;
+    bool keyclick_src_stick_action;
+    bool keyclick_src_stick_dial;
+    bool keyclick_src_stick_scroll;
+    bool keyclick_src_touch;
+    bool keyclick_src_lock;
+    bool dithering_enabled;
+#ifdef HAVE_PITCHCONTROL
+    bool timestretch_enabled;
+#endif
+
+#ifdef HAVE_RECORDING
+    int rec_format;    /* record format index */
+    int rec_mono_mode; /* how to create mono: L, R, L+R */
+
+    /* Encoder Settings Start - keep these together */
+    struct mp3_enc_config     mp3_enc_config;
+#if 0 /* These currently contain no members but their places in line
+         should be held */
+    struct aiff_enc_config    aiff_enc_config;
+    struct wav_enc_config     wav_enc_config;
+    struct wavpack_enc_config wavpack_enc_config;
+#endif
+    /* Encoder Settings End */
+
+    int rec_source;    /* 0=mic, 1=line, 2=S/PDIF, 2 or 3=FM Radio */
+    int rec_frequency; /* 0 = 44.1kHz (depends on target)
+                          1 = 48kHz
+                          2 = 32kHz
+                          3 = 22.05kHz
+                          4 = 24kHz
+                          5 = 16kHz */
+    int rec_channels;  /* 0=Stereo, 1=Mono */
+
+    int rec_mic_gain;   /* depends on target */
+    int rec_left_gain;  /* depends on target */
+    int rec_right_gain; /* depends on target */
+    bool peak_meter_clipcounter; /* clipping count indicator */
+    bool rec_editable; /* true means that the bit reservoir is off */
+
+    /* note: timesplit setting is not saved */
+    int rec_timesplit;  /* IN MINUTES 0 = off */
+    int rec_sizesplit; /* 0 = off,
+                          1 = 5MB, 2 = 10MB, 3 = 15MB, 4 = 32MB
+                          5 = 64MB, 6 = 75MB, 7 = 100MB, 8 = 128MB
+                          9 = 256MB, 10= 512MB, 11= 650MB, 12= 700MB,
+                          13= 1GB, 14 = 1.5GB 15 = 1.75MB*/
+    int rec_split_type; /* split/stop */
+    int rec_split_method; /* time/filesize */
+
+    int rec_prerecord_time; /* In seconds, 0-30, 0 means OFF */
+    char rec_directory[MAX_PATHNAME+1];
+    int cliplight; /* 0 = off
+                      1 = main lcd
+                      2 = main and remote lcd
+                      3 = remote lcd */
+
+    int rec_start_thres_db;
+    int rec_start_thres_linear;
+    int rec_start_duration; /* index of trig_durations */
+    int rec_stop_thres_db;
+    int rec_stop_thres_linear;
+    int rec_stop_postrec;
+    int rec_stop_gap;       /* index of trig_durations */
+    int rec_trigger_mode;   /* see TRIG_MODE_XXX constants */
+    int rec_trigger_type;   /* what to do when trigger released */
+#ifdef HAVE_HISTOGRAM
+    int histogram_interval; /* recording peakmeter histogram */
+#endif
+
+#ifdef HAVE_AGC
+    int rec_agc_preset_mic; /* AGC mic preset modes:
+                             0 = Off
+                             1 = Safety (clip)
+                             2 = Live (slow)
+                             3 = DJ-Set (slow)
+                             4 = Medium
+                             5 = Voice (fast) */
+    int rec_agc_preset_line; /* AGC line-in preset modes:
+                              0 = Off
+                              1 = Safety (clip)
+                              2 = Live (slow)
+                              3 = DJ-Set (slow)
+                              4 = Medium
+                              5 = Voice (fast) */
+    int rec_agc_maxgain_mic;  /* AGC maximum mic gain */
+    int rec_agc_maxgain_line; /* AGC maximum line-in gain */
+    int rec_agc_cliptime;     /* 0.2, 0.4, 0.6, 0.8, 1s */
+#endif
+#endif /* HAVE_RECORDING */
+
+#if CONFIG_TUNER
+    int fm_region;
+    bool fm_force_mono;  /* Forces Mono mode if true */
+    unsigned char fmr_file[MAX_FILENAME+1]; /* last fmr preset */
+    unsigned char fms_file[MAX_FILENAME+1];  /* last fms */
+#ifdef HAVE_REMOTE_LCD
+    unsigned char rfms_file[MAX_FILENAME+1];  /* last remote-fms */
+#endif
+#endif /* CONFIG_TUNER */
+#if defined(HAVE_RDS_CAP) && defined(CONFIG_RTC)
+    bool sync_rds_time; /* use RDS time to set the clock */
+#endif
+
+    /* misc options */
+#ifndef HAVE_WHEEL_ACCELERATION
+    int list_accel_start_delay; /* ms before we start increaseing step size */
+    int list_accel_wait; /* ms between increases */
+#endif
+
+#ifdef HAVE_TOUCHPAD_SENSITIVITY_SETTING
+    int touchpad_sensitivity;
+#endif
+
+#ifdef HAVE_TOUCHPAD_DEADZONE
+    int touchpad_deadzone;
+#endif
+
+    int  pause_rewind; /* time in s to rewind when pausing */
+#if defined(HAVE_HEADPHONE_DETECTION) || defined(HAVE_LINEOUT_DETECTION)
+    int  unplug_mode; /* pause on headphone unplug */
+    bool unplug_autoresume; /* disable auto-resume if no phones */
+#endif
+
+#ifdef HAVE_QUICKSCREEN
+    const struct settings_list *qs_items[QUICKSCREEN_ITEM_COUNT];
+#endif
+
+    int timeformat;    /* time format: 0=24 hour clock, 1=12 hour clock */
+
+#ifdef HAVE_DISK_STORAGE
+    int disk_spindown; /* time until disk spindown, in seconds (0=off) */
+    int buffer_margin; /* audio buffer watermark margin, in seconds */
+#endif
+
+    int dirfilter;     /* 0=display all, 1=only supported, 2=only music,
+                          3=dirs+playlists, 4=ID3 database */
+    int show_filename_ext; /* show filename extensions in file browser?
+                              0 = no, 1 = yes, 2 = only unknown 0 */
+    int default_codepage;   /* set default codepage for tag conversion */
+    bool hold_lr_for_scroll_in_list; /* hold L/R scrolls the list left/right */
+    bool play_selected; /* Plays selected file even in shuffle mode */
+    int single_mode;    /* single mode - stop after every track, album, album artist,
+                           artist, composer, work, or genre */
+    bool party_mode;    /* party mode - unstoppable music */
+    bool cuesheet;
+    bool car_adapter_mode; /* 0=off 1=on */
+    int car_adapter_mode_delay; /* delay before resume,  in seconds*/
+    int start_in_screen;
+#if defined(HAVE_RTC_ALARM) && \
+    (defined(HAVE_RECORDING) || CONFIG_TUNER)
+    int alarm_wake_up_screen;
+#endif
+    int ff_rewind_min_step; /* FF/Rewind minimum step size */
+    int ff_rewind_accel; /* FF/Rewind acceleration (in seconds per doubling) */
+
+    int peak_meter_release;   /* units per read out */
+    int peak_meter_hold;      /* hold time for peak meter in 1/100 s */
+    int peak_meter_clip_hold; /* hold time for clips */
+    bool peak_meter_dbfs;     /* show linear or dbfs values */
+    int peak_meter_min; /* range minimum */
+    int peak_meter_max; /* range maximum */
+
+    unsigned char wps_file[MAX_FILENAME+1];  /* last wps */
+    unsigned char sbs_file[MAX_FILENAME+1];  /* last statusbar skin */
+#ifdef HAVE_REMOTE_LCD
+    unsigned char rwps_file[MAX_FILENAME+1];  /* last remote-wps */
+    unsigned char rsbs_file[MAX_FILENAME+1];  /* last remote statusbar skin */
+#endif
+    unsigned char lang_file[MAX_FILENAME+1]; /* last language */
+    unsigned char playlist_catalog_dir[MAX_PATHNAME+1];
+    int skip_length; /* skip length */
+    int alt_skip_length; /* skip length */
+    int alt_reset_pitch; /* reset pitch on playback start */
+    int max_files_in_dir; /* Max entries in directory (file browser) */
+    int max_files_in_playlist; /* Max entries in playlist */
+    int volume_type;   /* how volume is displayed: 0=graphic, 1=percent */
+    int battery_display; /* how battery is displayed: 0=graphic, 1=percent */
+    bool show_icons;   /* 0=hide 1=show */
+    int statusbar;    /* STATUSBAR_* enum values */
+#ifdef HAVE_REMOTE_LCD
+    int remote_statusbar;
+#endif
+
+    int scrollbar;    /* SCROLLBAR_* enum values */
+    int scrollbar_width;
+
+#ifdef HAVE_TOUCHSCREEN
+    int list_line_padding;
+#endif
+#if LCD_DEPTH > 1
+    int list_separator_height; /* -1=auto (== 1 currently), 0=disabled, X=height in pixels */
+    int list_separator_color;
+#endif
+    /* goto current song when exiting WPS */
+    bool browse_current; /* 1=goto current song,
+                            0=goto previous location */
+    bool scroll_paginated; /* 0=dont 1=do */
+    bool list_wraparound;  /* wrap around to opposite end of list when scrolling */
+    int  list_order;       /* order for numeric lists (ascending or descending) */
+    int  scroll_speed;     /* long texts scrolling speed: 1-30 */
+    int  bidir_limit;      /* bidir scroll length limit */
+    int  scroll_delay;     /* delay (in 1/10s) before starting scroll */
+    int  scroll_step;      /* pixels to advance per update */
+
+    /* auto bookmark settings */
+    int autoloadbookmark;   /* auto load option: 0=off, 1=ask, 2=on */
+    int autocreatebookmark; /* auto create option: 0=off, 1=ask, 2=on */
+    int alt_autocreatebookmark; /* auto create option: 0=off, 1=ask, 2=on */
+    bool autoupdatebookmark;/* auto update option */
+    int usemrb;             /* use MRB list: 0=No, 1=Yes, 2=One per playlist,
+                                             3=One per playlist and track */
+    bool resume_from_recent_bookmark;
+#ifdef HAVE_DIRCACHE
+    bool dircache;          /* enable directory cache */
+#endif
+#ifdef HAVE_TAGCACHE
+#ifdef HAVE_TC_RAMCACHE
+    int tagcache_ram;        /* load tagcache to ram: 1=on, 2=quick (ignore dircache) */
+#endif
+    bool tagcache_autoupdate; /* automatically keep tagcache in sync? */
+    bool autoresume_enable;   /* enable auto-resume feature? */
+    //bool alt_settings_enable;   /* enable auto-resume feature? */
+    int autoresume_automatic; /* resume next track? 0=never, 1=always,
+                                 2=custom */
+    unsigned char autoresume_paths[MAX_PATHLIST+1]; /* colon-separated list */
+    bool runtimedb;           /* runtime database active? */
+    unsigned char tagcache_scan_paths[MAX_PATHLIST+1];
+    /* Folders the database scan skips, ':'-separated (FAT names cannot
+       hold a colon). Kept short enough for a config.cfg line, which is
+       read into 128 bytes. */
+    char db_exclude_folders[MAX_PATHLIST+1];   /* ":"-separated; GabagoolOS's Folders to scan writes it too */
+    bool db_exclude_audiobooks; /* skip global_settings.audiobook_folder */
+    unsigned char tagcache_db_path[MAX_PATHNAME+1];
+#endif /* HAVE_TAGCACHE */
+    bool alt_settings_enable; /* resume next track? 0=no, 1=custom */
+    unsigned char altmenu_paths[MAX_PATHNAME+1]; /* colon-separated list */
+#if LCD_DEPTH > 1
+    unsigned char backdrop_file[MAX_PATHNAME+1];  /* backdrop bitmap file */
+#endif
+
+#ifdef HAVE_LCD_COLOR
+    int bg_color; /* background color native format */
+    int fg_color; /* foreground color native format */
+    int lss_color; /* background color for the selector or start color for the gradient */
+    int lse_color; /* end color for the selector gradient */
+    int lst_color; /* color of the text for the selector */
+    unsigned char colors_file[MAX_FILENAME+1];
+#endif
+
+    int browser_default;        /* Default browser when accessed from WPS */
+
+    /* playlist/playback settings */
+    int  repeat_mode; /* 0=off 1=repeat all 2=repeat one 3=shuffle 4=ab */
+    int  next_folder; /* move to next folder */
+    bool constrain_next_folder; /* whether next_folder is constrained to
+                                   directories within start_directory */
+    int  recursive_dir_insert; /* should directories be inserted recursively */
+    bool fade_on_stop; /* fade on pause/unpause/stop */
+    bool playlist_shuffle;
+    bool warnon_erase_dynplaylist; /* warn when erasing dynamic playlist */
+    bool keep_current_track_on_replace_playlist;
+    bool show_shuffled_adding_options; /* whether to display options for adding shuffled tracks to dynamic playlist */
+    int show_queue_options; /* how and whether to display options to queue tracks */
+#ifdef HAVE_ALBUMART
+    int album_art; /* switch off album art display or choose preferred source */
+#endif
+    bool rewind_across_tracks;
+    int hold_skip;       /* HOLD_SKIP_CONTINUOUS or HOLD_SKIP_SEEK */
+    int hold_skip_delay; /* seconds a held Prev/Next waits per skip */
+
+    /* playlist viewer settings */
+    bool playlist_viewer_icons; /* display icons on viewer */
+    bool playlist_viewer_indices; /* display playlist indices on viewer */
+    int playlist_viewer_track_display; /* how to display tracks in viewer */
+
+    /* voice UI settings */
+    bool talk_menu; /* enable voice UI */
+    int talk_dir; /* voiced directories mode: 0=off 1=number 2=spell */
+    bool talk_dir_clip; /* use directory .talk clips */
+    int talk_file; /* voice file mode: 0=off, 1=number, 2=spell */
+    bool talk_file_clip; /* use file .talk clips */
+    bool talk_filetype; /* say file type */
+    bool talk_battery_level;
+    int  talk_mixer_amp; /* Relative volume of voices, MIX_AMP_MPUTE->MIX_AMP_UNITY */
+
+    /* file browser sorting */
+    bool sort_case; /* dir sort order: 0=case insensitive, 1=sensitive */
+    int sort_dir;   /* 0=alpha, 1=date (old first), 2=date (new first) */
+    int sort_file;  /* 0=alpha, 1=date, 2=date (new first), 3=type */
+    int sort_playlists; /* in playlist catalog 0=alpha, 1=date, 2=date (new first) */
+    int interpret_numbers; /* true=strnatcmp, false=strcmp */
+
+    /* power settings */
+    int poweroff;   /* idle power off timer */
+#if BATTERY_CAPACITY_INC > 0
+    int battery_capacity; /* in mAh */
+#endif
+#ifdef HAVE_SPDIF_POWER
+    bool spdif_enable; /* S/PDIF power on/off */
+#endif
+#ifdef HAVE_USB_CHARGING_ENABLE
+        int usb_charging;
+#endif
+#ifdef HAVE_HIBY_LINUX_POWER_CHARGE_LIMIT
+    int hiby_charge_limit_voltage;
+    int hiby_charge_current;
+#endif
+#if ((CONFIG_BATTERY_MEASURE & VOLTAGE_MEASURE))
+    int low_battery_poweroff_percent;
+#endif
+    /* device settings */
+#ifdef HAVE_LCD_CONTRAST
+    int contrast;   /* lcd contrast */
+#endif
+
+#ifdef HAVE_LCD_INVERT
+    bool invert;    /* invert display */
+#endif
+#ifdef HAVE_LCD_FLIP
+    bool flip_display; /* turn display (and button layout) by 180 degrees */
+#endif
+    int  cursor_style; /* style of the selection cursor */
+    int  screen_scroll_step;
+    int  show_path_in_browser; /* 0=off, 1=current directory, 2=full path */
+    bool offset_out_of_view;
+    bool disable_mainmenu_scrolling;
+    unsigned char icon_file[MAX_FILENAME+1];
+    unsigned char viewers_icon_file[MAX_FILENAME+1];
+    unsigned char font_file[MAX_FILENAME+1]; /* last font */
+    int glyphs_to_cache; /* default font allocation size in glyphs */
+#ifdef HAVE_REMOTE_LCD
+    unsigned char remote_font_file[MAX_FILENAME+1]; /* last font */
+#endif
+    unsigned char kbd_file[MAX_FILENAME+1];  /* last keyboard */
+    int  backlight_timeout;  /* backlight off timeout:  -1=never,
+                                0=always, or time in seconds */
+    bool caption_backlight; /* turn on backlight at end and start of track */
+    bool bl_filter_first_keypress;   /* filter first keypress when dark? */
+#if CONFIG_CHARGING
+    int backlight_timeout_plugged;
+#endif
+#ifndef HAS_BUTTON_HOLD
+    bool bt_selective_softlock_actions;
+    int bt_selective_softlock_actions_mask;
+#endif
+#ifdef HAVE_BACKLIGHT
+    bool bl_selective_actions; /* backlight disable on some actions */
+    int  bl_selective_actions_mask;/* mask of actions that will not enable backlight */
+    int backlight_on_button_hold; /* what to do with backlight when hold
+                                     switch is on */
+#ifdef HAVE_LCD_SLEEP_SETTING
+    int lcd_sleep_after_backlight_off; /* when to put lcd to sleep after backlight
+                                          has turned off:  -1=never, 0=always,
+                                          or time in seconds */
+#endif
+#endif /* HAVE_BACKLIGHT */
+
+#if defined(HAVE_BACKLIGHT_FADING_INT_SETTING)
+    int backlight_fade_in;  /* backlight fade in timing: 0..3 */
+    int backlight_fade_out; /* backlight fade in timing: 0..7 */
+#elif defined(HAVE_BACKLIGHT_FADING_BOOL_SETTING)
+    bool backlight_fade_in;
+    bool backlight_fade_out;
+#endif
+#ifdef HAVE_BACKLIGHT_BRIGHTNESS
+    int brightness;
+#ifdef HAVE_BACKLIGHT_DIM_IDLE
+    /* Where the panel sits once the backlight timeout expires, in tenths
+     * of a percent of the panel's range. Zero is "go dark", the way every
+     * other target behaves. */
+    int dim_level;
+    /* The old whole-percent setting, read from an old config.cfg and
+     * converted once by settings_apply(); -1 when there is nothing to
+     * convert. Never written. */
+    int dim_brightness;
+    /* Seconds from dimming to off; 0 = stay dimmed. */
+    int backlight_off_timeout;
+#endif
+#endif
+
+#ifdef HAVE_REMOTE_LCD
+    /* remote lcd */
+    int  remote_contrast;          /* lcd contrast:       0-63 0=low 63=high */
+    int  remote_backlight_timeout; /* backlight off timeout:  -1=never,
+                                      0=always, or time in seconds */
+    int  remote_backlight_timeout_plugged;
+    int  remote_scroll_speed;      /* long texts scrolling speed: 1-30 */
+    int  remote_scroll_delay;      /* delay (in 1/10s) before starting scroll */
+    int  remote_scroll_step;       /* pixels to advance per update */
+    int  remote_bidir_limit;       /* bidir scroll length limit */
+    bool remote_invert;            /* invert display */
+    bool remote_flip_display;      /* turn display (and button layout) by 180 degrees */
+    bool remote_caption_backlight; /* turn on backlight at end and start of track */
+    bool remote_bl_filter_first_keypress; /* filter first remote keypress when remote dark? */
+    unsigned char remote_icon_file[MAX_FILENAME+1];
+    unsigned char remote_viewers_icon_file[MAX_FILENAME+1];
+#ifdef HAS_REMOTE_BUTTON_HOLD
+    int remote_backlight_on_button_hold; /* what to do with remote backlight when hold
+                                            switch is on */
+#endif
+#ifdef HAVE_REMOTE_LCD_TICKING
+    bool remote_reduce_ticking; /* 0=normal operation,
+                                   1=EMI reduce on with cost more CPU. */
+#endif
+#endif /* HAVE_REMOTE_LCD */
+
+#ifdef HAVE_BUTTON_LIGHT
+    int buttonlight_timeout;
+#endif
+#ifdef HAVE_BUTTONLIGHT_BRIGHTNESS
+    int buttonlight_brightness;
+#endif
+
+#ifdef IPOD_ACCESSORY_PROTOCOL
+    int serial_bitrate; /* 0=auto 1=9600 2=19200 3=38400 4=57600 */
+#endif
+#ifdef HAVE_ACCESSORY_SUPPLY
+    bool accessory_supply; /* 0=off 1=on, accessory power supply for iPod */
+#endif
+#ifdef HAVE_LINEOUT_POWEROFF
+    bool lineout_active;
+#endif
+
+#ifdef HAVE_SPEAKER
+    int speaker_mode; /* 0: off, 1: on, 2: auto (only if headphone detection) */
+#endif /* HAVE_SPEAKER */
+    bool prevent_skip;
+
+#ifdef HAVE_TOUCHSCREEN
+    int touch_mode;
+    int touchscreen_exemptions;
+    int stick_preset;          /* STICK_PRESET_*                        */
+    int stick_zone;            /* STICK_ZONE_*                          */
+    int stick_sectors;         /* 1..8                                  */
+    int stick_rotation;        /* degrees, 0..345                       */
+    int stick_arm_ms;          /* arming window, 0..400 ms              */
+    int stick_dial_wps;        /* volume dial in the WPS                */
+    int stick_dial_lists;      /* scroll dial in lists and menus        */
+    int stick_deg_per_detent;  /* dial detent size, 8..30 degrees       */
+    int stick_overlay;         /* draw the live gesture on screen       */
+    int stick_overlay_style;   /* STICK_OVERLAY_*                       */
+    int stick_edge_swipe;      /* edge strips: back and menu            */
+    struct touchscreen_parameter ts_calibration_data;
+    struct list_kinetic_scroll_settings kinetic_scroll_accel;
+    struct list_kinetic_scroll_settings kinetic_scroll_brake;
+    struct list_kinetic_scroll_settings kinetic_scroll_decel;
+    struct list_kinetic_scroll_settings kinetic_scroll_press;
+#endif
+
+#ifdef HAVE_PITCHCONTROL
+    /* pitch screen settings */
+    bool pitch_mode_semitone;
+    bool pitch_mode_timestretch;
+#endif
+    /* If values are just added to the end, no need to bump plugin API
+       version. */
+    /* new stuff to be added at the end */
+
+#ifdef USB_ENABLE_HID
+    bool usb_hid;
+    int usb_keypad_mode;
+#endif
+
+#if defined(USB_ENABLE_AUDIO) || defined(HAVE_HOST_USB_AUDIO)
+    int usb_audio;
+#endif
+
+#if defined(USB_ENABLE_STORAGE) && defined(HAVE_MULTIDRIVE)
+    bool usb_skip_first_drive;
+#endif
+
+    unsigned char ui_vp_config[64]; /* viewport string for the lists */
+#ifdef HAVE_REMOTE_LCD
+    unsigned char remote_ui_vp_config[64]; /* viewport string for the remote lists */
+#endif
+
+    struct compressor_settings compressor_settings;
+
+    int sleeptimer_duration; /* In minutes; 0=off */
+    bool sleeptimer_on_startup;
+    bool keypress_restarts_sleeptimer;
+
+    bool show_shutdown_message; /* toggle whether display lights up and displays message
+                                when shutting down */
+
+#ifdef HAVE_MORSE_INPUT
+    bool morse_input; /* text input method setting */
+#endif
+
+#ifdef HAVE_HOTKEY
+    /* hotkey assignments - acceptable values are in
+       hotkey_action enum in onplay.h */
+    int hotkey_wps;
+    int hotkey_tree;
+#endif
+
+    /* When resuming playback (after a stop), rewind this number of seconds */
+    int resume_rewind;
+
+#ifdef AUDIOHW_HAVE_DEPTH_3D
+    int depth_3d;
+#endif
+
+#ifdef AUDIOHW_HAVE_FILTER_ROLL_OFF
+    int roll_off;
+#endif
+
+#ifdef AUDIOHW_HAVE_POWER_MODE
+    int power_mode;
+#endif
+
+#ifdef AUDIOHW_HAVE_EQ
+    /** Hardware EQ tone controls **/
+    struct hw_eq_band
+    {
+        /* Maintain the order of members or sound_menu has to be changed */
+        int gain;
+#ifdef AUDIOHW_HAVE_EQ_FREQUENCY
+        int frequency;
+#endif
+#ifdef AUDIOHW_HAVE_EQ_WIDTH
+        int width;
+#endif
+    } hw_eq_bands[AUDIOHW_EQ_BAND_NUM];
+#endif /* AUDIOHW_HAVE_EQ */
+
+#ifdef HAVE_HARDWARE_CLICK
+    bool keyclick_hardware; /* hardware piezo keyclick */
+#endif
+
+    char start_directory[MAX_PATHNAME+1];
+    /* Has the root been customized from the .cfg file? false = no, true = loaded from cfg */
+    bool root_menu_customized;
+    /* True once any main menu item carries a name the user gave it. The
+     * names themselves live in root_menu.c; this is the flag the custom
+     * setting machinery needs to know whether to write the line. */
+    bool root_menu_renamed;
+    /* The title over the main menu. Empty means the built-in "Rockbox". */
+    char root_menu_title[24]; /* ROOT_MENU_NAME_MAX */
+    /* Where the main menu's custom folder entry points. Empty means the
+     * root, which is what an unconfigured entry does rather than refusing
+     * to open. */
+    char custom_folder[MAX_PATHNAME+1];
+    /* Where the main menu's Audiobooks entry points. */
+    char audiobook_folder[MAX_PATHNAME+1];
+    /* The WPS used while a book plays (a name in WPS_DIR, no extension).
+     * Empty: the music one. */
+    char audiobook_wps[MAX_FILENAME+1];
+    int  ab_rewind_after;    /* minutes of pause before rewinding; 0 = never */
+    int  ab_rewind_amount;   /* seconds */
+    int  ab_finished_pct;    /* a book this far through counts as finished */
+    bool ab_autoscan;        /* rescan at startup when the library changed */
+    /* Pseudo-radio. The folder is the dial: its subfolders are stations,
+     * and a folder with none is a single station. */
+    char radio_folder[MAX_PATHNAME+1];
+    char radio_wps[MAX_FILENAME+1];      /* empty: the music one */
+    char radio_saver[MAX_FILENAME+1];    /* empty: the usual screensaver */
+    char radio_last[MAX_FILENAME+1];     /* station tuned last; empty: none */
+    int  radio_min_length;   /* minutes a recording needs to be a station */
+    bool radio_static;       /* the hiss played while tuning in */
+    int  radio_static_strength; /* percent, scales every radio noise */
+    bool radio_ambience;     /* the occasional uninvited noise on the band */
+    /* The same static, on an ordinary user-initiated track skip - the old
+     * transistor-radio feel of changing station by hand. */
+    bool track_static;
+    int  track_static_ms;
+    bool emoji_enabled;      /* colour emoji from /.rockbox/emoji */
+    /* Audio prioritisation: a device sound with music under it is barely
+     * audible, so the music steps aside while it plays. One depth per
+     * class of sound - see system_sound_play(). */
+    bool sound_duck;
+    int  sound_duck_click;   /* keyclicks and list edges */
+    int  sound_duck_alert;   /* track skip, end of playlist */
+    int  sound_duck_cue;     /* lock, unlock, stick arming */
+#ifdef HAVE_COVER_VIEWS
+    int library_view;        /* enum coverview_style */
+#endif
+#ifdef HAVE_VIDEO
+    bool video_enabled;      /* master switch for everything that moves */
+    bool video_canvas;       /* animated covers */
+    bool video_music;        /* music videos */
+    bool video_show_music;   /* the WPS shows the music video (context menu) */
+    int  video_latency;      /* ms the picture is held back */
+    int  video_bt_latency;   /* ms more while Bluetooth plays */
+    int  video_battery_fps;  /* frame cap on battery, 0 = none */
+    /* Screensavers: skins in WPS_DIR (.ss), "-" for none. */
+    unsigned char saver_battery[MAX_FILENAME+1];
+    unsigned char saver_charging[MAX_FILENAME+1];
+    int  saver_timeout;      /* seconds idle, 0 = never */
+    int  saver_battery_fps;
+    int  saver_battery_brightness;
+    int  saver_keep_on;      /* enum saver_keep_on */
+#endif
+#ifdef HAVE_LYRICS
+    bool lyrics_enabled;
+    int  lyrics_source;      /* enum lyrics_source_order */
+#endif
+    /* A font that lends glyphs the others lack (FONT_DIR, no extension).
+     * "-" for none. */
+    unsigned char fallback_font_file[MAX_FILENAME+1];
+#ifdef HAVE_LCD_TRANSITIONS
+    int menu_transition;     /* enum lcd_transition */
+    int menu_transition_ms;
+    int wps_transition;      /* enum lcd_transition, on track change */
+    int wps_transition_ms;
+#endif
+#ifdef HAVE_QUICKSCREEN
+    bool shortcuts_replaces_qs;
+    bool quickscreen_wheel;  /* draw the four ways as a click wheel */
+#endif
+
+#ifdef HAVE_PLAY_FREQ
+    int play_frequency; /* core audio output frequency selection */
+#endif
+    int volume_limit; /* maximum volume limit */
+
+#ifdef HAVE_PERCEPTUAL_VOLUME
+    int volume_adjust_mode;
+    int volume_adjust_norm_steps;
+#endif
+
+    int surround_enabled;
+    int surround_balance;
+    int surround_fx1;
+    int surround_fx2;
+    bool surround_method2;
+    int surround_mix;
+
+    int pbe;
+    int pbe_precut;
+
+    int afr_enabled;
+
+#if defined(DX50) || defined(DX90)
+    int governor;
+#endif
+#if defined(DX50) || defined(DX90) || (defined(HAVE_USB_POWER) && !defined(USB_NONE) && !defined(SIMULATOR))
+    int usb_mode;
+#endif
+#if defined(BUTTON_REC) || \
+    (CONFIG_KEYPAD == GIGABEAT_PAD) || \
+    (CONFIG_KEYPAD == IPOD_4G_PAD) || \
+    (CONFIG_KEYPAD == IRIVER_H10_PAD)
+    bool clear_settings_on_hold;
+#endif
+#if defined(HAVE_EROS_QN_CODEC)
+    int hp_lo_select; /* indicates automatic, headphone-only, or lineout-only operation */
+#endif
+    bool playback_log; /* ROCKBOX_DIR/playback.log for tracks played */
+#if defined(HAVE_GENERAL_PURPOSE_LED)
+    bool use_led_indicators;
+#endif
+};
+
+/* global settings */
+extern struct user_settings global_settings;
+/* global status */
+extern struct system_status global_status;
+
+#endif /* __SETTINGS_H__ */
