@@ -23,12 +23,12 @@ Everything you'd want from a music player, and it's quick.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/fresh-dark.png">
-  <img src="assets/fresh-light.png" width="880" alt="What it does. Library: Super smooth, even with tens of thousands of songs. And it sorts properly: The Beatles live under B. Lyrics: Words light up as the song plays. Sound: A real equalizer, plus one-tap presets for your headphones. Radio: Thousands of stations, and any podcast you like. Audiobooks: Picks up right where you left off, with chapters and bookmarks. E-books too. Wireless: Bluetooth, AirPlay, Wi-Fi transfers, and your phone as a remote. Keyboard: Swipe to type, in 12 languages. Now playing: Big covers, with love, shuffle and repeat right there. Buttons: Hold to skip through a song. Press twice for a shortcut. Your look: Four themes, three home screens, any colour you like.">
+  <img src="assets/fresh-light.png" width="880" alt="What it does. Library: Super smooth, even with tens of thousands of songs. And "The Beatles" is filed under B, not T. Lyrics: Words light up as the song plays. Sound: A real equalizer, plus one-tap presets for your headphones. Radio: Thousands of stations, and any podcast you like. Audiobooks: Picks up right where you left off, with chapters and bookmarks. E-books too. Wireless: Bluetooth, AirPlay, send music over Wi-Fi, and use your phone as a remote. Keyboard: Swipe to type, in 12 languages. Now playing: Big covers, with love, shuffle and repeat right there. Buttons: Hold to skip through a song. Press twice for a shortcut. Your look: Four themes, three home screens, any colour you like.">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/menu-dark.png">
-  <img src="assets/menu-light.png" width="880" alt="Sliced thin: the little things, done right. Sorting: The Beatles under B. Track order: 2 comes before 10. Lyrics: from your files or online. Equalizer: shape it any way you like. Radio: reconnects by itself. Audiobooks: a speed for every book. Sleep timer: remembers how long you like. Remote: your phone. Home screen: tiles, cards or a list. Themes: four, in any colour. Languages: 7 to read, 12 to type. Key lock: Volume down + Power.">
+  <img src="assets/menu-light.png" width="880" alt="Sliced thin: the little things, done right. Smart sorting: "The Beatles" under B, not T. Track order: track 9, then track 10. Lyrics: from your files or online. Equalizer: shape it any way you like. Radio: comes back if Wi-Fi drops. Audiobooks: a speed for every book. Sleep timer: remembers how long you like. Phone remote: control it from your phone. Home screen: tiles, cards or a list. Themes: four, in any colour. Languages: 7 to read, 12 to type. Lock buttons: Volume down + Power.">
 </picture>
 
 Oh, and there are games. 2048, Sudoku, Snake, chess, a tiny pet, a music quiz,
@@ -36,17 +36,17 @@ even Doom and Game Boy. Not your thing? Hide them with one tap.
 
 ## the house special
 
-<img src="assets/special.png" width="880" alt="The house special, on a red and white checked tablecloth. Gabagool? Ova haaaa! Every Tiles home comes with one tile you didn't order. Tap it. You'll see. Not in the mood? You can hide it like any other tile. Nobody's offended. Much. Beside it, the Tiles home with the house special tile.">
+<img src="assets/special.png" width="880" alt="The house special, on a red and white checked tablecloth. Gabagool? Ova haaaa! Your home screen comes with one tile you didn't order. Tap it. You'll see. Not in the mood? Hide it like any other tile. Nobody's offended. Much.">
 
 ## today's specials
 
 New in 1.1: swipe through songs like a dating app and it learns your taste.
-Plus podcasts, e-books, a waveform you can scrub through, and your phone as a
-remote.
+Plus podcasts, e-books, a picture of the whole song you can tap to jump
+around, and your phone as a remote.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/case-new-dark.png">
-  <img src="assets/case-new-light.png" width="880" alt="Four new screens. Your taste: a song card to swipe, with undo, skip, keep and love. Waveform seek: Now Playing with the song drawn as a waveform. Podcasts: a show's page with Play, Refresh and its episodes. Your server: an album from Navidrome with Play and Shuffle.">
+  <img src="assets/case-new-light.png" width="880" alt="Your taste: swipe songs, it learns what you like. Song waveform: tap anywhere to jump there. Podcasts: find and follow any show. Your own server: stream from your home computer.">
 </picture>
 
 ## from the display case
@@ -55,17 +55,17 @@ Real screens from the real thing. No mock-ups.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/case-homes-dark.png">
-  <img src="assets/case-homes-light.png" width="880" alt="Three homes and the Music page. Cards: a big Music card, then Playlists, Up next, Cover Flow, Playroom, Bluetooth and Settings. Tiles: a live Now Playing tile, Cover Flow, Albums, a clock and shortcuts. List: big lowercase words in the black Zule theme. The Music page: For you, Songs, Albums, Artists, Playlists, Loved, Genres and Years.">
+  <img src="assets/case-homes-light.png" width="880" alt="Cards home: everything one tap away. Tiles home: see what's playing at a glance. List home: big, simple words. Your music: all in one place.">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/case-listen-dark.png">
-  <img src="assets/case-listen-light.png" width="880" alt="Listening. Now Playing with love, a FLAC badge, shuffle, repeat and volume. Cover Flow, flipping through album covers. An album page washed in its cover's colour. The parametric equalizer with a ten-band curve and an AutoEq profile.">
+  <img src="assets/case-listen-light.png" width="880" alt="Now Playing: big cover, easy controls. Cover Flow: flip through your albums. Albums: take on the cover's colours. Equalizer: presets for your headphones.">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/case-more-dark.png">
-  <img src="assets/case-more-light.png" width="880" alt="And more. The e-book reader in its sepia look. Arranging the control centre, with a handle to drag each shortcut. Glide typing with a trail across the keyboard. The Arcade listing Game Boy cartridges and Doom.">
+  <img src="assets/case-more-light.png" width="880" alt="E-books: read books on your player. Quick settings: in the order you like. Swipe typing: in 12 languages. Retro games: bring your own.">
 </picture>
 
 ## we keep the books
@@ -131,7 +131,7 @@ All the code will be here for anyone to read.
 <br>
 
 It's how they say "capicola" in *The Sopranos*. Find the house special tile on
-the Tiles home and give it a tap. Ova haaaa!
+your home screen and give it a tap. Ova haaaa!
 </details>
 
 <details>
