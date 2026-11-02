@@ -1,0 +1,25 @@
+name: An idea
+description: Something you'd like GabagoolOS to do, or do better.
+labels: [idea]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome, big or small. One idea per issue helps us keep track.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What would you like, and what would you use it for?
+    validations:
+      required: true
+  - type: textarea
+    id: now
+    attributes:
+      label: How you do it today
+      description: Optional. What you do now, on GabagoolOS, the stock player or another player.
+  - type: textarea
+    id: pictures
+    attributes:
+      label: Pictures
+      description: Optional. A screenshot or a sketch of how it could look.
