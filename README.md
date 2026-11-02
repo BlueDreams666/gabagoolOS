@@ -1,7 +1,7 @@
 <a href="https://github.com/BlueDreams666/gabagoolOS/releases/latest">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png">
-  <img src="assets/hero-light.png" width="880" alt="gabagoolOS 1.1, Game on then. A neon sign reads: gabagool? ova haaaa! Your R1 just got made: fast, pretty new software for your HiBy R1. It runs from your SD card, and it's open source. Beside it, three R1s showing the Music page, the Tiles home and Now Playing.">
+  <img src="assets/hero-light.png" width="880" alt="gabagoolOS 1.1, Game on then. A neon sign reads: gabagool? ova haaaa! Your R1 just got made: fast, pretty new software for your HiBy R1. It runs from your SD card, and it's open source. Beside it, three R1s showing the Music page, the Tiles home and Now Playing with Say It Right by Nelly Furtado.">
 </picture>
 </a>
 
