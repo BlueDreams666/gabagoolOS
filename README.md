@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.jpg" width="320" alt="The gabagoolOS logo: the word gabagool in pixel letters with a small yellow os, over a halftone photo in pool blue, stamped Made by Spaghet + Slop.">
+</p>
+
 <a href="https://github.com/BlueDreams666/gabagoolOS/releases/latest">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png">
