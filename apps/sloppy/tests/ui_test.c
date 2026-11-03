@@ -6,6 +6,8 @@
 static const uint16_t *sl_test_pixels(void);
 #define SL_SCREEN_PIXELS() sl_test_pixels()
 #define SL_SCREEN_STRIDE W
+/* the card's root: here, the fake card */
+#define SL_CARD_ROOT "/Card"
 #include "../sloppy.c"
 #include "gb_testrom.h"
 /* the Audiobook Mod, as far as the Audiobooks page sees it (defined at the end) */
@@ -360,7 +362,8 @@ static int poweroffs;
 void sys_poweroff(void) { poweroffs++; }
 void viewportmanager_theme_enable(enum screen_type screen, bool enable, struct viewport *viewport)
 { (void)screen; (void)enable; (void)viewport; }
-bool tagcache_rebuild(void) { return rebuild_result; }
+static int test_rebuilds;
+bool tagcache_rebuild(void) { test_rebuilds++; return rebuild_result; }
 static struct tagcache_stat tc_stat_stub;
 struct tagcache_stat *tagcache_get_stat(void) { return &tc_stat_stub; }
 int tagcache_get_max_commit_step(void) { return 8; }
@@ -371,6 +374,8 @@ static int32_t test_db_key[6] = { 1, 2, 3, 4, 5, 6 };
 static int test_cache_drops;
 volatile int tagcache_updates_done, tagcache_entries_deleted;
 bool tagcache_update(void) { test_updates++; return false; }
+static int test_stops;
+void tagcache_stop_scan(void) { test_stops++; }
 bool sl_lib_db_key(int32_t key[6]) { memcpy(key, test_db_key, sizeof test_db_key); return true; }
 void sl_lib_cache_drop(void) { test_cache_drops++; }
 bool tagcache_folder_listed(const char *path) {
@@ -491,13 +496,14 @@ static void test_hsv(int h, int s, int v, int *r, int *g, int *b)
 }
 /* SLOPPY_SHOWCASE=<dir>: real sleeves for the front page's shots, <dir>/NN.jpg
  * by album (batch_showcase.inc loads them); NULL: the made-up ones */
-static struct { unsigned char *rgb; int w, h, hue, sat; } sc_art[10];
+enum { SC_N = 32 };   /* albums at most */
+static struct { unsigned char *rgb; int w, h, hue, sat; } sc_art[SC_N];
 static unsigned char *sc_pod_jpg, *sc_sub_jpg;   /* the podcast's and the music server's covers, as served */
 static size_t sc_pod_n, sc_sub_n;
 static bool sc_on;   /* names too: the fakes' podcast and music server read as real ones */
 static bool sc_cover(int album, int size, uint16_t *dst)
 {
-    if (album < 0 || album >= 10 || !sc_art[album].rgb) return false;
+    if (album < 0 || album >= SC_N || !sc_art[album].rgb) return false;
     int w = sc_art[album].w, h = sc_art[album].h, s = w < h ? w : h, x0 = (w - s) / 2, y0 = (h - s) / 2;
     for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++)
@@ -799,8 +805,8 @@ static bool test_cover_attach(lv_obj_t *c, int a, int size)
 void sl_art_apply(lv_obj_t *c, int a, int size) {test_cover_attach(c,a,size);}
 /* SLOPPY_SHOWCASE: Cover Flow reads its thumbnails from the card; the real sleeves, written there once */
 const char *sl_art_src(int a, int size) {
-    static char src[10][56];
-    if (!sc_on || size != SL_ART_GRID || a < 0 || a >= 10 || !sc_art[a].rgb) return NULL;
+    static char src[SC_N][56];
+    if (!sc_on || size != SL_ART_GRID || a < 0 || a >= SC_N || !sc_art[a].rgb) return NULL;
     if (!src[a][0]) {
         char p[48]; snprintf(p, sizeof p, "/.rockbox/sloppy/sc-cover-%d.bin", a);   /* "sloppy/": a path the fake card keeps */
         uint16_t *px = malloc((size_t)size * size * 2); if (!px) return NULL;
@@ -826,7 +832,7 @@ int sl_art_state(int a) { return a >= 0 && a < 64 ? test_art_state[a] : 1; }
 void sl_art_again(int a) { test_art_again = a; }
 int test_art_hue=-1;                     /* the cover colour sl_art_hue reports; -1: no thumbnail */
 bool sl_art_hue(int a, int *hue, int *sat) {
-    if(test_real_art&&a>=0&&a<10&&sc_art[a].rgb){*hue=sc_art[a].hue;*sat=sc_art[a].sat;return true;}
+    if(test_real_art&&a>=0&&a<SC_N&&sc_art[a].rgb){*hue=sc_art[a].hue;*sat=sc_art[a].sat;return true;}
     if(test_real_art&&a>=0){static const int sh[6]={20,0,0,0,0,0},ss[6]={75,85,20,10,75,45};
         *hue=(test_cover_hue(a)+sh[a%6])%360;*sat=ss[a%6];return true;}
     if(test_art_hue<0)return false;*hue=test_art_hue;*sat=80;return true;}
@@ -2320,8 +2326,30 @@ int main(void) {
       global_settings.sloppy_theme=0;styles_retheme(); }
     {   /* the splash: drawn still, then it lifts away as home arrives */
         uint32_t top=lv_obj_get_child_count(lv_layer_top());
-        splash_build();frame(0);shot_now("splash.ppm");
+        struct timespec t0,t1;clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t0);
+        splash_build();frame(0);clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t1);shot_now("splash.ppm");
+        long poster_us=(t1.tv_sec-t0.tv_sec)*1000000L+(t1.tv_nsec-t0.tv_nsec)/1000;
         assert(lv_anim_count_running()==0);   /* nothing moves while Rockbox starts */
+        /* the logo poster, copied to the screen as made, and not a speck of
+         * orange in what is drawn around the photo (skin in it may be warm) */
+        assert(lv_image_get_src(splash_word)==&splash_art_dsc);
+        { int same=0,orange=0;
+          for(int i=0;i<W*H;i++){unsigned p=pixels[i],r=((p>>11)&31)*255/31,g=((p>>5)&63)*255/63,b=(p&31)*255/31;
+            int x=i%W,y=i/W;bool photo=x>=28&&x<=452&&y>=220&&y<=636;
+            same+=p==splash_art[i];orange+=!photo&&r>180&&g>60&&g<r-50&&b<g-20;}
+          printf("splash: %d of %d pixels as made, %d orange\n",same,W*H,orange);assert(same==W*H&&!orange); }
+        /* no slower to draw than the wordmark it replaced */
+        { lv_obj_t *old=box(lv_layer_top());lv_obj_set_size(old,W,H);lv_obj_set_style_bg_color(old,lv_color_hex(C_BG),0);lv_obj_set_style_bg_opa(old,LV_OPA_COVER,0);
+          lv_obj_t *col=box(old);lv_obj_set_size(col,LV_SIZE_CONTENT,LV_SIZE_CONTENT);lv_obj_set_flex_flow(col,LV_FLEX_FLOW_COLUMN);
+          lv_obj_set_flex_align(col,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);lv_obj_set_style_pad_row(col,14,0);
+          brand_mark(col,&sl_brand_50,5);text(col,"Let's get back to that gabagool",&ss_regular_23,0xfff1dc);lv_obj_center(col);
+          lv_obj_add_flag(splash,LV_OBJ_FLAG_HIDDEN);frame(0);lv_obj_invalidate(old);
+          clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t0);frame(0);clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t1);
+          long word_us=(t1.tv_sec-t0.tv_sec)*1000000L+(t1.tv_nsec-t0.tv_nsec)/1000;
+          lv_obj_delete(old);lv_obj_remove_flag(splash,LV_OBJ_FLAG_HIDDEN);
+          lv_obj_invalidate(splash);clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t0);frame(0);clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t1);
+          long redraw_us=(t1.tv_sec-t0.tv_sec)*1000000L+(t1.tv_nsec-t0.tv_nsec)/1000;
+          printf("splash: poster built and drawn in %ld us (redraw %ld us); the old wordmark drew in %ld us\n",poster_us,redraw_us,word_us); }
         splash_fade_out();frame(0);frame(150);shot_now("splash-out.ppm");frame(400);
         assert(!splash && lv_obj_get_child_count(lv_layer_top())==top);
     }
@@ -3649,6 +3677,22 @@ int main(void) {
     assert(coin_flips==0 && lv_obj_get_child_count(coin_history)==0);
     coin_loaded=false;coin_flips=7;coin_load();assert(coin_flips==0 && !coin_hist[0]);   /* Reset is saved too */
     page_pop();frame(500);assert(!coin_page_obj && !coin_timer);
+    /* music playing: the mini player shows where the page leaves it room,
+     * and steps aside where a control would be under it (Reveal, at the
+     * biggest text) */
+    { int st0=test_status,step0=sl_text_step;test_status=AUDIO_STATUS_PLAY;
+      for(int step=0;step<SL_TEXT_STEPS;step++){
+        sl_text_step=step;global_settings.sloppy_text_size=step;appearance_reload((void *)2);frame(700);while(npages>1){page_pop();frame(400);}
+        magic_page();frame(500);mini_update();frame(0);
+        bool up=!lv_obj_has_flag(mini,LV_OBJ_FLAG_HIDDEN);
+        char b[48];snprintf(b,sizeof b,"magic-mini-step%d.ppm",step);shot_now(b);
+        printf("magic 8 ball, text step %d, music playing: mini player %s\n",step,up?"up":"aside");
+        assert(!up||!page_needs_mini_area());
+        if(step==0)assert(up);   /* room for it at the usual size */
+        page_pop();frame(500);
+      }
+      test_status=st0;sl_text_step=step0;global_settings.sloppy_text_size=step0;appearance_reload((void *)2);frame(700);while(npages>1){page_pop();frame(400);}
+      mini_update(); }
     magic_page();frame(500);shot("magic-ready.ppm");assert(magic_page_obj && magic_timer);
     lv_obj_send_event(magic_ball,LV_EVENT_CLICKED,NULL);
     int first_choice=magic_choice;
@@ -4093,6 +4137,39 @@ int main(void) {
       assert(volume_pct()>=22 && volume_pct()<=28);
       frame(1600);frame(300);assert(lv_obj_has_flag(hud,LV_OBJ_FLAG_HIDDEN));   /* glided out */
       sl_power_running=saved_sl; }
+    /* The level keeps the bar's round ends at every volume and in every
+     * theme, even while it eases after a key press (only the level's strip
+     * is redrawn then): outside the bar's outline nothing changes against
+     * an empty bar, and inside it the fill shows down to the curve. */
+    { int saved_sl=sl_power_running,saved_th=global_settings.sloppy_theme,saved_v=global_status.volume;sl_power_running=false;
+      static uint16_t empty[VOL_HUD_W*VOL_HUD_H];int bad=0,miss=0;
+      for(int th=0;th<4;th++){
+        global_settings.sloppy_theme=th;global_status.volume=volume_from_pct(0);volume_key(0);frame(0);frame(2000);
+        lv_timer_pause(hud_timer);lv_obj_invalidate(lv_screen_active());lv_obj_invalidate(hud);frame(16);
+        lv_area_t a;lv_obj_get_coords(hud,&a);assert(a.x2-a.x1+1==VOL_HUD_W && a.y2-a.y1+1==VOL_HUD_H);
+        for(int y=0;y<VOL_HUD_H;y++)for(int x=0;x<VOL_HUD_W;x++)empty[y*VOL_HUD_W+x]=pixels[(a.y1+y)*W+a.x1+x];
+        static const int lv[]={1,2,4,8,14,25,50,72,86,93,97,99,100,3,0};
+        for(int k=0;k<(int)(sizeof lv/sizeof *lv);k++){
+          global_status.volume=volume_from_pct(lv[k]);hud_update(true);
+          for(int t=0;t<20;t++)frame(16);
+          int lvl=lv_obj_get_height(hud_lvl),r=VOL_HUD_W/2;
+          char nm[48];snprintf(nm,sizeof nm,"volume-level-t%d-%03d.ppm",th,lv[k]);
+          if(th==0||th==3)shot_now(nm);
+          for(int y=0;y<VOL_HUD_H;y++)for(int x=0;x<VOL_HUD_W;x++){
+            /* distance from the outline: the round ends, straight sides between */
+            double py=y+0.5,cy=py<r?r:py>VOL_HUD_H-r?VOL_HUD_H-r:py,dx=x+0.5-r,dy=py-cy,d=r-sqrt(dx*dx+dy*dy);
+            uint16_t now=pixels[(a.y1+y)*W+a.x1+x],was=empty[y*VOL_HUD_W+x];
+            if(d<-1&&now!=was){if(!bad++)printf("volume level %d theme %d: pixel %d,%d past the curve changed\n",lv[k],th,x,y);}
+            /* well inside the outline and under the level (clear of the
+             * number and the top highlight) the fill shows, right into
+             * the bottom curve */
+            if((d>4||(d>0.5&&py>VOL_HUD_H-r))&&y>VOL_HUD_H-lvl+2&&y>48&&now==was){if(!miss++)printf("volume level %d theme %d: pixel %d,%d not filled\n",lv[k],th,x,y);}
+          }
+        }
+      }
+      printf("volume level: %d pixels past the curve, %d unfilled\n",bad,miss);assert(!bad&&!miss);
+      lv_obj_add_flag(hud,LV_OBJ_FLAG_HIDDEN);
+      global_settings.sloppy_theme=saved_th;global_status.volume=saved_v;sl_power_running=saved_sl; }
     sl_power_running=false;
     /* the lock screen follows the swipe, then slides up into home */
     frame(600);sl_power_running=true;sl_power_state_init(&sl_power,sl_ms());
@@ -6874,6 +6951,58 @@ int main(void) {
         db_update_state=DBU_IDLE;db_auto_poll();assert(db_update_state==DBU_IDLE);
         db_check_quiet=false;
         global_settings.sloppy_db_auto=saved_auto;current_tick=saved_tick;
+        {   /* music playing: the quiet check waits, and stops if music starts; its card reads
+             * stalled every Rockbox thread for minutes and Your taste froze behind them (3 Nov) */
+            FILE *u2=fopen(DB_USB_NOTE,"w");assert(u2);fclose(u2);
+            long st0=current_tick;int ss=test_status,ups=test_updates,stops=test_stops;current_tick=4*HZ;
+            test_status=AUDIO_STATUS_PLAY;
+            db_auto_poll();assert(db_update_state==DBU_IDLE && test_updates==ups && access(DB_USB_NOTE,F_OK)==0);
+            test_status=AUDIO_STATUS_PLAY|AUDIO_STATUS_PAUSE;   /* paused: it runs */
+            db_auto_poll();assert(db_update_state==DBU_CHECKING && test_updates==ups+1 && db_check_quiet);
+            test_status=AUDIO_STATUS_PLAY;
+            db_update_poll();db_update_poll();assert(test_stops==stops+1 && db_update_state==DBU_CHECKING);   /* stopped, once */
+            tagcache_updates_done++;db_update_poll();assert(db_update_state==DBU_IDLE);
+            db_auto_poll();assert(db_update_state==DBU_IDLE && test_updates==ups+1);   /* not while the music goes on */
+            test_status=0;
+            db_auto_poll();assert(db_update_state==DBU_CHECKING && db_check_quiet && test_updates==ups+2);   /* again after */
+            tagcache_updates_done++;db_update_poll();assert(db_update_state==DBU_IDLE && test_stops==stops+1);
+            db_auto_poll();assert(db_update_state==DBU_IDLE && test_updates==ups+2);   /* and only once */
+            db_check_quiet=false;test_status=ss;current_tick=st0;
+        }
+        {   /* the card tells a Mac to keep Spotlight's index and its file-event log off it,
+             * made again at each start if gone (Tai's lost its .metadata_never_index, 3 Nov) */
+            bool had_games=fake_find("/Card/Games/Put mario.gbc here.txt")>=0;
+            sl_card_guards();
+            assert(fake_find("/Card/.metadata_never_index")>=0 && fake_find("/Card/.fseventsd/no_log")>=0);
+            {   /* no Games folder in the release zip: the player makes it, with its note, in a new one only */
+                DIR *g=opendir("/Card/Games");assert(g);closedir(g);
+                printf("games folder: %s\n", had_games||fake_find("/Card/Games/Put mario.gbc here.txt")>=0 ? "note there" : "the user's own, left alone");
+            }
+            sl_card_guards();assert(fake_find("/Card/.metadata_never_index")>=0);
+            /* a card gone read-only (an exFAT error remount): asked for a check in words, once */
+            sloppy_card_error(EIO);sl_card_error_note();assert(!sl_card_err && !sl_card_err_told);
+            sloppy_card_error(EROFS);assert(sl_card_err==EROFS && !sl_card_err_told);   /* any thread: noted only */
+            sl_card_error_note();assert(sl_card_err_told);
+            sl_card_error_note();assert(sl_card_err_told);
+            {   /* the notice in every language: the table is keyed by the very words */
+                static const char *ask="Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see \"Look after your card\" in the guide.";
+                int l0=global_settings.sloppy_language;
+                for(int l=1;l<=SL_LANG_LAST;l++){global_settings.sloppy_language=l;assert(strcmp(sl_tr(ask),ask)!=0 && strstr(sl_tr(ask),"chkdsk"));}
+                global_settings.sloppy_language=l0;
+            }
+            printf("PASS: the card keeps .metadata_never_index and .fseventsd/no_log; a read-only card is asked about once, in every language\n");
+        }
+        {   /* by itself, never the rebuild that deletes the database first: back from USB mode
+             * before the library was up, Tai's R1 rebuilt, was switched off, and had none (3 Nov) */
+            long st0=current_tick;int ss=test_status,rb=test_rebuilds,ups=test_updates;current_tick=30*HZ;test_status=0;
+            tc_usable=false;
+            db_update_begin(false);assert(db_update_state==DBU_IDLE && test_rebuilds==rb && test_updates==ups);
+            db_auto_poll();assert(db_update_state==DBU_IDLE && test_updates==ups);   /* not while it is down */
+            tc_usable=true;
+            db_auto_poll();assert(db_update_state==DBU_CHECKING && test_updates==ups+1 && test_rebuilds==rb);   /* the check, once it is up */
+            tagcache_updates_done++;db_update_poll();assert(db_update_state==DBU_IDLE);
+            db_check_quiet=false;test_status=ss;current_tick=st0;
+        }
         /* Folders to scan: a folder turned off is on the exclude list, and leaving looks for changes */
         global_settings.db_exclude_folders[0]=0;global_settings.db_exclude_audiobooks=true;
         lo_folders_page();frame(500);shot("folders-to-scan.ppm");
@@ -8765,6 +8894,25 @@ int main(void) {
                 ttr[i]=(struct sl_track){0};tpath(&ttr[i],tpa[i]);ttr[i].title=tti[i];ttr[i].album=i;ttr[i].len=200000;}
             sl_lib.tracks=ttr;sl_lib.n_tracks=40;sl_lib.albums=tal;sl_lib.n_albums=40;
             int rated0=ts.n_rated;ts.n_rated=0;ts.gen++;
+            {   /* music playing: paused while the deck is up, so the clips are the only audio, and
+                 * playing again after it; a quiet library check holds off meanwhile (Tai, 3 Nov) */
+                test_status=AUDIO_STATUS_PLAY;
+                taste_page(false);frame(400);tsw_settle();
+                assert((test_status&AUDIO_STATUS_PAUSE) && td_resume && td.page);
+                page_pop();frame(600);
+                assert(!(test_status&AUDIO_STATUS_PAUSE) && !td_resume && !td.page);
+                test_status=0;queued=1;started=0;queue_tracks[0]=0;ts.n_rated=0;ts.gen++;
+            }
+            for(int k=0;k<2;k++){   /* short of memory (the R1 had 3.7 MB free, 3 Nov): no ready-made steps, then no turned copies; it still deals, follows and throws */
+                td_test_kb=k?8000:12000;
+                taste_page(false);frame(400);tsw_settle();
+                assert(td.page && td.n==TS_DECK && !td.step[0] && !td.step[TD_STEPS-1] && !td.next0 && !td.turn_back && (k ? !td.turn : td.turn!=NULL));
+                tsw_drag(70,20,14,200,false);tsw_up();for(int i=0;i<40;i++)frame(16);
+                assert(td.at==0 && td.x==0);
+                tsw_drag(160,-10,16,200,false);tsw_up();assert(td.flying);tsw_settle();assert(td.at==1);
+                page_pop();frame(600);assert(!td.page);
+                td_test_kb=0;ts.n_rated=0;ts.gen++;test_status=0;queued=1;started=0;queue_tracks[0]=0;
+            }
             taste_page(false);frame(400);tsw_settle();
             assert(td.n==TS_DECK && td.at==0);
             /* the stack: two cards under the top one, smaller and dimmer, the top one a plain copy */

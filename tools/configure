@@ -4422,9 +4422,12 @@ fi
     target="HIBY_R1"
     # The device has 64 MB, but Linux, Bluetooth and the stock services leave
     # SloppyOS little: 16 left 5 MB free with Bluetooth on and the interface
-    # stalled for seconds (the R1 log, 2026-10-13). 12 is an 11 MB buffer:
-    # over a minute of 24/96 FLAC ahead, and 4 MB back for everything else.
-    memory=12
+    # stalled for seconds (the R1 log, 2026-10-13). 12 (an 11 MB buffer)
+    # left 3.7 MB with the library up and music playing, and the R1 swapped
+    # on every Your taste swipe (2026-11-03): the buffer fills with the song
+    # ahead, so all of it is the player's. 8 is a 7 MB buffer, 20 s of
+    # 24/96 FLAC ahead and a minute of CD FLAC, and 4 MB more for the rest.
+    memory=8
     mipsellinuxcc
     tool="cp "
     boottool="cp "

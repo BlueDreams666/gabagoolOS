@@ -231,6 +231,9 @@ static const char dc_thread_playlist_name[] = "playlist cachectrl";
 #endif
 static void control_error_log(const char *what, int err)
 {
+#ifdef HAVE_SLOPPY_UI
+    sloppy_card_error(err);             /* a read-only card: the player asks for a check */
+#endif
 #if (CONFIG_PLATFORM & PLATFORM_HOSTED)
     const char *why = strerror(err);
 #else
@@ -250,6 +253,11 @@ static void control_error_log(const char *what, int err)
                             __func__, ID2P(LANG_PLAYLIST_CONTROL_ACCESS_ERROR)))
 #else
 static void notify_access_error(void) {
+    int err = errno;
+    control_error_log("playlist file", err);   /* the cause, as for the control file */
+#ifdef HAVE_SLOPPY_UI
+    if (err == EROFS) return;           /* said in words by the player instead */
+#endif
     splash(HZ*2, ID2P(LANG_PLAYLIST_ACCESS_ERROR));
 }
 static void notify_control_access_error(void) {
@@ -257,6 +265,9 @@ static void notify_control_access_error(void) {
      * left (EROFS when the card went read-only, say). */
     int err = errno;
     control_error_log("playlist control file", err);
+#ifdef HAVE_SLOPPY_UI
+    if (err == EROFS) return;           /* said in words by the player instead */
+#endif
 #if (CONFIG_PLATFORM & PLATFORM_HOSTED)
     splashf(HZ*2, "%s (errno %d: %s)", str(LANG_PLAYLIST_CONTROL_ACCESS_ERROR), err, strerror(err));
 #else
@@ -408,6 +419,10 @@ static void create_control_unlocked(struct playlist_info* playlist)
         control_error_log(playlist->control_filename, err);
         if (!check_rockboxdir())
             return; /* No RB directory exists! */
+#ifdef HAVE_SLOPPY_UI
+        if (err == EROFS)
+            return;                     /* said in words by the player instead */
+#endif
 
         cond_talk_ids_fq(LANG_PLAYLIST_CONTROL_ACCESS_ERROR);
         int fd = playlist->control_fd;
@@ -2071,6 +2086,31 @@ void playlist_shutdown(void)
     if (playlist->control_fd >= 0)
         pl_close_control(playlist);
 
+    playlist_write_unlock(playlist);
+}
+
+/*
+ * After USB mode (system_restore): playlist_shutdown() closed the control
+ * file, and a player that goes on running (the R1 does, now its USB mode
+ * unmounts the card and mounts it again) went on without it. Every song
+ * added or queued lives in that file, so the next one read or added (Your
+ * taste's clips, a shuffled queue) showed "Error accessing playlist
+ * control file" (Tai's R1, 3 Nov). The file is as it was: open it again.
+ */
+void playlist_reopen_control(void)
+{
+    struct playlist_info* playlist = &current_playlist;
+    playlist_write_lock(playlist);
+    if (playlist->control_fd < 0 && playlist->control_created)
+    {
+        playlist->control_fd = open(playlist->control_filename, O_RDWR);
+        if (playlist->control_fd < 0)
+            control_error_log("control file again after USB mode", errno);
+#ifdef HAVE_SLOPPY_UI
+        else
+            sl_log("playlist: control file open again after USB mode (%d songs)", playlist->amount);
+#endif
+    }
     playlist_write_unlock(playlist);
 }
 

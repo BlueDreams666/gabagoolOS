@@ -34,6 +34,9 @@ void usb_init_device(void);
 #ifndef MS_NODIRATIME
 #define MS_NODIRATIME 2048
 #endif
+#ifndef MS_REMOUNT
+#define MS_REMOUNT 32
+#endif
 #define mount fake_mount
 #define umount fake_umount
 #define sync fake_sync
@@ -59,7 +62,8 @@ static bool card_held(void)
 static int busy_for, umounts, slept;
 static bool mounted = true;
 int fake_umount(const char *t) { (void)t; umounts++; if (busy_for > 0 || (card_dir[0] && card_held())) { if (busy_for > 0) busy_for--; errno = EBUSY; return -1; } mounted = false; return 0; }
-int fake_mount(const char *d, const char *t, const char *fs, unsigned long f, const void *o) { (void)d; (void)t; (void)fs; (void)f; (void)o; mounted = true; return 0; }
+static unsigned long mount_flags;       /* the last mount(2)'s flags */
+int fake_mount(const char *d, const char *t, const char *fs, unsigned long f, const void *o) { (void)d; (void)t; (void)fs; (void)o; mount_flags = f; mounted = true; return 0; }
 void fake_sync(void) {}
 unsigned fake_sleep(unsigned ticks) { slept += ticks; return 0; }
 static char udc_state[32] = "not attached", lun[128] = "/dev/mmcblk0p1", udc_bound[64] = "";
@@ -283,6 +287,20 @@ int main(void)
     usb_trace_dirty = true; usb_trace_flush();
     assert(count_in(trace_card, "host: UDC configured") == 1);
     printf("PASS: the USB trace notes every step, reaches the card only while it is the player's, and a refused bind is retried\n");
+    /* power off: the card unmounted before the power goes, or read-only
+     * when a file still holds it (switched off mounted, its exFAT was left
+     * dirty: a Mac found the bitmap to repair, Tai's R1, 3 Nov) */
+    card_off = card_leaving = false; mounted = true; busy_for = 0; umounts = 0;
+    usb_card_park();
+    assert(!mounted && umounts == 1 && card_leaving);
+    usb_card_park(); assert(umounts == 1);                     /* once */
+    card_off = card_leaving = false; mounted = true; busy_for = 1; umounts = 0; mount_flags = 0;
+    usb_card_park();
+    assert(umounts == 1 && mounted && (mount_flags & MS_REMOUNT) && (mount_flags & MS_RDONLY));
+    card_off = true; card_leaving = false; umounts = 0;
+    usb_card_park(); assert(umounts == 0);                    /* the computer has it: left alone */
+    card_off = false;
+    printf("PASS: at power off the card is unmounted, or made read-only when a file holds it\n");
     unlink(trace_ram); unlink(trace_off); unlink(trace_card); unlink(trace_prev); unlinkat(AT_FDCWD, tdir, AT_REMOVEDIR);
     return 0;
 }

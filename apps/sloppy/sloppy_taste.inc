@@ -818,6 +818,12 @@ static struct
     lv_timer_t *timer;
     unsigned rng;
 } td;
+/* What was playing when the deck came up: it is paused while the deck is
+ * open, so the cards' clips are the only audio, and plays on after. Tai,
+ * after it froze on a swipe over his music (3 Nov): "make sure music is
+ * stopped before entering it and then the device can focus". */
+static bool td_resume;
+static long td_test_kb;                  /* the harness: free memory as the R1 would have it, 0 the real one */
 
 /* May track t be the next card? Half a minute long or more, not hidden,
  * not swiped, not in the deck, and its artist not on either of the last
@@ -2075,8 +2081,9 @@ static void td_deleted(lv_event_t *e)
     for (int i = 0; i < 3; i++) td_free_buf(td.stamp_buf[i]);
     td_free_buf(td.stamp_turn);
     for (int j = 0; j < 3; j++) td_free_buf(td.shadow_buf[j]);
-    /* your own song back, where it was */
+    /* your own song back, where it was, and playing again if it was */
     if (quiz_clip_active()) { quiz_hush_clip(); quiz_restore_clip(); }
+    if (td_resume) { td_resume = false; audio_resume(); }
     if (ts.n_rated) ts.asked = true;     /* left half way: For you won't deal it again */
     if (ts.asked) { if (access(TS_TASTE, F_OK)) ts_save_file(TS_TASTE, true); else ts_flush(); }
     memset(&td, 0, sizeof td);
@@ -2249,10 +2256,17 @@ static void td_btn_draw(lv_event_t *e)
     }
 }
 
+static void sl_mem_release(const char *why, bool images);
 static void taste_page(bool first)
 {
     ts_load();
     if (page_bring_back(td.page)) return;
+    {
+        int st = audio_status();
+        td_resume = (st & AUDIO_STATUS_PLAY) && !(st & AUDIO_STATUS_PAUSE);
+        if (td_resume) audio_pause();   /* the first clip keeps the queue and where it was */
+        sl_mem_release("Your taste", true);   /* the glass and the image cache, before the deck's pictures */
+    }
     /* the last deck still sliding away (Done, Back, then here again at
      * once) holds td's pictures: gone now, freeing them as its own, before
      * this one makes new ones (its delete came after, and freed these) */
@@ -2343,16 +2357,26 @@ static void taste_page(bool first)
     lv_obj_set_style_radius(td.ghost, sl_zune() ? 0 : SL_R_PILL, 0);
     lv_obj_add_flag(td.ghost, LV_OBJ_FLAG_HIDDEN);
     td.ghost_in = 256;
-    for (int j = 0; j < TD_STEPS; j++)
+    /* The deck's pictures are about 5.7 MB, a card ~0.5 MB: with the
+     * library up and Bluetooth on the R1 had 3.7 MB free, and every swipe
+     * stalled while it swapped (Tai's log, 3 Nov). Short of memory, the
+     * ready-made steps of the card under and the second turned copy are
+     * not made (each is drawn as it is needed instead), nor, shorter
+     * still, the turned copy. */
+    long free_kb = td_test_kb ? td_test_kb : sl_mem_available_kb();
+    bool lean = free_kb >= 0 && free_kb < 16 * 1024, leaner = free_kb >= 0 && free_kb < 10 * 1024;
+    if (lean)
+        sl_log("taste: %ld KiB free: the deck without its ready-made steps%s", free_kb, leaner ? " or turned copies" : "");
+    for (int j = 0; j < TD_STEPS && !lean; j++)
     {
         int q = 240 + 4 * j;
         td.step[j] = lv_draw_buf_create((TD_CARD_W * q + 128) / 256, (TD_CARD_H * q + 128) / 256, LV_COLOR_FORMAT_RGB565A8, 0);
     }
-    td.next0 = lv_draw_buf_create((TD_CARD_W * 240 + 128) / 256, (TD_CARD_H * 240 + 128) / 256, LV_COLOR_FORMAT_RGB565A8, 0);
+    if (!lean) td.next0 = lv_draw_buf_create((TD_CARD_W * 240 + 128) / 256, (TD_CARD_H * 240 + 128) / 256, LV_COLOR_FORMAT_RGB565A8, 0);
     td.step_card = td.turn_card = td.next0_card = -1;
     if (!sl_zune()) td_make_shadow(p);    /* the lifted card's shadow, shown by td_layout */
-    td.turn = lv_draw_buf_create(TD_TURN_W, TD_TURN_H, LV_COLOR_FORMAT_RGB565A8, 0);
-    td.turn_back = lv_draw_buf_create(TD_TURN_W, TD_TURN_H, LV_COLOR_FORMAT_RGB565A8, 0);
+    if (!leaner) td.turn = lv_draw_buf_create(TD_TURN_W, TD_TURN_H, LV_COLOR_FORMAT_RGB565A8, 0);
+    if (!lean) td.turn_back = lv_draw_buf_create(TD_TURN_W, TD_TURN_H, LV_COLOR_FORMAT_RGB565A8, 0);
     td.back_row = -1;
     td_make_stamps();
     td_deal();

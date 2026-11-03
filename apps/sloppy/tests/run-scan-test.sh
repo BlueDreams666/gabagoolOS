@@ -43,6 +43,7 @@ clang -O1 -g -w -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -std=gnu99 \
     -c "$test_dir/scan_test.c" -o "$B/scan_test.o"
 objs=$(cd "$B" && find apps firmware lib -name '*.o' ! -path 'lib/fixedpoint/*' | sed "s|^|$B/|")
 clang -o "$B/scan-test" "$B/scan_test.o" $objs "$B/lib/libfixedpoint.a"
+clang -dynamiclib -o "$B/fail_master_open.dylib" "$test_dir/fail_master_open.c"
 
 status=0
 for n in ${*:-50000 70000}; do
@@ -69,6 +70,19 @@ p = os.path.join(card, 'Music', 'Artist 00000', 'Album 000000', '01 Song 000000.
 g.song(p, 'Retagged', 'Artist 00000', 'Album 000000', 'Artist 00000', 1, 1, 1960, 'Rock')
 os.utime(p, (1, 2000000000))   # a newer file time, as a tag editor leaves
 EOF
+    # a commit that cannot open the master index (a card going away under it,
+    # as at a USB hand-over) must fail and keep the database: it deleted every
+    # database file, and Tai's R1 lost its library that way (3 Nov)
+    # (on a copy: the failed commit leaves the database marked dirty, which
+    # the player answers with a rescan, not the update this test goes on to)
+    cut="$work/card-$n-cut"; rm -rf "$cut"; cp -Rc "$card" "$cut" 2>/dev/null || cp -R "$card" "$cut"
+    db0=$(ls "$cut/.rockbox"/database_*.tcd | grep -vc database_tmp.tcd)
+    touch "$cut/Music/Artist 00000/Album 000000/01 Song 000000.mp3"   # something to commit
+    DYLD_INSERT_LIBRARIES="$B/fail_master_open.dylib" "$B/scan-test" "$cut" --update >/dev/null 2>&1 || true
+    db1=$(ls "$cut/.rockbox"/database_*.tcd 2>/dev/null | grep -vc database_tmp.tcd || true)
+    if [ "$db1" -ge "$db0" ]; then echo "a master index the commit cannot open: the database kept ($db1 files)"
+    else echo "FAIL: a master index the commit cannot open deleted the database ($db0 files, $db1 left)"; status=1; fi
+    rm -rf "$cut"
     "$B/scan-test" "$card" --update || status=1
     rm -rf "$card"
 done

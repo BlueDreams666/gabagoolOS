@@ -48,6 +48,9 @@
 #include "audiohw.h"
 #include "general.h"
 #include <stdio.h>
+#if (CONFIG_PLATFORM & PLATFORM_HOSTED)
+#include <time.h>                      /* audio_wait_fade_complete */
+#endif
 
 #ifdef HAVE_TAGCACHE
 #include "tagcache.h"
@@ -1549,9 +1552,20 @@ static void audio_wait_fade_complete(void)
        second its tick is gone and it never will be (the R1 hung here for
        good); the level is set where the fade was going */
     long until = current_tick + HZ;
+#if (CONFIG_PLATFORM & PLATFORM_HOSTED)
+    /* and by the wall clock too: the ticks stop with a stalled timer
+       thread, and then the fade and the tick count would both wait */
+    struct timespec t0, t;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+#endif
     while (pcmbuf_fading())
     {
-        if (TIME_AFTER(current_tick, until))
+        bool late = TIME_AFTER(current_tick, until);
+#if (CONFIG_PLATFORM & PLATFORM_HOSTED)
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        late = late || (t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000 > 1000;
+#endif
+        if (late)
         {
             pcmbuf_fade(false, false);
             break;

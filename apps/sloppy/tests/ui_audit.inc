@@ -728,6 +728,32 @@ static bool au_under_float(const struct au_item *x) {
     return false;
 }
 /* every rule on what the screen shows now */
+/* rule c, the mini player: while it shows, nothing to tap is fixed under
+ * it (a list may run under it if it scrolls a player's height or more) */
+static lv_obj_t *au_ctrl_under_mini(lv_obj_t *o, const lv_area_t *m) {
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) return NULL;
+    lv_area_t a; lv_obj_get_coords(o, &a);
+    if (a.y2 < m->y1 || a.y1 > m->y2) return NULL;
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && lv_obj_get_scroll_top(o) + lv_obj_get_scroll_bottom(o) >= m->y2 - m->y1 + 1 + SL_FLOAT) return NULL;
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_CLICKABLE) && lv_area_get_height(&a) < au_sh / 2 &&
+        a.x2 >= m->x1 && a.x1 <= m->x2) return o;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(o); i++) { lv_obj_t *c = au_ctrl_under_mini(lv_obj_get_child(o, i), m); if (c) return c; }
+    return NULL;
+}
+static int au_mini_checked;   /* screens read with the mini player up */
+static void au_rule_mini(void) {
+    /* the screen as it settles: the player looks again every 250 ms
+     * (periodic_ui), not on each change inside a page */
+    if (mini && npages >= 2) mini_update();
+    if (!mini || lv_obj_has_flag(mini, LV_OBJ_FLAG_HIDDEN) || npages < 2) return;
+    au_mini_checked++;
+    lv_area_t m; lv_obj_get_coords(mini, &m);
+    lv_obj_t *p = pages[npages - 1];
+    for (uint32_t i = 0; i < lv_obj_get_child_count(p); i++) {
+        lv_obj_t *c = au_ctrl_under_mini(lv_obj_get_child(p, i), &m);
+        if (c) { lv_area_t a; lv_obj_get_coords(c, &a); au_report('c', c, &a, &m, "a control fixed under the mini player"); return; }
+    }
+}
 static void au_check(const char *screen) {
     snprintf(au_screen, sizeof au_screen, "%s", screen);
     au_shot_due = false; au_nmarks = 0; au_screen_findings = 0;
@@ -745,6 +771,7 @@ static void au_check(const char *screen) {
         if (it->kind & AU_CTRL) au_rule_d(it);
     }
     au_pairs(false, NULL);
+    au_rule_mini();
     /* SLOPPY_AUDIT_WORDS=<file>: every visible label's words, for finding text left in English */
     if (getenv("SLOPPY_AUDIT_WORDS")) {
         static FILE *wf; if (!wf) wf = fopen(getenv("SLOPPY_AUDIT_WORDS"), "w");
@@ -1880,6 +1907,7 @@ static void au_run(const char *dir, const int (*combos)[3], int ncombos) {
            au_allow[12], au_allow[13], au_allow[14], au_allow[15], au_allow[16], au_allow[17]);
     printf("audit: deferred contrast (real, not fixed here) D1 control centre glass %d, D3 white on Zule pink or the accent preview %d\n",
            au_defer[1], au_defer[3]);
+    printf("audit: %d screens read with music playing and the mini player up\n", au_mini_checked);
     printf("audit: %ld letters on screen, %ld without a glyph\n", au_glyphs, au_glyph_missing);
     printf("audit: %ld symbols on screen, %ld not drawn by sl_sym\n", au_syms, au_sym_foreign);
     if (au_tsv) { fclose(au_tsv); au_tsv = NULL; }

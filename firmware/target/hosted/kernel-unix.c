@@ -65,12 +65,36 @@ static pthread_cond_t wfi_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t wfi_mtx = PTHREAD_MUTEX_INITIALIZER;
 /*
  * call tick tasks and wake the scheduler up */
+/* The tick task running now, and the ticks whose tasks were put off: the
+ * UI's watchdog names them when the main loop is stuck */
+void (*volatile tick_task_now)(void);
+volatile unsigned int tick_skipped;
 void timer_signal(union sigval arg)
 {
     (void)arg;
-    tick_lock();
-    call_tick_tasks();
-    tick_unlock();
+    /* Never wait for the lock: one kept by a thread stuck holding it (or by
+     * a tick task that never came back) stopped the clock for good, and
+     * every sleep, timeout and fade with it (the R1 froze in Your taste,
+     * 3 Nov, its log's time standing still). The tick still counts and
+     * wakes the scheduler; its tasks run on the next one. */
+    pthread_once(&tick_mtx_once, tick_mtx_init);
+    if (pthread_mutex_trylock(&tick_mtx) == 0)
+    {
+        extern void (*tick_funcs[MAX_NUM_TICK_TASKS+1])(void);
+        current_tick++;
+        for (void (**p)(void) = tick_funcs; *p; p++)
+        {
+            tick_task_now = *p;
+            (*p)();
+        }
+        tick_task_now = NULL;
+        tick_unlock();
+    }
+    else
+    {
+        __atomic_add_fetch(&current_tick, 1, __ATOMIC_RELAXED);
+        tick_skipped++;
+    }
     interrupt();
 }
 

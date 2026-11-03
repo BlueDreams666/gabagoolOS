@@ -161,21 +161,21 @@ static void i_bootlogo_tests(void) {
     bootlogo_root = FAKE_CARD;
     remove(I_LOGO "/My logo.png"); remove(I_LOGO "/._My logo.png"); remove(I_LOGO "/zz.jpg"); remove(I_LOGO "/notes.txt");
     remove(BOOTLOGO_CACHE); remove(BOOTLOGO_STAMP);
-    /* none: the wordmark */
+    /* none: the logo poster */
     splash_build(); frame(0);
-    assert(!bootlogo_px && splash_word && !lv_obj_check_type(splash_word, &lv_image_class));
+    assert(!bootlogo_px && splash_word && lv_image_get_src(splash_word) == &splash_art_dsc);
     i_splash_gone();
     /* a picture: fitted after the boot, the first by name (a Mac's ._ shadow and other files passed by) */
     mkdir(I_LOGO);
     i_put(I_LOGO "/zz.jpg", 2000); i_put(I_LOGO "/My logo.png", 3000); i_put(I_LOGO "/._My logo.png", 400); i_put(I_LOGO "/notes.txt", 10);
     splash_build(); frame(0);
-    assert(!bootlogo_px && !lv_obj_check_type(splash_word, &lv_image_class));   /* not fitted yet: the wordmark this time */
+    assert(!bootlogo_px && lv_image_get_src(splash_word) == &splash_art_dsc);   /* not fitted yet: the poster this time */
     i_splash_gone();
     i_bootlogo_after_boot();
     assert(!strcmp(test_wall_in, I_LOGO "/My logo.png") && i_exists(BOOTLOGO_CACHE) && i_stamp_has(I_LOGO "/My logo.png 3000 "));
     /* the next start: the picture, in the middle, nothing decoded */
     splash_build(); frame(0);
-    assert(bootlogo_px && lv_obj_check_type(splash_word, &lv_image_class) && bootlogo_dsc.header.w == 300 && bootlogo_dsc.header.h == 150);
+    assert(bootlogo_px && lv_image_get_src(splash_word) == &bootlogo_dsc && bootlogo_dsc.header.w == 300 && bootlogo_dsc.header.h == 150);
     {   lv_area_t a; lv_obj_update_layout(splash_word); lv_obj_get_coords(splash_word, &a);
         assert(a.x1 == (W - 300) / 2 && a.y1 == (H - 150) / 2); }
     i_splash_gone();
@@ -187,13 +187,13 @@ static void i_bootlogo_tests(void) {
     splash_build(); frame(0); assert(!bootlogo_px); i_splash_gone();   /* not this one any more */
     i_bootlogo_after_boot();
     assert(!strcmp(test_wall_in, I_LOGO "/My logo.png") && i_stamp_has(I_LOGO "/My logo.png 5000 "));
-    /* emptied: forgotten, the wordmark back */
+    /* emptied: forgotten, the poster back */
     remove(I_LOGO "/My logo.png"); remove(I_LOGO "/._My logo.png"); remove(I_LOGO "/zz.jpg"); remove(I_LOGO "/notes.txt");
     i_bootlogo_after_boot();
     assert(!i_exists(BOOTLOGO_CACHE) && !i_exists(BOOTLOGO_STAMP));
-    splash_build(); frame(0); assert(!bootlogo_px && !lv_obj_check_type(splash_word, &lv_image_class)); i_splash_gone();
+    splash_build(); frame(0); assert(!bootlogo_px && lv_image_get_src(splash_word) == &splash_art_dsc); i_splash_gone();
     bootlogo_root = "";
-    printf("PASS: boot logo: the first picture in Bootlogo fitted after a boot, on the next splash in the middle, made again when it changes, the wordmark back when the folder empties.\n");
+    printf("PASS: boot logo: the first picture in Bootlogo fitted after a boot, on the next splash in the middle, made again when it changes, the poster back when the folder empties.\n");
 }
 /* The plan's "NES title" was Super Mario Land, a Game Boy cartridge the
  * Playroom once opened in classic Rockbox from Games/mario.gb: that file at
@@ -267,7 +267,7 @@ static void i_shots(const char *dir, const char *tag) {
         }
         global_settings.sloppy_dac_nos = nos0;
         au_reset();
-        /* the splash: the wordmark, then your boot logo */
+        /* the splash: the poster, then your boot logo */
         au_apply(look, 0, 0);
         remove(BOOTLOGO_CACHE); remove(BOOTLOGO_STAMP);
         splash_build(); frame(0); i_shot(dir, "splash-wordmark", lk, tag); i_splash_gone();

@@ -2363,3 +2363,4 @@
 { "Drag one by its handle to move it, a tile among the tiles. Tap one to hide it from Music, or to show it again.", "按住手柄拖动即可移动，磁贴只在磁贴之间移动。轻点一项可在“音乐”中隐藏它，再点一次即可重新显示。" },
 { "artist", "位艺人" },
 { "Japanese (Romaji)", "日语（罗马字）" },
+{ "Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see \"Look after your card\" in the guide.", "你的 SD 卡需要快速检查。请把它连接到电脑，运行“急救”（Mac）或 chkdsk（Windows）：参见指南中的“Look after your card”。" },

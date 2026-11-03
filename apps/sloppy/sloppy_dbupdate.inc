@@ -19,6 +19,18 @@ enum { DBU_IDLE, DBU_POSTED, DBU_SCANNING, DBU_READY, DBU_LOADING, DBU_CHECKING 
  * mode, after Files and Wi-Fi transfer change the card, and pull to
  * refresh. */
 static int db_check_done0, db_check_deleted0;
+/* The quiet check (start-up, after USB mode) waits while music plays and
+ * stops if music starts: its card reads ran for minutes at every start on
+ * Tai's R1 (4249 songs), and as every Rockbox thread shares one OS thread
+ * the player stalled with each one; Your taste, waiting for the audio
+ * thread to start its clip, froze behind it (3 Nov). It runs again once
+ * the music stops. */
+static bool db_check_stopped, db_check_again;
+static bool db_music_playing(void)
+{
+    int st = audio_status();
+    return (st & AUDIO_STATUS_PLAY) && !(st & AUDIO_STATUS_PAUSE);
+}
 static int32_t db_check_key0[6];
 /* db_check_quiet (declared in sloppy.c): at start-up and after USB mode, nothing to say if nothing changed */
 static int db_update_state = DBU_IDLE;
@@ -271,12 +283,15 @@ static void dbu_refresh(void)
 static void db_auto_poll(void)
 {
     static bool done;
-    if (lib_state != SL_LIB_READY || db_update_state != DBU_IDLE || current_tick < 3 * HZ) return;
+    if (lib_state != SL_LIB_READY || db_update_state != DBU_IDLE || current_tick < 3 * HZ ||
+        !tagcache_is_usable()) return;
     /* the note also after the start-up update: a read USB mode stopped
      * leaves it for when the library is up again */
     bool usb = access(DB_USB_NOTE, F_OK) == 0;
-    if (!usb && (done || !global_settings.sloppy_db_auto || current_tick < 20 * HZ)) return;
+    if (!usb && !db_check_again && (done || !global_settings.sloppy_db_auto || current_tick < 20 * HZ)) return;
+    if (db_music_playing() || td.page) return;   /* nor while Your taste is open */
     done = true;
+    db_check_again = false;
     unlink(DB_USB_NOTE);
     sl_log(usb ? "database update after USB mode" : "database update at start-up");
     db_check_quiet = true;
@@ -305,6 +320,17 @@ static void db_update_begin(bool show)
     if (lib_state == SL_LIB_LOADING) { db_check_quiet = false; toast("Your library is still loading"); return; }
     /* by itself: what changed, if the database is there to update */
     if (!show && tagcache_is_usable() && lib_state == SL_LIB_READY) { db_check_begin(); return; }
+    /* By itself, never the rebuild, which deletes the database before it
+     * scans: back from USB mode before the library had loaded, Tai's R1
+     * rebuilt 27436 entries, was switched off and had no database (3 Nov).
+     * It waits until the database is up (db_auto_poll); a missing one gets
+     * the first scan, and Update library still rebuilds. */
+    if (!show)
+    {
+        db_check_again = true;
+        sl_log("database: the check waits for the database to be up");
+        return;
+    }
     db_check_quiet = false;
     tagcache_rebuild();                  /* only queues the job; returns false */
     db_update_state = DBU_POSTED;
@@ -439,6 +465,13 @@ static void db_update_poll(void)
             }
             break;
         case DBU_CHECKING:
+            if (db_check_quiet && !db_check_stopped && tagcache_updates_done == db_check_done0 &&
+                (db_music_playing() || td.page))
+            {
+                tagcache_stop_scan();
+                db_check_stopped = true;
+                sl_log("database: the check stops while music plays, again after");
+            }
             if (tagcache_updates_done == db_check_done0)
             {
                 if (st->commit_delayed)        /* found new songs, but they can't be saved until a restart */
@@ -447,6 +480,11 @@ static void db_update_poll(void)
                     notify_ex(NS_LIBRARY, NOTE_INFO, 0, NA_NONE, "library", "Library scanned. Restart the player to finish.");
                 }
                 break;
+            }
+            if (db_check_stopped)
+            {
+                db_check_stopped = false;
+                db_check_again = true;
             }
             {
                 int32_t key[6];

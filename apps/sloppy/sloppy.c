@@ -21,6 +21,7 @@
 #include <math.h>
 #include <pthread.h>                    /* sl_log's lock: worker threads log too, in the harness as on the R1 */
 #include <unistd.h>
+#include <errno.h>                      /* the card's errors (sloppy_card_error) */
 #if defined(HIBY_LINUX) && !defined(SIMULATOR)
 #include <sys/syscall.h>
 #include <sys/mman.h>                   /* sl_give_back */
@@ -646,6 +647,7 @@ static lv_draw_buf_t *sl_rgb565a8_from(const lv_draw_buf_t *argb)
 }
 
 static void periodic_ui(void);
+static void sl_card_error_note(void);
 static void sl_power_redraw(lv_timer_t *t)
 {
     (void)t;
@@ -3707,9 +3709,39 @@ static bool snake_on_top(void);
 /* Freaky Spoon's arrows, the chess toolbar, the coin's Flip, the snake's
  * hint and a keyboard sit where the mini player would */
 static bool fm_dest_on_top(void);
+/* Where the mini player floats, and whether a page keeps something to tap
+ * there. A long list may run under it (it scrolls clear); a control fixed
+ * in place, or in a page that only just scrolls, may not: the player
+ * steps aside for that page, as it does for a game's controls. */
+#define MINI_H 82
+#define MINI_CLEAR (MINI_H + SL_FLOAT)   /* a list scrolling this far takes anything out from under it */
+static bool mini_area_has_control(lv_obj_t *o)
+{
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) return false;
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    if (a.y2 < H - SL_FLOAT - MINI_H || a.y1 >= H - SL_FLOAT) return false;   /* nothing of it down there */
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) &&
+        lv_obj_get_scroll_top(o) + lv_obj_get_scroll_bottom(o) >= MINI_CLEAR) return false;
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_CLICKABLE) &&
+        lv_area_get_height(&a) < H / 2)   /* not a page's body or a catcher */
+        return true;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(o); i++)
+        if (mini_area_has_control(lv_obj_get_child(o, i))) return true;
+    return false;
+}
+static bool page_needs_mini_area(void)
+{
+    if (npages < 2) return false;        /* home is laid out around the player */
+    lv_obj_t *p = pages[npages - 1];
+    lv_obj_update_layout(p);             /* a page just made has not been laid out yet */
+    for (uint32_t i = 0; i < lv_obj_get_child_count(p); i++)
+        if (mini_area_has_control(lv_obj_get_child(p, i))) return true;
+    return false;
+}
 static bool mini_held_off(void)
 {
-    return fm_dest_on_top() || quiz_active || quiz_menu_shown() || search_hides_mini() || kb_on_top() || coin_on_top() || snake_on_top() || sel_on() ||
+    return page_needs_mini_area() || fm_dest_on_top() || quiz_active || quiz_menu_shown() || search_hides_mini() || kb_on_top() || coin_on_top() || snake_on_top() || sel_on() ||
            st_on() || spoon_on_top() || chess_on_top() || clicker_on_top() || spacey_on_top() || arc_on_top() ||
            t48_on_top() || sdk_on_top() || pt_on_top() || fl_on_top();
 }
@@ -7185,7 +7217,7 @@ static void banner_hide(void)
 }
 
 /* ---------------------------------------------------------- hardware keys */
-static lv_obj_t *hud, *hud_lvl, *hud_txt;
+static lv_obj_t *hud, *hud_lvl, *hud_fill, *hud_txt;
 static lv_timer_t *hud_timer;
 static bool hud_dragging;
 /* Long enough to reach the screen after pressing a side key */
@@ -7193,6 +7225,7 @@ static bool hud_dragging;
 #define VOL_HUD_AFTER_TOUCH_MS 1500
 #define VOL_HUD_W 72
 #define VOL_HUD_H 260
+#define VOL_HUD_RIM 2
 #define VOL_HUD_PAD 28                      /* extra touch margin around it */
 #define VOL_HUD_OFF (VOL_HUD_W + 24)       /* slid out past the right edge */
 static void hud_touch(lv_event_t *e);
@@ -7234,7 +7267,16 @@ static bool hud_hit(int x, int y)
     return x >= a.x1 - VOL_HUD_PAD && x <= a.x2 + VOL_HUD_PAD &&
            y >= a.y1 - VOL_HUD_PAD && y <= a.y2 + VOL_HUD_PAD;
 }
-static void hud_level(void *o, int32_t v) { lv_obj_set_height(o, v); }
+/* The level is a plain window as tall as the volume over a pill the
+ * size of the bar, so its bottom keeps the bar's round end at any level,
+ * even below one radius, and nothing pokes past the curve. The colour
+ * still runs light to shade over the filled part only. */
+static void hud_level(void *o, int32_t v)
+{
+    lv_obj_set_height(o, v);
+    int stop = VOL_HUD_H > 0 ? 255 * (VOL_HUD_H - v) / VOL_HUD_H : 0;
+    lv_obj_set_style_bg_main_stop(hud_fill, (int32_t)(stop < 0 ? 0 : stop > 255 ? 255 : stop), 0);
+}
 /* smooth: a key press eases the level to its new height; a finger on the
  * bar moves it directly */
 static void hud_update(bool smooth)
@@ -7268,12 +7310,11 @@ static void hud_show(void)
         lv_obj_set_style_bg_grad_color(hud, lv_color_hex(0x050506), 0);
         lv_obj_set_style_bg_grad_dir(hud, LV_GRAD_DIR_VER, 0);
         lv_obj_set_style_bg_opa(hud, 235, 0);
-        lv_obj_set_style_border_width(hud, 2, 0);
+        lv_obj_set_style_border_width(hud, VOL_HUD_RIM, 0);
         lv_obj_set_style_border_color(hud, lv_color_hex(0xdfe9e2), 0);
         lv_obj_set_style_border_opa(hud, 70, 0);
         lv_obj_set_style_border_post(hud, true, 0);           /* the rim over the fill */
         sl_elevate(hud, SL_E3, 0);
-        lv_obj_set_style_clip_corner(hud, true, 0);
         lv_obj_add_flag(hud, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
         lv_obj_remove_flag(hud, LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
         lv_obj_set_ext_click_area(hud, VOL_HUD_PAD);
@@ -7283,9 +7324,14 @@ static void hud_show(void)
         lv_obj_add_event_cb(hud, hud_touch, LV_EVENT_PRESS_LOST, NULL);
         hud_lvl = box(hud);
         lv_obj_set_width(hud_lvl, VOL_HUD_W);
-        lv_obj_set_style_bg_opa(hud_lvl, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_grad_dir(hud_lvl, LV_GRAD_DIR_VER, 0);
-        lv_obj_align(hud_lvl, LV_ALIGN_BOTTOM_MID, 0, 0);
+        /* children sit inside the rim: this puts the level on the outline */
+        lv_obj_align(hud_lvl, LV_ALIGN_BOTTOM_MID, 0, VOL_HUD_RIM);
+        hud_fill = box(hud_lvl);
+        lv_obj_set_size(hud_fill, VOL_HUD_W, VOL_HUD_H);
+        lv_obj_align(hud_fill, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_set_style_radius(hud_fill, SL_R_FULL, 0);
+        lv_obj_set_style_bg_opa(hud_fill, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_grad_dir(hud_fill, LV_GRAD_DIR_VER, 0);
         /* light from the window, across the top of the glass */
         lv_obj_t *hi = box(hud);
         lv_obj_set_size(hi, VOL_HUD_W - 18, 34);
@@ -7302,8 +7348,8 @@ static void hud_show(void)
         hud_timer = lv_timer_create(hud_hide, VOL_HUD_SHOW_MS, NULL);
         hud_slide(hud, VOL_HUD_OFF);
     }
-    lv_obj_set_style_bg_color(hud_lvl, sl_zune() ? lv_color_hex(ZN_PINK) : lv_color_white(), 0);
-    lv_obj_set_style_bg_grad_color(hud_lvl, sl_zune() ? lv_color_hex(ZN_PINK) : lv_color_hex(0xc9d3dc), 0);
+    lv_obj_set_style_bg_color(hud_fill, sl_zune() ? lv_color_hex(ZN_PINK) : lv_color_white(), 0);
+    lv_obj_set_style_bg_grad_color(hud_fill, sl_zune() ? lv_color_hex(ZN_PINK) : lv_color_hex(0xc9d3dc), 0);
     bool hidden = lv_obj_has_flag(hud, LV_OBJ_FLAG_HIDDEN) || lv_obj_get_style_translate_x(hud, 0) > 0;
     hud_update(!hidden);                  /* arriving, it shows the level at once */
     lv_obj_remove_flag(hud, LV_OBJ_FLAG_HIDDEN);
@@ -8084,30 +8130,26 @@ static void bootlogo_tick(lv_timer_t *t)
     bootlogo_job = 1;
 }
 
+/* The logo poster: the wordmark and the pool photo on deep ink, a pool-blue
+ * halftone rising under them (splash/make_splash.py). Already RGB565 at
+ * the screen's size, so it is copied out, never decoded or scaled. */
+#include "splash/splash.inc"
+static const lv_image_dsc_t splash_art_dsc = {
+    .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565, .w = W, .h = H, .stride = W * 2 },
+    .data = (const uint8_t *)splash_art,
+    .data_size = sizeof splash_art,
+};
 static void splash_build(void)
 {
     splash = box(lv_layer_top());
     lv_obj_set_size(splash, W, H);
-    lv_obj_set_style_bg_color(splash, lv_color_hex(C_BG), 0);
+    lv_obj_set_style_bg_color(splash, lv_color_hex(0x10161d), 0);
     lv_obj_set_style_bg_opa(splash, LV_OPA_COVER, 0);
-    if (bootlogo_load())
-    {
-        /* your picture, in the middle, where the word would be */
-        splash_word = lv_image_create(splash);
-        lv_image_set_src(splash_word, &bootlogo_dsc);
-        lv_obj_center(splash_word);
-        return;
-    }
-    /* the word, and the promise under it */
-    splash_word = box(splash);
-    lv_obj_set_size(splash_word, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(splash_word, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(splash_word, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(splash_word, 14, 0);
-    brand_mark(splash_word, &sl_brand_50, 5);
-    lv_obj_t *tag = text(splash_word, "Let's get back to that gabagool", &ss_regular_23, 0xfff1dc);
-    lv_obj_set_style_opa(tag, 190, 0);
-    lv_obj_align(splash_word, LV_ALIGN_CENTER, 0, 0);
+    /* your picture, in the middle; or the poster */
+    bool own = bootlogo_load();
+    splash_word = lv_image_create(splash);
+    lv_image_set_src(splash_word, own ? &bootlogo_dsc : &splash_art_dsc);
+    lv_obj_center(splash_word);
 }
 
 void sloppy_boot_splash(void)
@@ -8132,7 +8174,8 @@ static void splash_fade_out(void)
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, splash_word);
-    lv_anim_set_values(&a, 0, -26);
+    /* a picture smaller than the screen lifts away; the poster only fades */
+    lv_anim_set_values(&a, 0, lv_image_get_src(splash_word) == &splash_art_dsc ? 0 : -26);
     lv_anim_set_duration(&a, SL_T_SLOW);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
     lv_anim_set_exec_cb(&a, splash_lift);
@@ -8243,12 +8286,17 @@ bool sloppy_shutdown_screen(int why)
     bye_show(why, false);
     lcd_set_viewport(NULL);
     lv_refr_now(disp);
+    /* the log's file let go, so the card can be unmounted before the power
+     * goes (usb_card_park): switched off mounted, it was left dirty */
+    sl_log("power: off, the card let go");
+    sl_log_hold(true);
     return true;
 }
 /* clean_shutdown() gave up (the database was busy): carry on */
 static void bye_cancel(void)
 {
     if (bye) lv_obj_add_flag(bye, LV_OBJ_FLAG_HIDDEN);
+    sl_log_hold(false);                 /* the log again: the player goes on */
 }
 
 static void log_boot_times(void)
@@ -8338,6 +8386,7 @@ static void np_follow_track(void)
  * while the panel is dark, so this waits and runs once on wake. */
 static void periodic_ui(void)
 {
+    sl_card_error_note();
     statusbar_update();
     mini_update();
     lp_refresh();
@@ -8616,9 +8665,13 @@ static void *sl_watchdog(void *arg)
          * it (a database scan or the buffering, not always our UI) */
         struct thread_debug_info ti;
         if (thread_get_debug_info(thread_self(), &ti) <= 0) strcpy(ti.name, "?");
-        char b[200];
-        int n = snprintf(b, sizeof b, "[%7ld.%02ld] watchdog: main loop stuck for %u ms in '%s', thread '%s' running\n",
-                         current_tick / HZ, current_tick % HZ, (unsigned)(now - beat), sl_at_where, ti.name);
+        char b[256];
+        /* and the clock's own thread: a stalled tick froze the R1 (3 Nov) */
+        extern void (*volatile tick_task_now)(void);
+        extern volatile unsigned int tick_skipped;
+        int n = snprintf(b, sizeof b, "[%7ld.%02ld] watchdog: main loop stuck for %u ms in '%s', thread '%s' running, tick task %p, %u ticks put off\n",
+                         current_tick / HZ, current_tick % HZ, (unsigned)(now - beat), sl_at_where, ti.name,
+                         (void *)tick_task_now, tick_skipped);
         if (n <= 0 || log_fd < 0) continue;
         syscall(SYS_write, log_fd, b, (size_t)(n < (int)sizeof b ? n : (int)sizeof b - 1));
         syscall(SYS_fsync, log_fd);
@@ -8633,6 +8686,60 @@ static void *sl_watchdog(void *arg)
 }
 #endif
 
+/* A computer that sees the card writes to it on its own: a Mac's Spotlight
+ * index and file-event log. Unplugged before those writes reach it, the
+ * exFAT is left needing a repair (Tai's R1, three times in two weeks, and
+ * the card's .metadata_never_index lost with it). These two tell a Mac
+ * to keep both off the card; made again at every start if gone. */
+/* The card turned read-only: Linux does that to an exFAT it finds damaged,
+ * and every save fails after ("Error accessing playlist control file").
+ * Said once, in words, from any thread: the UI's periodic pass shows it. */
+static volatile int sl_card_err;
+static bool sl_card_err_told;
+void sloppy_card_error(int err)
+{
+    if (err == EROFS && !sl_card_err) sl_card_err = err;
+}
+static void sl_card_error_note(void)
+{
+    if (!sl_card_err || sl_card_err_told) return;
+    sl_card_err_told = true;
+    sl_log("card: read-only (errno %d): asking for a check", sl_card_err);
+    notify_ex(NS_SYSTEM, NOTE_WARN, 0, NA_NONE, "card",
+              sl_tr("Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see \"Look after your card\" in the guide."));
+}
+#ifndef SL_CARD_ROOT
+#define SL_CARD_ROOT ""   /* the card is the R1's / */
+#endif
+static void sl_card_guards(void)
+{
+    /* and the Games folder with its note: the release zip carries no Games
+     * folder, so a "Replace" while copying an update over can't take the
+     * user's cartridges with it */
+    static const char note[] =
+        "Super Mario Bros.\n\n"
+        "GabagoolOS has a Game Boy Color player built in. Super Mario Bros. Deluxe is the\n"
+        "Game Boy Color edition of Super Mario Bros. Put your own cartridge file here, named\n\n"
+        "    mario.gbc\n\n"
+        "and open Arcade > Super Mario Bros. on the player.\n";
+    static const struct { const char *path; const char *text; } files[] = {
+        { SL_CARD_ROOT "/.metadata_never_index", "" }, { SL_CARD_ROOT "/.fseventsd/no_log", "" },
+        { SL_CARD_ROOT "/Games/Put mario.gbc here.txt", note },
+    };
+    mkdir(SL_CARD_ROOT "/.fseventsd");
+    DIR *gd = opendir(SL_CARD_ROOT "/Games");
+    bool games = gd != NULL;
+    if (gd) closedir(gd);
+    mkdir(SL_CARD_ROOT "/Games");
+    for (unsigned i = 0; i < sizeof files / sizeof files[0]; i++)
+    {
+        if (file_exists(files[i].path)) continue;
+        if (files[i].text[0] && games) continue;   /* the user's own Games folder: the note only once, in a new one */
+        int fd = open(files[i].path, O_WRONLY | O_CREAT, 0666);
+        if (fd >= 0) { write(fd, files[i].text, strlen(files[i].text)); close(fd); }
+        else { sl_log("card: %s not made, errno %d", files[i].path, errno); sloppy_card_error(errno); }
+    }
+}
 static void sloppy_run(void)
 {
     static bool inited;
@@ -8656,7 +8763,7 @@ static void sloppy_run(void)
     }
 #endif
     static bool erase_checked;           /* first: an erase asked for happens before anything of ours is read */
-    if (!erase_checked) { erase_checked = true; er_boot(); sl_ota_boot(); }   /* then a swap cut short is finished */
+    if (!erase_checked) { erase_checked = true; er_boot(); sl_ota_boot(); sl_card_guards(); }   /* then a swap cut short is finished */
     sl_log("GabagoolOS start, Rockbox up for %ld.%02lds", current_tick / HZ, current_tick % HZ);
 
     touchscreen_set_mode(TOUCHSCREEN_POINT);   /* we do our own gestures */

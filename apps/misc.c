@@ -360,6 +360,7 @@ static void system_flush(void)
 static void system_restore(void)
 {
     tree_restore();
+    playlist_reopen_control();          /* playlist_shutdown() closed it */
 }
 
 #ifdef HAVE_SLOPPY_UI

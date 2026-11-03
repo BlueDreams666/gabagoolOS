@@ -3,7 +3,8 @@
 # ASan and UBSan: Rockbox's own warble player is built for the R1's config
 # with a stand-in SDL, then plays the files in decode/ that once crashed or
 # hung a codec, and each file given, damaged the same way each run.
-# A hang is a play that has not finished in 10 s.
+# A hang is a play that has not finished in 10 s. Each file plays from its
+# start and from its middle, and a division by zero fails it.
 #
 #   run-decode-fuzz.sh [-n mutants a file] [file ...]      default 1000
 set -eu
@@ -124,15 +125,25 @@ EOF
 clang -O1 -w -o "$work/mut" "$work/mut.c"
 
 export ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 UBSAN_OPTIONS=print_stacktrace=1
-# play one file; prints why it failed, if it did
-play() {
+# play one file, from its start and then from its middle (a byte offset, as
+# Your taste starts its clips); prints why it failed, if it did. A division
+# by zero is a crash on the R1 (MIPS traps it): UBSan's report of one counts.
+play1() {
     local rc=0
-    timeout -s KILL 10 "$B/warble.hibyr1" -c wait=13230000:halt=1 "$1" /dev/null >/dev/null 2>"$work/err" || rc=$?
-    if [ $rc -eq 137 ]; then echo "hang"
-    elif grep -q "ERROR: AddressSanitizer\|ROCKBOX ASSERT" "$work/err"; then
-        grep -m1 -E "ERROR: AddressSanitizer|ROCKBOX ASSERT" "$work/err"; grep -m3 -E "^ +#[0-9]+ " "$work/err"
-    elif [ $rc -ge 128 ]; then echo "signal $((rc - 128))"
+    timeout -s KILL 10 "$B/warble.hibyr1" -c "wait=13230000:halt=1$2" "$1" /dev/null >/dev/null 2>"$work/err" || rc=$?
+    if [ $rc -eq 137 ]; then echo "hang$3"
+    elif grep -q "ERROR: AddressSanitizer\|ROCKBOX ASSERT\|runtime error: division by zero" "$work/err"; then
+        echo "$(grep -m1 -E "ERROR: AddressSanitizer|ROCKBOX ASSERT|runtime error: division by zero" "$work/err")$3"
+        grep -m3 -E "^ +#[0-9]+ " "$work/err"
+    elif [ $rc -ge 128 ]; then echo "signal $((rc - 128))$3"
     fi
+}
+play() {
+    local why size
+    why=$(play1 "$1" "" "")
+    [ -n "$why" ] && { echo "$why"; return; }
+    size=$(wc -c < "$1" | tr -d ' ')
+    play1 "$1" ":offset=$((size / 2))" " (from byte $((size / 2)))"
 }
 status=0
 for f in "$test_dir"/decode/*; do

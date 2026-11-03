@@ -175,10 +175,14 @@ static int64_t get_file_pos(long newtime)
     int64_t pos = -1;
     struct mp3entry *id3 = ci->id3;
 
-    if (id3->vbr) {
+    /* A damaged or very short file's length, TOC or bitrate can be 0 here,
+       and an integer division by zero is a crash on MIPS (the R1 stopped on
+       a Your taste clip started in the middle of a song, 3 Nov): each
+       divisor is checked, the plain estimates used when one is 0. */
+    if (id3->vbr && id3->length) {
         int64_t curpos = ci->curpos - id3->first_frame_offset;
         long skipms_from_curpos = curpos > 0 ?  (long) (id3->elapsed - newtime) : - newtime;
-        if (id3->has_toc) {
+        if (id3->has_toc && id3->length >= 100) {
             /* Use the TOC to find the new position */
             unsigned int percent = ((uint64_t)newtime * 100) / id3->length;
             if (percent > 99)
@@ -234,7 +238,7 @@ static void set_elapsed(struct mp3entry* id3)
     unsigned long elapsed = id3->elapsed;
 
     if ( id3->vbr ) {
-        if ( id3->has_toc ) {
+        if ( id3->has_toc && id3->length >= 100 && id3->filesize >= 256 ) {
             unsigned int pct_timestep = id3->length / 100;
             unsigned int toc_sizestep = id3->filesize / 256;
 
@@ -254,18 +258,20 @@ static void set_elapsed(struct mp3entry* id3)
 
             /* Interpolate between this TOC mark and the next TOC mark */
             offset -= cur_toc * toc_sizestep;
-            elapsed += (uint64_t)pct_timestep * offset / plength;
+            if (plength)                    /* two marks the same: a step of 0 */
+                elapsed += (uint64_t)pct_timestep * offset / plength;
         } else {
             /* No TOC, use an approximation (this'll be wildly inaccurate) */
             uint64_t data_size = id3->filesize -
                                  id3->first_frame_offset - id3->id3v1len;
-            elapsed = (uint64_t)id3->length * offset / data_size;
+            if (data_size)
+                elapsed = (uint64_t)id3->length * offset / data_size;
         }
     }
     else
     {
         /* constant bitrate, use exact calculation */
-        if (id3->bitrate != 0)
+        if (id3->bitrate >= 8)
             elapsed = offset / (id3->bitrate / 8);
     }
 

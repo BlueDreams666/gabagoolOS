@@ -2368,4 +2368,5 @@ RU = {
 'Drag one by its handle to move it, a tile among the tiles. Tap one to hide it from Music, or to show it again.': 'Перетащите пункт за ручку, чтобы переместить его, как плитку среди плиток. Коснитесь пункта, чтобы скрыть его из «Музыки» или показать снова.',
 'artist': 'артист',
 'Japanese (Romaji)': 'Японская (ромадзи)',
+'Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see "Look after your card" in the guide.': 'SD-карте нужна быстрая проверка. Подключите её к компьютеру и запустите «Первую помощь» (Mac) или chkdsk (Windows): см. «Look after your card» в руководстве.',
 }

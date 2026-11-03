@@ -28,6 +28,9 @@
 #include "settings.h"
 #include "talk.h"
 #include "splash.h"
+#ifdef HAVE_SLOPPY_UI
+#include "sloppy/sloppy.h"
+#endif
 #include "viewport.h"
 #include "strptokspn_r.h"
 #include "scrollbar.h"
@@ -225,6 +228,16 @@ void splashf(int ticks, const char *fmt, ...)
     /* If fmt is a lang ID then get the corresponding string (which
        still might contain % place holders). */
     fmt = P2STR((unsigned char *)fmt);
+#ifdef HAVE_SLOPPY_UI
+    {   /* every message Rockbox puts up, in sloppy.log too: an error on the
+           R1's screen ("Error accessing playlist ...") left no trace */
+        char said[160];
+        va_start(ap, fmt);
+        vsnprintf(said, sizeof said, fmt, ap);
+        va_end(ap);
+        sl_log("splash: %s", said);
+    }
+#endif
     FOR_NB_SCREENS(i)
     {
         struct screen * screen = &(screens[i]);

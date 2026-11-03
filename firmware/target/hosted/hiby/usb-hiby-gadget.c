@@ -934,6 +934,33 @@ int disk_mount_all(void)
  *
  * returns the # of successful unmounts
  */
+/* At power off: the card unmounted, or else read-only, before the power
+ * goes. /sbin/poweroff, or the kernel's reboot() when it is slow, left it
+ * mounted: the exFAT volume stayed dirty, and a Mac's check found its
+ * allocation bitmap needing repair, three times in two weeks on Tai's R1
+ * (3 Nov). A file still open for writing keeps it mounted; read-only
+ * then, which flushes it and takes no more writes. */
+void usb_card_park(void)
+{
+    if (card_off || card_leaving)
+        return;                          /* the computer has it, or it is going */
+    if (!card_mount_read())
+    {
+        /* not in /proc/mounts: as the HiBy init mounts it (disk_unmount_all) */
+        strcpy(card_dev, access("/dev/mmcblk0p1", F_OK) == 0 ? "/dev/mmcblk0p1" : "/dev/mmcblk0");
+        card_fs[0] = card_opts[0] = '\0';
+        card_flags = 0;
+    }
+    usb_trace("power off: unmounting the card");
+    usb_trace_flush();                   /* the card's last line */
+    card_leaving = true;                 /* nothing more onto it */
+    crashlog_card_away(1);
+    if (card_umount() == 0)
+        return;
+    mount(card_dev, PIVOT_ROOT, card_fs, card_flags | MS_REMOUNT | MS_RDONLY,
+          card_opts[0] ? card_opts : NULL);
+}
+
 int disk_unmount_all(void)
 {
     logf(">>>>>>>>>>>>>>>>> disk_unmount_all()\n");

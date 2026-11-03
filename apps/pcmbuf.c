@@ -1442,13 +1442,12 @@ static void pcmbuf_fade_tick(void)
    timer's fade under it stays */
 void pcmbuf_fade_in_from_mute(void)
 {
-    pcm_play_lock();
-
+    /* the tick lock before the PCM lock, never inside it (pcmbuf_fade) */
     if (fade_state != PCM_NOT_FADING)
         tick_remove_task(pcmbuf_fade_tick);
 
+    pcm_play_lock();
     fade_out_complete = false;
-
     pcm_play_unlock();
 
     fade_vol = MIX_AMP_MUTE;
@@ -1460,14 +1459,17 @@ void pcmbuf_fade_in_from_mute(void)
 /* Fade channel in or out in the background */
 void pcmbuf_fade(bool fade, bool in)
 {
-    /* Must pause any active fade */
-    pcm_play_lock();
-
+    /* Must pause any active fade. The tick lock is taken first and on its
+       own: under the PCM lock it was the reverse of a tick task that plays
+       a sound (chirp_tick: the tick lock, then the PCM lock), and each
+       thread could hold one and wait for the other for good. Removing the
+       task waits for a tick pass under way, so none can mark the fade
+       complete after this. */
     if (fade_state != PCM_NOT_FADING)
         tick_remove_task(pcmbuf_fade_tick);
 
+    pcm_play_lock();
     fade_out_complete = false;
-
     pcm_play_unlock();
 
     /* playing again, or muted at once: the sleep fade has done its job */

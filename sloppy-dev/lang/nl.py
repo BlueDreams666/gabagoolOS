@@ -2368,4 +2368,5 @@ NL = {
 'Drag one by its handle to move it, a tile among the tiles. Tap one to hide it from Music, or to show it again.': 'Sleep er een aan de greep om hem te verplaatsen, een tegel tussen de tegels. Tik op een om hem te verbergen in Muziek, of om hem weer te tonen.',
 'artist': 'artiest',
 'Japanese (Romaji)': 'Japans (romaji)',
+'Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see "Look after your card" in the guide.': 'Je SD-kaart heeft een snelle controle nodig. Sluit hem aan op een computer en voer EHBO (Mac) of chkdsk (Windows) uit: zie "Look after your card" in de handleiding.',
 }

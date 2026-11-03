@@ -540,7 +540,9 @@ static void *ci_request_buffer(size_t *realsize, size_t reqsize)
     free(input_buffer);
     if (!rbcodec_format_is_atomic(ci.id3->codectype))
         reqsize = MIN(reqsize, 32 * 1024);
-    input_buffer = malloc(reqsize);
+    /* a few bytes over, zeroed: the player's buffering keeps 32 KB of guard
+       after what it hands out, and libmad's frame sync reads one past it */
+    input_buffer = calloc(1, reqsize + 8);
     *realsize = read(input_fd, input_buffer, reqsize);
     if (*realsize < 0)
         *realsize = 0;

@@ -14,4 +14,6 @@ void sloppy_boot_mark(const char *stage);
 bool sloppy_shutdown_screen(int why);
 /* a line in the breadcrumb log on the card, /.rockbox/sloppy/sloppy.log */
 void sl_log(const char *fmt, ...);
+/* a card error from any thread (errno): read-only (EROFS) asks for a check, once */
+void sloppy_card_error(int err);
 #endif

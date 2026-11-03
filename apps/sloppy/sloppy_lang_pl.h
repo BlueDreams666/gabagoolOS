@@ -2363,3 +2363,4 @@
 { "Drag one by its handle to move it, a tile among the tiles. Tap one to hide it from Music, or to show it again.", "Przeciągnij pozycję za uchwyt, by ją przenieść, jak kafelek między kafelkami. Stuknij, by ukryć ją w Muzyce lub pokazać ponownie." },
 { "artist", "wykonawca" },
 { "Japanese (Romaji)", "Japoński (romaji)" },
+{ "Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see \"Look after your card\" in the guide.", "Karta SD wymaga szybkiego sprawdzenia. Podłącz ją do komputera i uruchom Pierwszą pomoc (Mac) lub chkdsk (Windows): zobacz \"Look after your card\" w przewodniku." },

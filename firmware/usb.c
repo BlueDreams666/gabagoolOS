@@ -47,6 +47,9 @@
 #include "misc.h"
 #include "gui/yesno.h"
 #include "settings.h"
+#if defined(HAVE_TAGCACHE) && !defined(BOOTLOADER)
+bool tagcache_committing(void);         /* apps/tagcache.c */
+#endif
 #include "lang_enum.h"
 #include "gui/skin_engine/skin_engine.h"
 #endif
@@ -499,7 +502,14 @@ static void NORETURN_ATTR usb_thread(void)
             queue_wait_w_tmo(&usb_queue, &ev, HZ);
             if(ev.id == SYS_TIMEOUT)
             {
-                if(TIME_AFTER(current_tick, usb_acks_asked_at + USB_ACK_WAIT))
+                if(TIME_AFTER(current_tick, usb_acks_asked_at + USB_ACK_WAIT)
+#if defined(HAVE_TAGCACHE) && !defined(BOOTLOADER)
+                   /* never in the middle of a tag database commit: the card
+                      taken under it left the database dirty, and the next
+                      start deleted it (Tai's R1 lost its library, 3 Nov) */
+                   && !tagcache_committing()
+#endif
+                  )
                 {
                     USB_TRACE("usb thread: %d thread%s never answered in %d s: USB mode goes ahead without %s",
                               usb_num_acks_to_expect, usb_num_acks_to_expect == 1 ? "" : "s",

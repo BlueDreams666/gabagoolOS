@@ -2380,4 +2380,5 @@ AR = {
 'Drag one by its handle to move it, a tile among the tiles. Tap one to hide it from Music, or to show it again.': 'اسحب عنصرًا من مقبضه لنقله، بلاطة بين البلاطات. انقر على عنصر لإخفائه من الموسيقى، أو لإظهاره مجددًا.',
 'artist': 'فنان',
 'Japanese (Romaji)': 'اليابانية (روماجي)',
+'Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see "Look after your card" in the guide.': 'تحتاج بطاقة SD إلى فحص سريع. صِلها بحاسوب وشغّل الإسعافات الأولية (Mac) أو chkdsk (Windows): راجع "Look after your card" في الدليل.',
 }

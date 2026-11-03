@@ -38,6 +38,12 @@
 #include "logf.h"
 #include "rbpaths.h"
 #include "crashlog-linux.h"
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+#include "hiby/usb-hiby-gadget.h"
+#define card_park() usb_card_park()   /* unmounted before the power goes (a dirty exFAT volume) */
+#else
+#define card_park() do {} while (0)
+#endif
 
 const char *handle_special_dirs(const char *dir, unsigned flags,
                                 char *buf, const size_t bufsize);
@@ -196,6 +202,7 @@ void power_off(void)
     backlight_hw_on();
     button_close_device();
     sync();
+    card_park();
     system("/sbin/poweroff");
 #ifdef HAVE_SHUTDOWN_WATCHDOG
     kernel_reboot_fallback(RB_POWER_OFF);
@@ -239,6 +246,8 @@ void system_reboot(void)
     shutdown_watchdog_arm(true);
 #endif
     backlight_hw_off();
+    sync();
+    card_park();
     system("/sbin/reboot");
 #ifdef HAVE_SHUTDOWN_WATCHDOG
     kernel_reboot_fallback(RB_AUTOBOOT);

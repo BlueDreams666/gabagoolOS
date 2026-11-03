@@ -121,6 +121,7 @@ struct playlist_insert_context {
 /* Exported functions only for current playlist. */
 void playlist_init(void) INIT_ATTR;
 void playlist_shutdown(void);
+void playlist_reopen_control(void);  /* after USB mode */
 int playlist_create(const char *dir, const char *file);
 int playlist_resume(void);
 int playlist_add(const char *filename);

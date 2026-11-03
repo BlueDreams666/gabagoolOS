@@ -876,6 +876,118 @@ static long find_entry_ram(const char *filename)
 }
 #endif /* defined (HAVE_TC_RAMCACHE) && defined (HAVE_DIRCACHE) */
 
+/* The update's lookups, one for every file on the card, by a list of the
+ * filename tags read once: read entry by entry from where the last one was
+ * found, a file not there yet (or listed in another order than the
+ * database's) read most of the tag file twice. The R1's check of its 4249
+ * songs took 4 to 6 minutes at every start, the player stalling with it
+ * (all its threads share one OS thread), and its freezes came during it. */
+struct fe_name { uint32_t hash; int32_t pos; };
+static struct fe_name *fe_names;
+static int fe_count, fe_fd = -1;
+static uint32_t fe_hash(const char *s)
+{
+    uint32_t h = 2166136261u;
+    while (*s) h = (h ^ (unsigned char)*s++) * 16777619u;
+    return h;
+}
+static int fe_cmp(const void *a, const void *b)
+{
+    uint32_t x = ((const struct fe_name *)a)->hash, y = ((const struct fe_name *)b)->hash;
+    return (x > y) - (x < y);
+}
+static void fe_drop(void)
+{
+    free(fe_names);
+    fe_names = NULL;
+    fe_count = 0;
+    fe_fd = -1;
+}
+/* the list for fd (the update's filenametag_fd); false without memory */
+static bool fe_ready(int fd)
+{
+    if (fe_fd == fd && fe_names)
+        return true;
+    fe_drop();
+    char buf[TAGCACHE_BUFSZ * 2];
+    int cap = 0, have = 0, at = 0;
+    long pos = sizeof(struct tagcache_header);
+    if (lseek(fd, pos, SEEK_SET) != pos)
+        return false;
+    while (true)
+    {
+        if (have - at < (int)sizeof(struct tagfile_entry) + TAGCACHE_BUFSZ)
+        {
+            memmove(buf, buf + at, have - at);
+            have -= at;
+            at = 0;
+            ssize_t r = read(fd, buf + have, sizeof(buf) - have);
+            if (r > 0)
+                have += r;
+        }
+        if (have - at < (int)sizeof(struct tagfile_entry))
+            break;
+        struct tagfile_entry tfe;
+        memcpy(&tfe, buf + at, sizeof(tfe));
+        if (tc_stat.econ)
+            swap_tagfile_entry(&tfe);
+        if (tfe.tag_length <= 0 || tfe.tag_length > TAGCACHE_BUFSZ ||
+            have - at < (int)sizeof(tfe) + tfe.tag_length)
+            break;                      /* damaged, or cut short: the end */
+        if (fe_count == cap)
+        {
+            int ncap = cap ? cap * 2 : 1024;
+            struct fe_name *n = realloc(fe_names, ncap * sizeof(*n));
+            if (!n)
+            {
+                fe_drop();
+                return false;
+            }
+            fe_names = n;
+            cap = ncap;
+        }
+        char *name = buf + at + sizeof(tfe);
+        name[tfe.tag_length - 1] = '\0';
+        fe_names[fe_count].hash = fe_hash(name);
+        fe_names[fe_count].pos = pos;
+        fe_count++;
+        at += sizeof(tfe) + tfe.tag_length;
+        pos += sizeof(tfe) + tfe.tag_length;
+    }
+    if (!fe_names)
+        fe_names = malloc(sizeof(*fe_names));   /* an empty database */
+    if (!fe_names)
+        return false;
+    qsort(fe_names, fe_count, sizeof(*fe_names), fe_cmp);
+    fe_fd = fd;
+    return true;
+}
+/* idx_id of filename by the list, -4 when it is not in the tag file */
+static long fe_find(int fd, const char *filename)
+{
+    struct fe_name key = { .hash = fe_hash(filename) };
+    long tag_length = strlen(filename) + 1;
+    int lo = 0, hi = fe_count;
+    while (lo < hi)
+    {
+        int mid = (lo + hi) / 2;
+        if (fe_names[mid].hash < key.hash) lo = mid + 1;
+        else hi = mid;
+    }
+    char buf[TAGCACHE_BUFSZ];
+    for (int i = lo; i < fe_count && fe_names[i].hash == key.hash; i++)
+    {
+        struct tagfile_entry tfe;
+        if (lseek(fd, fe_names[i].pos, SEEK_SET) != fe_names[i].pos ||
+            read_tagfile_entry(fd, &tfe) != sizeof(tfe) || tfe.tag_length != tag_length ||
+            tag_length > (long)sizeof(buf) || read(fd, buf, tag_length) != tag_length)
+            continue;
+        if (!strncmp(filename, buf, tag_length))
+            return tfe.idx_id;
+    }
+    return -4;
+}
+
 static long find_entry_disk(const char *filename_raw, bool localfd)
 {
     struct tagfile_entry tfe;
@@ -913,6 +1025,9 @@ static long find_entry_disk(const char *filename_raw, bool localfd)
             return -1;
     }
 
+    if (!localfd && fd == filenametag_fd && fe_ready(fd))
+        return fe_find(fd, filename);
+
     check_again:
 
     if (last_pos > 0) /* pos gets cached to prevent reading from beginning */
@@ -946,7 +1061,10 @@ static long find_entry_disk(const char *filename_raw, bool localfd)
                         logf("read error #2");
                         close(fd);
                         if (!localfd)
+                        {
                             filenametag_fd = -1;
+                            fe_drop();
+                        }
                         last_pos = -1;
                         return -3;
                     }
@@ -2900,7 +3018,21 @@ static int build_index(int index_type, struct tagcache_header *h, int tmpfd)
         close(masterfd);
     }
     else
-        remove_files(); /* Just to be sure we are clean. */
+    {
+        char master[MAX_PATH];
+        snprintf(master, sizeof(master), "%s/%s", tc_stat.db_path, TAGCACHE_FILE_MASTER);
+        if (!file_exists(master))
+            remove_files(); /* Just to be sure we are clean. */
+        else
+        {
+            /* There but not opened (the card going away under a commit, as
+               at a USB hand-over): fail, and keep the database. Removing it
+               here deleted every database file but the scan waiting to be
+               committed, and Tai's R1 lost its whole library (3 Nov). */
+            logf("master file there but not opened: commit fails");
+            return -1;
+        }
+    }
 
     /* Open the index file, which contains the tag names. */
     fd = open_tag_fd(&tch, index_type, true);
@@ -3369,7 +3501,24 @@ static int build_index(int index_type, struct tagcache_header *h, int tmpfd)
     return 1;
 }
 
+/* A commit rewrites the index files one by one, the database marked dirty
+ * meanwhile: one cut off (the card taken by USB mode, which waits only
+ * 8 s for a thread to answer) leaves it dirty, and the next start throws
+ * it away and scans the card from nothing. USB mode waits for this. */
+static volatile bool committing;
+bool tagcache_committing(void)
+{
+    return committing;
+}
+static bool commit_inner(void);
 static bool commit(void)
+{
+    committing = true;
+    bool ok = commit_inner();
+    committing = false;
+    return ok;
+}
+static bool commit_inner(void)
 {
     struct tagcache_header tch;
     struct master_header   tcmh;
@@ -4028,6 +4177,7 @@ bool tagcache_import_changelog(void)
         close(filenametag_fd);
         filenametag_fd = -1;
     }
+    fe_drop();
 
     write_lock--;
 
@@ -5330,6 +5480,7 @@ void do_tagcache_build(const char *path[])
         close(filenametag_fd);
         filenametag_fd = -1;
     }
+    fe_drop();
 
     if (!ret)
     {

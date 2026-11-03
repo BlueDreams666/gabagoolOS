@@ -34,6 +34,7 @@ int usb_card_handover_error(void);
 const char *usb_card_busy_files(void);   /* when it would not come off: what of ours was on it */
 bool usb_card_retry(void);                /* USB screen: try a failed handover again; true while still busy */
 bool usb_card_away(void);                 /* from the handover's start until the card is mounted again: write nothing to it */
+void usb_card_park(void);                /* at power off: the card unmounted, or read-only */
 
 /* The USB trace: each step from plug to unplug, timed, kept in RAM
  * (/tmp/usb-trace.txt) and copied to .rockbox/sloppy/usb-trace.txt on the

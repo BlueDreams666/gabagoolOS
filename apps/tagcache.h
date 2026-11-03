@@ -223,6 +223,7 @@ bool tagcache_is_fully_initialized(void);
 bool tagcache_is_usable(void);
 void tagcache_start_scan(void);
 void tagcache_stop_scan(void);
+bool tagcache_committing(void);   /* a commit under way: the card must stay */
 bool tagcache_update(void);
 extern volatile int tagcache_updates_done;      /* counts finished updates */
 extern volatile int tagcache_entries_deleted;   /* counts entries taken out */

@@ -2368,4 +2368,5 @@ JA = {
 'Drag one by its handle to move it, a tile among the tiles. Tap one to hide it from Music, or to show it again.': 'ハンドルをドラッグして移動します（タイルはタイルの間で）。タップすると「ミュージック」で非表示にしたり、再表示したりできます。',
 'artist': 'アーティスト',
 'Japanese (Romaji)': '日本語（ローマ字）',
+'Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see "Look after your card" in the guide.': 'SDカードの簡単なチェックが必要です。コンピュータに接続して、ファーストエイド（Mac）または chkdsk（Windows）を実行してください。ガイドの「Look after your card」をご覧ください。',
 }
