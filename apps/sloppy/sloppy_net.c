@@ -3714,18 +3714,12 @@ void sl_net_remote_answer(const char *json)
 #define SCR_LFM_SESSION SL_CAST_DIR "/lastfm.session"
 #define LFM_TOKEN_MS    (10u * 60u * 1000u)   /* how long a phone sign-in is waited for */
 #include "sloppy_lastfm_state.h"
-/* The API account's key and secret: a local file kept out of git. The
- * simulator and the tests never read it (they set their own below). */
-#if !defined(SIMULATOR) && !defined(SLOPPY_NET_TEST) && defined(__has_include)
-#if __has_include("sloppy_lastfm_key.h")
-#include "sloppy_lastfm_key.h"
-#endif
-#endif
-#ifndef SL_LASTFM_API_KEY
-#define SL_LASTFM_API_KEY ""
-#define SL_LASTFM_API_SECRET ""
-#endif
-const char *sl_lastfm_key = SL_LASTFM_API_KEY, *sl_lastfm_secret = SL_LASTFM_API_SECRET;
+/* The API account's key and secret are not in the program or its source.
+ * A release carries them in SCR_KEYS on the card, scrambled (sloppy-dev/
+ * make-keys.py writes it): without the file, Last.fm says "Not in this
+ * build" and the rest of scrobbling works. The tests set their own. */
+#define SCR_KEYS    SL_CAST_DIR "/keys.bin"
+const char *sl_lastfm_key = "", *sl_lastfm_secret = "";
 unsigned sl_lastfm_poll_ms = 4000;      /* how often a phone sign-in is asked after */
 
 static pthread_mutex_t scr_lock = PTHREAD_MUTEX_INITIALIZER;   /* the shared state below */
@@ -4620,6 +4614,40 @@ static void lfm_error(const char *e, bool tell)
     if (tell) scr.st.lfm_fail_seq++;
     pthread_mutex_unlock(&scr_lock);
 }
+/* The keys file: "GBK1", then "lastfm\t<key>\t<secret>\n" scrambled by
+ * the xorshift stream below (make-keys.py does the same). Read at each
+ * load of the files until a key is in; with scr_files held. */
+static void lfm_keys_load(void)
+{
+    static char key[64], secret[64];
+    if (sl_lastfm_key[0]) return;
+    char p[256];
+    unsigned char b[200];
+    int fd = scr_path(p, sizeof p, SCR_KEYS) ? open(p, O_RDONLY) : -1;
+    if (fd < 0) return;
+    ssize_t r = read(fd, b, sizeof b - 1);
+    close(fd);
+    if (r < 8 || memcmp(b, "GBK1", 4)) { scr_say("keys file is not one, ignored"); return; }
+    uint32_t x = 0x9e3779b9u;
+    for (ssize_t i = 4; i < r; i++)
+    {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        b[i] ^= (unsigned char)x;
+    }
+    b[r] = '\0';
+    char *line = (char *)b + 4, *k, *sec;
+    line[strcspn(line, "\r\n")] = '\0';
+    if (!strncmp(line, "lastfm\t", 7) && (k = line + 7, sec = strchr(k, '\t')) && sec - k < (long)sizeof key
+        && strlen(sec + 1) < sizeof secret && sec > k && sec[1])
+    {
+        *sec++ = '\0';
+        snprintf(key, sizeof key, "%s", k);
+        snprintf(secret, sizeof secret, "%s", sec);
+        sl_lastfm_key = key; sl_lastfm_secret = secret;
+    }
+    else scr_say("keys file has no Last.fm key, ignored");
+    memset(b, 0, sizeof b);
+}
 /* the session on the card: its name, a tab, the key; with scr_files held */
 static void lfm_session_load(void)
 {
@@ -4885,6 +4913,7 @@ static void scr_pass(void)
             if (!token_new) scr_token_load();
             sw.queued = scr_count_lines(SCR_QUEUE);
             sw.lfm_queued = scr_count_lines(SCR_LFM_QUEUE);
+            lfm_keys_load();
             lfm_session_load();
             if (!sw.loaded || reload) scr_say("%d listen%s waiting, token %s", sw.queued, sw.queued == 1 ? "" : "s",
                                               sw.token[0] || token_new ? "set" : "not set");

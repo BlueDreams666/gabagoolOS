@@ -2095,7 +2095,7 @@ void playlist_shutdown(void)
  * unmounts the card and mounts it again) went on without it. Every song
  * added or queued lives in that file, so the next one read or added (Your
  * taste's clips, a shuffled queue) showed "Error accessing playlist
- * control file" (Tai's R1, 3 Nov). The file is as it was: open it again.
+ * control file" (a test R1, 3 Nov). The file is as it was: open it again.
  */
 void playlist_reopen_control(void)
 {

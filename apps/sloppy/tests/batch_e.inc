@@ -307,7 +307,7 @@ static void e_share_tests(void) {
         int u = socket(AF_INET, SOCK_DGRAM, 0); assert(u >= 0);
         struct timeval tv = { 3, 0 }; setsockopt(u, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
         struct sockaddr_in to = { .sin_family = AF_INET, .sin_port = htons((uint16_t)lp) }; inet_pton(AF_INET, "127.0.0.1", &to.sin_addr);
-        const char *ann = "{\"alias\":\"Tai's Phone\",\"version\":\"2.1\",\"deviceModel\":\"iPhone\",\"deviceType\":\"mobile\","
+        const char *ann = "{\"alias\":\"Sam's Phone\",\"version\":\"2.1\",\"deviceModel\":\"iPhone\",\"deviceType\":\"mobile\","
                           "\"fingerprint\":\"sender-fp-1\",\"port\":53317,\"protocol\":\"https\",\"download\":false,\"announce\":true}";
         assert(sendto(u, ann, strlen(ann), 0, (struct sockaddr *)&to, sizeof to) > 0);
         char r[1024]; ssize_t n = recv(u, r, sizeof r - 1, 0); assert(n > 0); r[n] = '\0';
@@ -333,14 +333,14 @@ static void e_share_tests(void) {
     static struct e_bg bg; pthread_t t;
     bg.port = lp; bg.method = "POST"; bg.path = "/api/localsend/v2/prepare-upload";
     bg.len = (size_t)snprintf(bg.body, sizeof bg.body,
-        "{\"info\":{\"alias\":\"Tai\\u2019s Phone\",\"version\":\"2.1\",\"deviceModel\":\"iPhone\",\"deviceType\":\"mobile\",\"fingerprint\":\"f\",\"port\":53317,\"protocol\":\"https\",\"download\":false},"
+        "{\"info\":{\"alias\":\"Sam\\u2019s Phone\",\"version\":\"2.1\",\"deviceModel\":\"iPhone\",\"deviceType\":\"mobile\",\"fingerprint\":\"f\",\"port\":53317,\"protocol\":\"https\",\"download\":false},"
         "\"files\":{\"a1\":{\"id\":\"a1\",\"fileName\":\"03 Lighthouse.flac\",\"size\":150000,\"fileType\":\"audio/flac\",\"sha256\":\"%s\",\"preview\":null},"
         "\"b2\":{\"id\":\"b2\",\"fileName\":\"04 Tide.m4a\",\"size\":1000,\"fileType\":\"audio/mp4\",\"sha256\":null,\"metadata\":{\"modified\":\"2026-01-01T12:00:00Z\"}},"
         "\"c3\":{\"id\":\"c3\",\"fileName\":\"todo.txt\",\"size\":10,\"fileType\":\"text/plain\"}}}", sha);
     e_bg_start(&bg, &t);
     for (int i = 0; i < 100 && !rx_sheet; i++) e_rx_frames(1);
     assert(rx_sheet && acts_open_now && rx_st.state == SL_RX_ASK && rx_st.files == 2 && rx_st.refused == 1);
-    assert(find_label(acts, "Accept 2 songs from Tai\xe2\x80\x99s Phone?") && find_label(acts, "Accept") && find_label(acts, "Decline"));
+    assert(find_label(acts, "Accept 2 songs from Sam\xe2\x80\x99s Phone?") && find_label(acts, "Accept") && find_label(acts, "Decline"));
     lv_obj_t *yes = find_label(acts, "Accept"); while (yes && !lv_obj_has_flag(yes, LV_OBJ_FLAG_CLICKABLE)) yes = lv_obj_get_parent(yes);
     lv_obj_send_event(yes, LV_EVENT_CLICKED, NULL);
     for (int i = 0; i < 200 && !bg.done; i++) usleep(10000);
@@ -357,7 +357,7 @@ static void e_share_tests(void) {
     snprintf(q, sizeof q, "/api/localsend/v2/upload?sessionId=%s&fileId=b2&token=%s", sid, tok2);
     assert(e_req(lp, "POST", q, big, 1000, out, sizeof out) == 200 && e_file_is("04 Tide.m4a", big, 1000));
     e_rx_frames(6);
-    assert(rx_st.state == SL_RX_IDLE && db_update_state != DBU_IDLE && e_note_has("2 files received") && e_note_has("Tai\xe2\x80\x99s Phone"));
+    assert(rx_st.state == SL_RX_IDLE && db_update_state != DBU_IDLE && e_note_has("2 files received") && e_note_has("Sam\xe2\x80\x99s Phone"));
     db_update_state = DBU_IDLE;
     /* a checksum that does not match: refused, removed */
     bg.len = (size_t)snprintf(bg.body, sizeof bg.body, "{\"info\":{\"alias\":\"Laptop\"},\"files\":{\"z\":{\"id\":\"z\",\"fileName\":\"05 Wrong.flac\",\"size\":100,"
@@ -577,6 +577,27 @@ static void e_lastfm_tests(void) {
     sl_lastfm_key = ""; scr_poll(); sl_net_scrobble_online(false); sl_net_scrobble_online(true); scr_poll(); frame(300);
     assert(scr_st.lfm_keyless && has_text(scr_page_obj, "Not in this build"));
     sl_lastfm_key = "testkey"; sl_net_scrobble_online(false); sl_net_scrobble_online(true); scr_poll();
+    /* a release carries the key in the card's keys file, scrambled as make-keys.py writes it;
+     * a file that is not one is left alone */
+    {
+        const char *kf = "/tmp/sloppy-ui-test-root/.rockbox/sloppy/keys.bin";
+        for (int bad = 0; bad < 2; bad++) {
+            unsigned char b[64] = "GBK1lastfm\tfilekey123\tfilesecret456\n";
+            size_t n = strlen((char *)b);
+            uint32_t x = 0x9e3779b9u;
+            for (size_t i = 4; i < n; i++) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; b[i] ^= (unsigned char)x; }
+            if (bad) b[0] = 'X';
+            FILE *f = fopen(kf, "wb"); assert(f && fwrite(b, 1, n, f) == n); fclose(f);
+            assert(memmem(b, n, "filekey123", 10) == NULL);
+            sl_lastfm_key = ""; sl_lastfm_secret = "";
+            sl_net_scrobble_hold(true); sl_net_scrobble_hold(false);
+            for (int i = 0; i < 40 && !sl_lastfm_key[0]; i++) { scr_poll(); frame(50); }
+            if (bad) assert(!sl_lastfm_key[0] && lbf_log_has("keys file is not one, ignored"));
+            else assert(!strcmp(sl_lastfm_key, "filekey123") && !strcmp(sl_lastfm_secret, "filesecret456") && !lbf_log_has("filekey123"));
+        }
+        unlink(kf);
+        sl_lastfm_key = "testkey"; sl_lastfm_secret = "testsecret";
+    }
     test_status = 0; hist_poll(); test_track = tt0; test_status = st0;
     global_settings.sloppy_lastfm = 0; scr_apply();
     wf_st.connected = conn0; sl_net_scrobble_online(conn0); sl_net_scrobble_fake = NULL;
@@ -947,7 +968,7 @@ static void e_radio_format_tests(void) {
 
 /* An app's big buffers go back to the system when its page closes (on the
  * R1 they stayed the player's: Spoon, Snake and the coin took 1.8 MB for
- * good and the player froze out of memory, Tai's log of 2 Nov), and each
+ * good and the player froze out of memory, a device log of 2 Nov), and each
  * app draws them again when it opens, before it slides in. */
 static size_t e_nonzero(const void *p, size_t n) {
     const uint8_t *b = p; size_t k = 0;
@@ -1017,7 +1038,7 @@ static void e_au_receive(int which) {
     s.files = 12; s.songs = 12; s.done = which == 1 ? 12 : 4;
     s.bytes = which == 1 ? 402653184 : 151000000; s.total = 402653184;
     snprintf(s.current, sizeof s.current, "05 The Extraordinarily Long-Named Closing Track (Live at the Harbor).flac");
-    snprintf(s.from, sizeof s.from, "Tai's iPhone 15 Pro Max");
+    snprintf(s.from, sizeof s.from, "Sam's iPhone 15 Pro Max");
     if (which == 2) { s.state = SL_RX_ASK; rx_st = s; au_open_home(AU_HOME); rx_ask(); return; }
     wf_share_cb(NULL); frame(300);
     s.state = which == 1 ? SL_RX_DONE : SL_RX_RECEIVING;
@@ -1171,7 +1192,7 @@ static void e_shots(const char *dir, const char *tag) {
             for (int i = 0; i < 40 && !rx_ls_up; i++) frame(250);
             static struct e_bg bg; pthread_t t;
             bg.port = sl_share_bound_port(true); bg.method = "POST"; bg.path = "/api/localsend/v2/prepare-upload";
-            bg.len = (size_t)snprintf(bg.body, sizeof bg.body, "{\"info\":{\"alias\":\"Tai's iPhone\"},\"files\":{"
+            bg.len = (size_t)snprintf(bg.body, sizeof bg.body, "{\"info\":{\"alias\":\"Sam's iPhone\"},\"files\":{"
                 "\"1\":{\"id\":\"1\",\"fileName\":\"01 Night Drive.flac\",\"size\":31000000},\"2\":{\"id\":\"2\",\"fileName\":\"02 Harbor.flac\",\"size\":28000000},"
                 "\"3\":{\"id\":\"3\",\"fileName\":\"03 Tide.flac\",\"size\":26500000}}}");
             au_open_home(AU_HOME);

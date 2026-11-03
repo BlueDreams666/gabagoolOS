@@ -506,7 +506,7 @@ static void NORETURN_ATTR usb_thread(void)
 #if defined(HAVE_TAGCACHE) && !defined(BOOTLOADER)
                    /* never in the middle of a tag database commit: the card
                       taken under it left the database dirty, and the next
-                      start deleted it (Tai's R1 lost its library, 3 Nov) */
+                      start deleted it (a test R1 lost its library, 3 Nov) */
                    && !tagcache_committing()
 #endif
                   )

@@ -20,8 +20,8 @@ show) if [ -f "$S/powered" ]; then printf '\tPowered: yes\n'; else printf '\tPow
       printf '\tAlias: %s\n\tPairable: yes\n\tDiscoverable: no\n' "$(cat "$S/alias" 2>/dev/null || echo 'HiBy R1')" ;;
 power) if [ "$2" = on ]; then touch "$S/powered"; echo "Changing power on succeeded";
        else rm -f "$S/powered"; echo "Changing power off succeeded"; fi ;;
-paired-devices|devices) echo "Device 24:58:7C:8A:10:20 Studio headphones" ;;
-info) if [ "$2" = "$PHONE" ]; then printf "\tName: Tai's iPhone\n\tAlias: Tai's iPhone\n"
+paired-devices|devices) echo "Device 00:1A:7D:DA:71:13 Studio headphones" ;;
+info) if [ "$2" = "$PHONE" ]; then printf "\tName: Sam's iPhone\n\tAlias: Sam's iPhone\n"
       else printf '\tName: Studio headphones\n\tAlias: Studio headphones\n'; fi ;;
 connect) [ -f "$S/hang" ] && sleep 60   # a bluetoothctl that never answers
          n=$(cat "$S/fail" 2>/dev/null || echo 0)
@@ -47,7 +47,7 @@ case "$1" in
 list-pcms) # "flaky": every other answer comes back empty, as BlueALSA does while busy
            if [ -f "$S/flaky" ]; then n=$(cat "$S/flaky"); echo $((n + 1)) > "$S/flaky"
                [ $((n % 2)) -eq 1 ] && exit 0; fi
-           [ -f "$S/connected" ] && echo "/org/bluealsa/hci0/dev_24_58_7C_8A_10_20/a2dpsrc/sink"
+           [ -f "$S/connected" ] && echo "/org/bluealsa/hci0/dev_00_1A_7D_DA_71_13/a2dpsrc/sink"
            [ -f "$S/phone" ] && grep -q sink "$S/bluealsa" 2>/dev/null && echo "$SINK" ;;
 info) case "$2" in
       *a2dpsnk*) printf 'Device: /org/bluez/hci0/dev_AA_BB_CC_DD_EE_01\nTransport: A2DP-sink\nMode: source\n'

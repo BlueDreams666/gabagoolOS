@@ -72,7 +72,7 @@ os.utime(p, (1, 2000000000))   # a newer file time, as a tag editor leaves
 EOF
     # a commit that cannot open the master index (a card going away under it,
     # as at a USB hand-over) must fail and keep the database: it deleted every
-    # database file, and Tai's R1 lost its library that way (3 Nov)
+    # database file, and a test R1 lost its library that way (3 Nov)
     # (on a copy: the failed commit leaves the database marked dirty, which
     # the player answers with a rescan, not the update this test goes on to)
     cut="$work/card-$n-cut"; rm -rf "$cut"; cp -Rc "$card" "$cut" 2>/dev/null || cp -R "$card" "$cut"

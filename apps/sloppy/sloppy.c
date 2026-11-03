@@ -481,7 +481,7 @@ static unsigned long sl_perf_rss_kb(unsigned long *peak_kb)
 /* An app's big static buffer, handed back to the system when its page
  * closes: once drawn its pages stayed the player's for good, and Snake,
  * Spoon and the coin each kept hundreds of KB after closing until the R1
- * ran out of memory and froze (Tai's log, 2 Nov). The whole pages inside
+ * ran out of memory and froze (a device log, 2 Nov). The whole pages inside
  * it read as 0 afterwards, so the app redraws it on its next open; the Mac
  * clears them too, so the harness sees what the R1 does. */
 static void sl_give_back(void *p, size_t n)
@@ -1540,7 +1540,7 @@ static unsigned sl_out_latency_ms(void) { return sl_test_out_latency_ms; }
 static bool sl_out_is_bt(void) { return sl_test_out_bt; }
 #endif
 /* Music going out over Bluetooth: BlueALSA's encoder (fdk-aac, LDAC) and
- * its daemons share the CPU and the 64 MB with us. Joe's R1 (2026-10-23)
+ * its daemons share the CPU and the 64 MB with us. a second test R1 (2026-10-23)
  * drew 0.5-2.3 s passes with 4-5 MB free while a speaker played. The
  * extras that cost most (the visualizer's full frame rate, the cover's
  * neighbour reflection, the glass kept in memory) give way. */
@@ -1610,7 +1610,7 @@ static void notify_ex(int src, int kind, unsigned flags, int action, const char 
 /* Starting something the user just picked cuts the old song cleanly. The
  * core treats a new playlist over a playing one as a manual track change,
  * and with crossfade on skip the old song carried on under the new one for
- * the whole fade (9 s on Tai's player). Crossfade stays for songs flowing
+ * the whole fade (9 s on a test player). Crossfade stays for songs flowing
  * into each other inside a queue. */
 static int album_chain = -1;          /* last album queued by play-through, as its albums_by_title spot */
 /* A new list keeps what the user queued: note it before playlist_create()
@@ -8688,7 +8688,7 @@ static void *sl_watchdog(void *arg)
 
 /* A computer that sees the card writes to it on its own: a Mac's Spotlight
  * index and file-event log. Unplugged before those writes reach it, the
- * exFAT is left needing a repair (Tai's R1, three times in two weeks, and
+ * exFAT is left needing a repair (a test R1, three times in two weeks, and
  * the card's .metadata_never_index lost with it). These two tell a Mac
  * to keep both off the card; made again at every start if gone. */
 /* The card turned read-only: Linux does that to an exFAT it finds damaged,

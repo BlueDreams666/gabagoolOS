@@ -60,7 +60,7 @@ bool hiby_pcm_is_bluealsa_device(const char *device)
 
 /* Bluetooth's ring: four periods of 2048 frames (186 ms at 44.1 kHz).
  * It was eight (371 ms), started only when nearly full, and BlueALSA's
- * own FIFO and the speaker's buffer sit behind it: Joe's R1 measured a
+ * own FIFO and the speaker's buffer sit behind it: a second test R1 measured a
  * clip heard 1.7 s after it was asked for (2026-10-23). The ring only has
  * to ride out the poll thread's scheduling, which is a thread of its own;
  * UI stalls are covered by pcmbuf, seconds deep, ahead of the mixer. */

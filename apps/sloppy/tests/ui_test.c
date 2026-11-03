@@ -1210,7 +1210,7 @@ static void cc_label_tests(void)
     global_settings.repeat_mode=rep0;sleep_choice=sleep0;speed_set(speed0);
     quick_panel_rebuild();frame(100);
     printf("cc labels: %d layouts, %d languages x %d text sizes x 4 themes, folded, half and grown: none overlap\n",checks,SL_LANG_LAST+1,SL_TEXT_STEPS);
-    /* and as Tai sees them: pulled down and grown, the biggest text */
+    /* and as a user sees them: pulled down and grown, the biggest text */
     static const struct { int lang, step; const char *name; } looks[]={{0,3,"en-largest"},{3,3,"de-largest"},{5,3,"ar-largest"},{4,2,"he-larger"},{3,0,"de-standard"},{2,1,"fr-large"}};
     for (unsigned i=0;i<sizeof looks/sizeof looks[0];i++) {
         global_settings.sloppy_language=looks[i].lang;sl_text_step=looks[i].step;global_settings.sloppy_text_size=looks[i].step;
@@ -2076,9 +2076,9 @@ static void bt13_tests(void)
     bt_tap_label(pages[npages - 1], "Save"); frame(400); frame(100); frame(100); frame(400);
     assert(pages[npages - 1] == sl_bt_page_obj && find_label(sl_bt_body, "Desk cans") && !strcmp(sl_bt_demo_devices[0].name, "Desk cans"));
     sl_bt_player_name_cb(NULL); frame(400);
-    lv_textarea_set_text(sl_bt_name_ta, "Tai's R1");
+    lv_textarea_set_text(sl_bt_name_ta, "Sam's R1");
     bt_tap_label(pages[npages - 1], "Save"); frame(400); frame(100); frame(100); frame(400);
-    assert(!strcmp(sl_bt_demo_name, "Tai's R1") && find_label(sl_bt_body, "Tai's R1"));
+    assert(!strcmp(sl_bt_demo_name, "Sam's R1") && find_label(sl_bt_body, "Sam's R1"));
     sl_bt_sbc_page(NULL); frame(400);
     bt_tap_label(pages[npages - 1], "XQ · up to 452 kb/s"); frame(100); frame(100);
     assert(sl_bt_demo_sbc == 1); page_pop(); frame(400); frame(100);
@@ -3118,7 +3118,7 @@ int main(void) {
         sl_bt_demo_index=-1;frame(4100);frame(100);assert(!sl_bt_state.connected);
     }
     page_pop();frame(400);assert(!sl_bt_page_obj);
-    {   /* Bluetooth's output delay (Joe's R1: 1.7 s): what is drawn follows
+    {   /* Bluetooth's output delay (a second test R1: 1.7 s): what is drawn follows
          * what is heard. The progress bar and the time, the lyrics, and
          * the spectrum's window all trail Rockbox's position by it. */
         unsigned long el0=test_track.elapsed,len0=test_track.length;
@@ -6970,7 +6970,7 @@ int main(void) {
             db_check_quiet=false;test_status=ss;current_tick=st0;
         }
         {   /* the card tells a Mac to keep Spotlight's index and its file-event log off it,
-             * made again at each start if gone (Tai's lost its .metadata_never_index, 3 Nov) */
+             * made again at each start if gone (a test card lost its .metadata_never_index, 3 Nov) */
             bool had_games=fake_find("/Card/Games/Put mario.gbc here.txt")>=0;
             sl_card_guards();
             assert(fake_find("/Card/.metadata_never_index")>=0 && fake_find("/Card/.fseventsd/no_log")>=0);
@@ -6993,7 +6993,7 @@ int main(void) {
             printf("PASS: the card keeps .metadata_never_index and .fseventsd/no_log; a read-only card is asked about once, in every language\n");
         }
         {   /* by itself, never the rebuild that deletes the database first: back from USB mode
-             * before the library was up, Tai's R1 rebuilt, was switched off, and had none (3 Nov) */
+             * before the library was up, a test R1 rebuilt, was switched off, and had none (3 Nov) */
             long st0=current_tick;int ss=test_status,rb=test_rebuilds,ups=test_updates;current_tick=30*HZ;test_status=0;
             tc_usable=false;
             db_update_begin(false);assert(db_update_state==DBU_IDLE && test_rebuilds==rb && test_updates==ups);
@@ -8895,7 +8895,7 @@ int main(void) {
             sl_lib.tracks=ttr;sl_lib.n_tracks=40;sl_lib.albums=tal;sl_lib.n_albums=40;
             int rated0=ts.n_rated;ts.n_rated=0;ts.gen++;
             {   /* music playing: paused while the deck is up, so the clips are the only audio, and
-                 * playing again after it; a quiet library check holds off meanwhile (Tai, 3 Nov) */
+                 * playing again after it; a quiet library check holds off meanwhile (3 Nov) */
                 test_status=AUDIO_STATUS_PLAY;
                 taste_page(false);frame(400);tsw_settle();
                 assert((test_status&AUDIO_STATUS_PAUSE) && td_resume && td.page);
@@ -9445,7 +9445,7 @@ int main(void) {
             /* emoji in a name (headphones, a title): drawn, and what joins them takes no room */
             {   const char *t0=sl_lib.tracks[0].title,*t1=sl_lib.tracks[1].title;
                 assert(!xf_packs[XF_EMO+1].mem);
-                sl_lib.tracks[0].title="Tai's \xf0\x9f\x8e\xa7\xef\xb8\x8f Buds \xe2\x9c\xa8";                 /* 🎧️ ✨ */
+                sl_lib.tracks[0].title="Sam's \xf0\x9f\x8e\xa7\xef\xb8\x8f Buds \xe2\x9c\xa8";                 /* 🎧️ ✨ */
                 sl_lib.tracks[1].title="\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd \xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbb \xe2\x9d\xa4\xef\xb8\x8f";   /* 👍🏽 👩‍💻 ❤️ */
                 songs_page();frame(500);
                 assert(find_label(pages[npages-1],sl_lib.tracks[0].title)&&!glyphs_missing(pages[npages-1]));
@@ -11521,11 +11521,11 @@ int main(void) {
         /* the phone connects: a notification, its name on the screen */
         sl_btrx_demo.state=HIBY_BTRX_CONNECTED;sl_btrx_demo.connects=1;
         strlcpy(sl_btrx_demo.mac,"AA:BB:CC:DD:EE:01",sizeof sl_btrx_demo.mac);
-        strlcpy(sl_btrx_demo.name,"Tai's iPhone",sizeof sl_btrx_demo.name);
+        strlcpy(sl_btrx_demo.name,"Sam's iPhone",sizeof sl_btrx_demo.name);
         strlcpy(sl_btrx_demo.codec,"AAC",sizeof sl_btrx_demo.codec);sl_btrx_demo.rate=48000;sl_btrx_demo.channels=2;
         frame(200);
-        assert(!strcmp(nh.list[0].title,"Tai's iPhone connected") && nh.list[0].action==NA_BT);
-        assert(find_label(sl_btrx_body,"Playing from Tai's iPhone") && find_label(sl_btrx_body,"AAC · 48.0 kHz"));
+        assert(!strcmp(nh.list[0].title,"Sam's iPhone connected") && nh.list[0].action==NA_BT);
+        assert(find_label(sl_btrx_body,"Playing from Sam's iPhone") && find_label(sl_btrx_body,"AAC · 48.0 kHz"));
         assert(find_label(sl_btrx_body,"Connected. Play music on your phone."));   /* no audio yet: not "paused" */
         shot("btrx-connected.ppm");
         /* audio: 48 kHz in, the mixer at 44.1; the song here pauses */
@@ -11579,7 +11579,7 @@ int main(void) {
         strlcpy(sl_btrx_demo.error,"Phone disconnected",sizeof sl_btrx_demo.error);
         frame(200);
         assert(!sl_btrx_on && !sl_btrx_active && !test_voice_more && !sl_btrx_held_off);
-        assert(nh.list[0].kind==NOTE_INFO && !strcmp(nh.list[0].title,"Tai's iPhone disconnected"));
+        assert(nh.list[0].kind==NOTE_INFO && !strcmp(nh.list[0].title,"Sam's iPhone disconnected"));
         assert(find_label(sl_btrx_body,"Start receiving"));
         shot("btrx-disconnected.ppm");
         /* Stop on the screen */

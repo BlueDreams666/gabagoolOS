@@ -2,7 +2,7 @@
  * in the R1's build VM). The real firmware/target/hosted/kernel-unix.c,
  * its Rockbox headers stood in for by empty ones.
  *
- * Tai's R1 froze in Your taste (3 Nov): its log's time stood at 113 s while
+ * a test R1 froze in Your taste (3 Nov): its log's time stood at 113 s while
  * the watchdog counted 20 s stuck, every Rockbox thread asleep waiting for a
  * tick. The timer thread waited for the tick lock, and while anything kept
  * that lock the clock stopped, and every sleep, timeout and fade with it.

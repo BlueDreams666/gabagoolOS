@@ -289,7 +289,7 @@ int main(void)
     printf("PASS: the USB trace notes every step, reaches the card only while it is the player's, and a refused bind is retried\n");
     /* power off: the card unmounted before the power goes, or read-only
      * when a file still holds it (switched off mounted, its exFAT was left
-     * dirty: a Mac found the bitmap to repair, Tai's R1, 3 Nov) */
+     * dirty: a Mac found the bitmap to repair, a test R1, 3 Nov) */
     card_off = card_leaving = false; mounted = true; busy_for = 0; umounts = 0;
     usb_card_park();
     assert(!mounted && umounts == 1 && card_leaving);

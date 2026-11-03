@@ -136,7 +136,7 @@ void sl_net_lastfm_signin_phone(void);
 void sl_net_lastfm_signin_password(const char *user, const char *pass);
 void sl_net_lastfm_signin_cancel(void);
 void sl_net_lastfm_signout(void);
-extern const char *sl_lastfm_key, *sl_lastfm_secret;   /* "" in a build without the key file */
+extern const char *sl_lastfm_key, *sl_lastfm_secret;   /* "" until the card's keys file is read, and without one */
 extern unsigned sl_lastfm_poll_ms;
 void sl_net_scrobble_token(const char *token);     /* "" forgets it */
 void sl_net_scrobble_online(bool up);              /* Wi-Fi connected */

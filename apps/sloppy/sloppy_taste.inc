@@ -819,9 +819,9 @@ static struct
     unsigned rng;
 } td;
 /* What was playing when the deck came up: it is paused while the deck is
- * open, so the cards' clips are the only audio, and plays on after. Tai,
- * after it froze on a swipe over his music (3 Nov): "make sure music is
- * stopped before entering it and then the device can focus". */
+ * open, so the cards' clips are the only audio, and plays on after (it
+ * froze on a swipe over playing music, 3 Nov: with the music stopped, the
+ * player has the memory and the time for the deck). */
 static bool td_resume;
 static long td_test_kb;                  /* the harness: free memory as the R1 would have it, 0 the real one */
 
@@ -2359,7 +2359,7 @@ static void taste_page(bool first)
     td.ghost_in = 256;
     /* The deck's pictures are about 5.7 MB, a card ~0.5 MB: with the
      * library up and Bluetooth on the R1 had 3.7 MB free, and every swipe
-     * stalled while it swapped (Tai's log, 3 Nov). Short of memory, the
+     * stalled while it swapped (a device log, 3 Nov). Short of memory, the
      * ready-made steps of the card under and the second turned copy are
      * not made (each is drawn as it is needed instead), nor, shorter
      * still, the turned copy. */

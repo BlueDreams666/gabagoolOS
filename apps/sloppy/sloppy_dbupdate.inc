@@ -21,7 +21,7 @@ enum { DBU_IDLE, DBU_POSTED, DBU_SCANNING, DBU_READY, DBU_LOADING, DBU_CHECKING 
 static int db_check_done0, db_check_deleted0;
 /* The quiet check (start-up, after USB mode) waits while music plays and
  * stops if music starts: its card reads ran for minutes at every start on
- * Tai's R1 (4249 songs), and as every Rockbox thread shares one OS thread
+ * a test R1 (4249 songs), and as every Rockbox thread shares one OS thread
  * the player stalled with each one; Your taste, waiting for the audio
  * thread to start its clip, froze behind it (3 Nov). It runs again once
  * the music stops. */
@@ -321,7 +321,7 @@ static void db_update_begin(bool show)
     /* by itself: what changed, if the database is there to update */
     if (!show && tagcache_is_usable() && lib_state == SL_LIB_READY) { db_check_begin(); return; }
     /* By itself, never the rebuild, which deletes the database before it
-     * scans: back from USB mode before the library had loaded, Tai's R1
+     * scans: back from USB mode before the library had loaded, a test R1
      * rebuilt 27436 entries, was switched off and had no database (3 Nov).
      * It waits until the database is up (db_auto_poll); a missing one gets
      * the first scan, and Update library still rebuilds. */

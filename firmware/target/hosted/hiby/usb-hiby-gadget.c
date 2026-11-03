@@ -937,7 +937,7 @@ int disk_mount_all(void)
 /* At power off: the card unmounted, or else read-only, before the power
  * goes. /sbin/poweroff, or the kernel's reboot() when it is slow, left it
  * mounted: the exFAT volume stayed dirty, and a Mac's check found its
- * allocation bitmap needing repair, three times in two weeks on Tai's R1
+ * allocation bitmap needing repair, three times in two weeks on a test R1
  * (3 Nov). A file still open for writing keeps it mounted; read-only
  * then, which flushes it and takes no more writes. */
 void usb_card_park(void)

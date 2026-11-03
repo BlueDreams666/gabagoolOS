@@ -101,7 +101,7 @@ static void state_int(const char *file, int v)
     FILE *f = fopen(p, "w"); assert(f); fprintf(f, "%d\n", v); fclose(f);
 }
 
-static const struct hiby_bt_device phones = { "24:58:7C:8A:10:20", "Studio headphones", true };
+static const struct hiby_bt_device phones = { "00:1A:7D:DA:71:13", "Studio headphones", true };
 
 /* ==== Receive from phone (hiby_btrx_*) ==== */
 static bool state_has(const char *file, const char *needle)
@@ -230,7 +230,7 @@ static void rx_tests(void)
     btrx_wait_ms = 30000;
     assert(hiby_btrx_start() && rx_until(HIBY_BTRX_WAITING, 20000));
     assert(!hiby_pcm_get_bt_mac() && strstr(routed_to, "plughw") && !state_has("removed", "24:58"));
-    assert(rx_logged("headphones 24_58_7C_8A_10_20 let go") || rx_logged("headphones 24:58:7C:8A:10:20 let go"));
+    assert(rx_logged("headphones 00_1A_7D_DA_71_13 let go") || rx_logged("headphones 00:1A:7D:DA:71:13 let go"));
     state("pair_request", true);
     assert(rx_wait(rx_answered, 5000) && rx_logged("pairing request"));
     state("title", true); state("artist", true);
@@ -239,12 +239,12 @@ static void rx_tests(void)
     snprintf(p, sizeof p, "%s/artist", getenv("BT_STATE")); { FILE *f = fopen(p, "w"); fputs("The Sopranos", f); fclose(f); }
     state("phone", true);
     assert(rx_until(HIBY_BTRX_CONNECTED, 5000));
-    assert(!strcmp(rx.mac, "AA:BB:CC:DD:EE:01") && !strcmp(rx.name, "Tai's iPhone") && rx.connects == 1);
+    assert(!strcmp(rx.mac, "AA:BB:CC:DD:EE:01") && !strcmp(rx.name, "Sam's iPhone") && rx.connects == 1);
     assert(rx.rate == 48000 && rx.channels == 2 && !strcmp(rx.codec, "AAC"));
     assert(rx_wait(rx_buffered, 5000));
     assert(state_has("trusted", "AA:BB:CC:DD:EE:01"));
     rx_check_audio();
-    assert(rx_wait(rx_first, 3000) && rx_logged("connected: AA:BB:CC:DD:EE:01 (Tai's iPhone), codec AAC, S16_LE, 2 ch, 48000 Hz"));
+    assert(rx_wait(rx_first, 3000) && rx_logged("connected: AA:BB:CC:DD:EE:01 (Sam's iPhone), codec AAC, S16_LE, 2 ch, 48000 Hz"));
     assert(rx_wait(rx_titled, 5000) && !strcmp(rx.artist, "The Sopranos"));
     state_int("volume", 64);
     assert(rx_wait(rx_volume64, 8000));
@@ -328,7 +328,7 @@ static void file_put(const char *file, const char *text)
 }
 static void pair_tests(void)
 {
-    struct hiby_bt_device car = { "24:58:7C:8A:10:20", "Car stereo", false };
+    struct hiby_bt_device car = { "00:1A:7D:DA:71:13", "Car stereo", false };
     pthread_t ans;
     pthread_create(&ans, NULL, answerer, NULL);
     state_int("fail", 0);
@@ -359,12 +359,12 @@ static void pair_tests(void)
     state("pair_mode", false); state("removed", false);
 
     /* the player's own name and a device's, kept and given back to BlueZ */
-    assert(hiby_bt_set_player_name("  Tai's R1\n") && state_has("alias", "Tai's R1"));
-    char n[64]; hiby_bt_player_name(n, sizeof n); assert(!strcmp(n, "Tai's R1"));
+    assert(hiby_bt_set_player_name("  Sam's R1\n") && state_has("alias", "Sam's R1"));
+    char n[64]; hiby_bt_player_name(n, sizeof n); assert(!strcmp(n, "Sam's R1"));
     file_put("alias", "HiBy R1\n");                 /* a reboot: bt_init set HiBy's name again */
     bt_cfg.loaded = false; bt_ready_done = false;
     hiby_bt_disconnect(); hiby_bt_take_audio_pause();
-    assert(hiby_bt_power(true) && state_has("alias", "Tai's R1"));
+    assert(hiby_bt_power(true) && state_has("alias", "Sam's R1"));
     assert(hiby_bt_rename(phones.mac, "Kitchen; rm -rf /") && state_has("dbus_set", "variant:string:Kitchen; rm -rf /"));
     struct hiby_bt_device list[8];
     int count = hiby_bt_devices(list, 8);
@@ -450,17 +450,17 @@ int main(void)
      * colon / underscore spellings of the address used to never match) */
     playing = 1;
     assert(hiby_bt_connect(&phones));
-    assert(strstr(routed_to, "bluealsa:DEV=24:58:7C:8A:10:20"));
+    assert(strstr(routed_to, "bluealsa:DEV=00:1A:7D:DA:71:13"));
     struct hiby_bt_status s;
     hiby_bt_status(&s);
-    assert(s.connected && s.routed && !strcmp(s.mac, "24:58:7C:8A:10:20"));
+    assert(s.connected && s.routed && !strcmp(s.mac, "00:1A:7D:DA:71:13"));
     assert(!strcmp(s.name, "Studio headphones") && !strcmp(s.codec, "AAC"));
     assert(hiby_bt_take_audio_kick() && !hiby_bt_take_audio_pause());
     /* and the headphones are sent the player's volume at once */
     wait_sends();
     int step = (300 * 127 + 300) / 600;
     assert(srv_count == 1 && srv_last == step);
-    assert(!strncmp(srv_last_cmd, "BT:ABSVOL:24_58_7C_8A_10_20 ", 28));
+    assert(!strncmp(srv_last_cmd, "BT:ABSVOL:00_1A_7D_DA_71_13 ", 28));
     printf("PASS: connect routes and reports routed, volume synced on connect (step %d).\n", step);
 
     /* a drag: 120 volume changes in a row never wait for sys_server, and
@@ -546,7 +546,7 @@ int main(void)
     /* routed but BlueALSA silent: the address shown is still BlueZ's */
     state("connected", false);
     hiby_bt_status(&s);
-    assert(s.connected && !strcmp(s.mac, "24:58:7C:8A:10:20"));
+    assert(s.connected && !strcmp(s.mac, "00:1A:7D:DA:71:13"));
     printf("PASS: auto route, status address while BlueALSA is silent.\n");
 
     /* a first page turned away is tried once more; two are given up on */

@@ -30,9 +30,9 @@ bool bt_is_suspended_fast(void);
 static bool sl_bt_demo_on = true;
 static int sl_bt_demo_index = -1;
 static struct hiby_bt_device sl_bt_demo_devices[] = {
-    { "24:58:7C:8A:10:20", "Studio headphones", true },
-    { "D0:3A:2F:91:45:6B", "Pocket speakers", true },
-    { "A4:8E:10:6F:20:33", "Nearby headphones", false }
+    { "00:1A:7D:DA:71:13", "Studio headphones", true },
+    { "00:1A:7D:DA:71:14", "Pocket speakers", true },
+    { "00:1A:7D:DA:71:15", "Nearby headphones", false }
 };
 /* the simulator's names, pairing questions, misses and hangs: the harness
  * sets these to play through every state the real stack can be in */

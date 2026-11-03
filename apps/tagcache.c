@@ -3028,7 +3028,7 @@ static int build_index(int index_type, struct tagcache_header *h, int tmpfd)
             /* There but not opened (the card going away under a commit, as
                at a USB hand-over): fail, and keep the database. Removing it
                here deleted every database file but the scan waiting to be
-               committed, and Tai's R1 lost its whole library (3 Nov). */
+               committed, and a test R1 lost its whole library (3 Nov). */
             logf("master file there but not opened: commit fails");
             return -1;
         }

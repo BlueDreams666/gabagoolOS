@@ -98,7 +98,7 @@ static void hiby_pcm_finish(snd_pcm_t *pcm)
 /* ---------------------------------------- Bluetooth: never block, drop */
 /* A blocking write or start on a Bluetooth PCM waits on BlueALSA. The
  * start also runs on Rockbox threads (mixer_start_pcm from the codec), and
- * those all share one OS thread: Joe's R1 logged the codec thread "stuck"
+ * those all share one OS thread: a second test R1 logged the codec thread "stuck"
  * in a library for 3-6 s with the whole UI frozen (2026-10-23). Bluetooth
  * PCMs are non-blocking; a full output is simply tried again later. */
 static void hiby_pcm_nonblock_if_bt(snd_pcm_t *pcm)

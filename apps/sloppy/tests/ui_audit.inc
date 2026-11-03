@@ -1448,7 +1448,7 @@ static void b9_snake_death(void);
                            global_status.sloppy_volume_on_bt = 1, sl_bt_page())) \
     X("bt-device", au_bt_device()) \
     X("bt-rename", (sl_bt_page(), frame(300), sl_bt_name_page(sl_bt_demo_devices[0].mac, sl_bt_demo_devices[0].name))) \
-    X("bt-player-name", (strlcpy(sl_bt_demo_name, "Tai's R1", sizeof sl_bt_demo_name), sl_bt_player_name_cb(NULL))) \
+    X("bt-player-name", (strlcpy(sl_bt_demo_name, "Sam's R1", sizeof sl_bt_demo_name), sl_bt_player_name_cb(NULL))) \
     X("bt-sbc", (sl_bt_demo_sbc = 1, sl_bt_sbc_page(NULL))) \
     X("bt-pair-confirm", au_bt_ask(HIBY_BT_ASK_CONFIRM, "123456")) \
     X("bt-pair-pin", au_bt_ask(HIBY_BT_ASK_PIN, "")) \
@@ -1634,7 +1634,7 @@ static void au_btrx_connected(void) {
     sl_btrx_begin(); frame(100);
     sl_btrx_demo.state = HIBY_BTRX_CONNECTED; sl_btrx_demo.connects = 1;
     strlcpy(sl_btrx_demo.mac, "AA:BB:CC:DD:EE:01", sizeof sl_btrx_demo.mac);
-    strlcpy(sl_btrx_demo.name, "Tai's iPhone", sizeof sl_btrx_demo.name);
+    strlcpy(sl_btrx_demo.name, "Sam's iPhone", sizeof sl_btrx_demo.name);
     strlcpy(sl_btrx_demo.codec, "AAC", sizeof sl_btrx_demo.codec); sl_btrx_demo.rate = 48000; sl_btrx_demo.channels = 2;
     strlcpy(sl_btrx_demo.title, "Gabagool Groove", sizeof sl_btrx_demo.title);
     strlcpy(sl_btrx_demo.artist, "The Sopranos", sizeof sl_btrx_demo.artist);
@@ -1666,7 +1666,7 @@ static void au_bt_device(void) {
 /* the pairing page as each kind of question shows it */
 static void au_bt_ask(int kind, const char *code) {
     struct hiby_bt_ask a = { .kind = kind, .serial = 9000 + kind };
-    strlcpy(a.mac, "A4:8E:10:6F:20:33", sizeof a.mac);
+    strlcpy(a.mac, "00:1A:7D:DA:71:15", sizeof a.mac);
     strlcpy(a.name, "Volkswagen Golf Radio", sizeof a.name);
     strlcpy(a.code, code, sizeof a.code);
     sl_bt_pair_page(&a);
@@ -1686,7 +1686,7 @@ static void au_bt_reconnecting(void) {
 }
 /* AirPods connected: battery and noise control */
 static void au_bt_airpods(void) {
-    strlcpy(sl_bt_demo_devices[1].name, "Tai's AirPods Pro", sizeof sl_bt_demo_devices[1].name);
+    strlcpy(sl_bt_demo_devices[1].name, "Sam's AirPods Pro", sizeof sl_bt_demo_devices[1].name);
     sl_bt_demo_aap = (struct hiby_bt_aap){ .up = true, .left = 99, .right = 100, .box = 17, .left_charging = true, .noise = 2 };
     sl_bt_demo_index = 1; sl_bt_page();
 }

@@ -171,7 +171,7 @@ static void ot_user_untouched(void)
     free(now);
 }
 
-/* the releases as zips, the update as Tai makes it */
+/* the releases as zips, the update as a release makes it */
 static char *ot_man, *ot_zip;             /* the 1.1 update's manifest and zip */
 static size_t ot_man_n, ot_zip_n;
 static void ot_release(const char *dir, bool new)
