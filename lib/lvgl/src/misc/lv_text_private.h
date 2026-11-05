@@ -179,8 +179,8 @@ static inline bool lv_text_is_marker(uint32_t letter)
 
     /*See https://www.compart.com/en/unicode/block/U+2000*/
     if(letter >= 0x200B && letter <= 0x200F) return true;
-    if(letter >= 0x2028 && letter <= 0x202F) return true;
-    if(letter >= 0x205F && letter <= 0x206F) return true;
+    if(letter >= 0x2028 && letter <= 0x202E) return true;   /*GabagoolOS: U+202F and U+205F are spaces*/
+    if(letter >= 0x2060 && letter <= 0x206F) return true;
 
     /*U+FEFF ZERO WIDTH NO-BREAK SPACE, see https://www.compart.com/en/unicode/block/U+FE70*/
     if(letter == 0xFEFF) return true;

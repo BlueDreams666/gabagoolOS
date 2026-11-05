@@ -283,6 +283,7 @@ static void acts_show(void)
         lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_RIGHT, 0);
     }
     acts_open_now = true;
+    sl_doing_is("a sheet", NULL);
     anim_prop(acts_scrim, set_opa, 0, 110, SL_T_PAGE, NULL);
     anim_prop(acts, set_ty, 520, 0, SL_T_PAGE, NULL);
 }
@@ -4676,15 +4677,9 @@ static void qp_glass_capture(void)
     /* let go when memory ran short: taking 1.5 MB back on the next pull
      * pushed the music and the code out and the pull took seconds (the R1
      * log). The panel's own backdrop stands in until there is room. */
-    if (!qp_glass_px || !qp_sharp_px)
-    {
-        long kb = sl_mem_available_kb();
-        if (kb >= 0 && kb < 10 * 1024)
-        {
-            sl_log("glass: skipped, %ld KiB free", kb);
-            return;
-        }
-    }
+    if ((!qp_glass_px || !qp_sharp_px) &&
+        !sl_mem_room((long)(!qp_glass_px + !qp_sharp_px) * W * H * 2 / 1024, "the glass"))
+        return;
     if (!qp_glass_px) qp_glass_px = malloc((size_t)W * H * 2);
     if (!qp_sharp_px) qp_sharp_px = malloc((size_t)W * H * 2);
     if (!qp_glass_px || !qp_sharp_px) { sl_log("glass: no memory for it"); return; }
@@ -5321,8 +5316,12 @@ static void qp_warmup(lv_timer_t *timer)
 {
     lv_timer_delete(timer);
     if (!qp) { qp_build(); qp_refresh(); }
-    if (!qp_glass_px) qp_glass_px = malloc((size_t)W * H * 2);
-    if (!qp_sharp_px) qp_sharp_px = malloc((size_t)W * H * 2);
+    /* the glass ahead of the first pull, with room for it only */
+    if (!qp_glass_px && !qp_sharp_px && sl_mem_room(W * H * 4 / 1024, "the glass, ahead"))
+    {
+        qp_glass_px = malloc((size_t)W * H * 2);
+        qp_sharp_px = malloc((size_t)W * H * 2);
+    }
     sl_perf_memory("home warmed");
 }
 /* A touch at the top edge may become a pull. The capture is most of its
@@ -5788,6 +5787,7 @@ static void sel_start(int kind, void *view, lv_obj_t *page, int first)
     sel_kind = kind;
     sel_view = view;
     sel_count = 0;
+    sl_doing_is("picking", NULL);
     if (first >= 0) { sel_set(first, true); sel_count = 1; }
     sfx_play(SFX_UI_ON);
     /* the bar sits where the mini player does, which steps aside for it */

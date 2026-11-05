@@ -37,6 +37,7 @@ static const char *const rm_words[] = {
     "Open the browser menu, then Add to Home screen.", "Done", "Software update", "Send an update file",
     "Pair this phone", "Type the code the player shows.", "Pair", "That code is not right.",
     "Too many tries. Wait a minute, then try again.", "That code ran out. Type the new one.",
+    "Download bug report",
 };
 
 /* s as a JSON string, quotes included; control bytes escaped, UTF-8 kept */
@@ -411,6 +412,12 @@ static void rm_tick(lv_timer_t *timer)
     else if (!strcmp(path, "/api/hello")) rm_hello(rm_out, sizeof rm_out);
     else if (!strcmp(path, "/api/queue")) rm_queue(rm_out, sizeof rm_out);
     else if (!strcmp(path, "/api/update")) rm_update(rm_out, sizeof rm_out);
+    else if (!strcmp(path, "/api/report"))   /* the phone's Download bug report: the file, then sloppy_net.c sends it */
+    {
+        char rp[MAX_PATH];
+        if (sl_report_write(rp, sizeof rp)) snprintf(rm_out, sizeof rm_out, "{\"path\":\"%s\"}", rp);
+        else snprintf(rm_out, sizeof rm_out, "{\"error\":\"card\"}");
+    }
     else
     {
         if (!strcmp(path, "/api/cmd") && sl_net_query_param(query, "c", v, sizeof v)) rm_cmd(v);

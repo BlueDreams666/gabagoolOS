@@ -201,7 +201,7 @@ static const struct sq_setting sq_settings[] = {
     { "Brightness", "Display", "dim darker night dark screen backlight light", 0x20021 },
     { "Buttons", "Controls", "play key next key hold previous", 0x2000e },
     { "Headset controls", "Controls", "remote bluetooth wired", 0x2000e },
-    { "Tap to wake", "Controls", "touch wake screen off dark keys", 0x2000e },
+    { "Double tap to wake", "Controls", "touch tap twice wake screen off dark keys", 0x2000e },
     { "Upside down", "Buttons", "rotate rotation turn 180 flip upside down orientation left handed keys other side", 0x2000e },
     { "Notification Center", "Controls", "shortcuts control centre quick", 0x2000f },
     { "Notifications", "Controls", "toasts banners history alerts messages", 0x2000f },

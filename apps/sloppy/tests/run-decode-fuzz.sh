@@ -146,6 +146,27 @@ play() {
     play1 "$1" ":offset=$((size / 2))" " (from byte $((size / 2)))"
 }
 status=0
+# Gapless: a tone of an odd number of frames, encoded the way a Mac or
+# iTunes does (AAC with its priming and padding noted) and as FLAC, comes
+# out of the decoder the same length to the frame: the encoder's silence is
+# trimmed, nothing of the song is. (MP3: no encoder here to make one.)
+python3 -I - "$work/tone.wav" <<'PY'
+import math, struct, sys, wave
+n = 88237                                   # 2 s and 37 frames at 44.1 kHz
+w = wave.open(sys.argv[1], 'wb'); w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100)
+w.writeframes(b''.join(struct.pack('<hh', int(9000 * math.sin(i * 0.0627)), int(9000 * math.sin(i * 0.0313))) for i in range(n)))
+w.close()
+PY
+frames() { python3 -I -c 'import sys,wave; print(wave.open(sys.argv[1]).getnframes())' "$1"; }
+want=$(frames "$work/tone.wav")
+for kind in "m4af aac m4a" "flac flac flac"; do
+    read -r ff df ext <<< "$kind"
+    if ! afconvert -f "$ff" -d "$df" "$work/tone.wav" "$work/tone.$ext" >/dev/null 2>&1; then echo "skip gapless .$ext: afconvert can't write it"; continue; fi
+    "$B/warble.hibyr1" "$work/tone.$ext" "$work/out-$ext.wav" >/dev/null 2>"$work/err" || true
+    got=$(frames "$work/out-$ext.wav" 2>/dev/null || echo 0)
+    if [ "$got" = "$want" ]; then echo "ok  gapless .$ext: $got frames in, $got out"
+    else echo "FAIL gapless .$ext: $want frames in, $got out ($(grep -m1 Trim "$work/err" || echo no trim))"; status=1; fi
+done
 for f in "$test_dir"/decode/*; do
     why=$(play "$f")
     if [ -n "$why" ]; then echo "FAIL decode/$(basename "$f"): $why"; status=1; fi

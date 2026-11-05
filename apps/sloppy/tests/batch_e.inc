@@ -170,7 +170,7 @@ static void e_radio_tests(void) {
  * client built here from their specs (plain sockets, no dependencies) ---- */
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#define E_RX_DIR "/tmp/sloppy-ui-test-root/Music/Received"
+#define E_RX_DIR SIM_ROOT "/Music/Received"
 static int e_connect(int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0); assert(fd >= 0);
     struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons((uint16_t)port) };
@@ -214,8 +214,8 @@ static void *e_bg_run(void *v) { struct e_bg *b = v; b->status = e_req(b->port, 
 static void e_bg_start(struct e_bg *b, pthread_t *t) { b->done = false; b->status = 0; assert(!pthread_create(t, NULL, e_bg_run, b)); }
 /* SHA-256 of a buffer, the sender's way: the reference vector is checked first */
 static void e_sha(const void *d, size_t n, char hex[65]) {   /* the system's shasum: the receiver must agree with it */
-    FILE *f = fopen("/tmp/sloppy-e-sha.bin", "wb"); assert(f); if (n) fwrite(d, 1, n, f); fclose(f);
-    FILE *p = popen("shasum -a 256 /tmp/sloppy-e-sha.bin", "r"); assert(p); assert(fscanf(p, "%64s", hex) == 1); pclose(p);
+    FILE *f = fopen(SIM_TMP "/sloppy-e-sha.bin", "wb"); assert(f); if (n) fwrite(d, 1, n, f); fclose(f);
+    FILE *p = popen("shasum -a 256 " SIM_TMP "/sloppy-e-sha.bin", "r"); assert(p); assert(fscanf(p, "%64s", hex) == 1); pclose(p);
 }
 static bool e_json_str(const char *j, const char *key, char *out, size_t cap) {
     char k[96]; snprintf(k, sizeof k, "\"%s\":\"", key); const char *p = strstr(j, k); if (!p) return false;
@@ -493,8 +493,8 @@ static int lff(const char *url, const char *auth, const char *body, char *out, s
 static void e_lfm_play(const char *path, const char *title, unsigned long ms) { lbf_play(path, title, ms); scr_poll(); frame(100); }
 
 static void e_lastfm_tests(void) {
-    assert(!system("rm -f /tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.tsv /tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.session"
-                   " && mkdir -p /tmp/sloppy-ui-test-root/.rockbox/sloppy"));
+    assert(!system("rm -f " SIM_ROOT "/.rockbox/sloppy/lastfm.tsv " SIM_ROOT "/.rockbox/sloppy/lastfm.session"
+                   " && mkdir -p " SIM_ROOT "/.rockbox/sloppy"));
     const char *k0 = sl_lastfm_key, *s0 = sl_lastfm_secret; unsigned poll0 = sl_lastfm_poll_ms;
     sl_lastfm_key = "testkey"; sl_lastfm_secret = "testsecret"; sl_lastfm_poll_ms = 0;
     sl_net_scrobble_fake = lff;
@@ -529,10 +529,10 @@ static void e_lastfm_tests(void) {
     scr_poll(); frame(100);
     assert(lff_scrobbled == 1 && strstr(lff_last, "track%5B0%5D=Harbor%20Lights") && strstr(lff_last, "trackNumber%5B0%5D=4") && !lff_bad_sig);
     assert(scr_st.lfm_queued == 0);
-    {   FILE *f = fopen("/tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.session", "r"); char b[128] = ""; assert(f && fgets(b, sizeof b, f)); fclose(f);
+    {   FILE *f = fopen(SIM_ROOT "/.rockbox/sloppy/lastfm.session", "r"); char b[128] = ""; assert(f && fgets(b, sizeof b, f)); fclose(f);
         assert(!strcmp(b, "tai\tsk0123456789secretSESSION\n"));
-        struct stat sb; assert(!stat("/tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.session", &sb) && (sb.st_mode & 077) == 0);
-        assert(access("/tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.session.tmp", F_OK)); }   /* written aside and renamed: none left */
+        struct stat sb; assert(!stat(SIM_ROOT "/.rockbox/sloppy/lastfm.session", &sb) && (sb.st_mode & 077) == 0);
+        assert(access(SIM_ROOT "/.rockbox/sloppy/lastfm.session.tmp", F_OK)); }   /* written aside and renamed: none left */
     page_pop(); frame(400);
     assert(has_text(scr_page_obj, "tai") && !lv_obj_has_flag(scr_lfm_out_row, LV_OBJ_FLAG_HIDDEN));
     /* what plays now goes as it starts, then as it counts */
@@ -568,7 +568,7 @@ static void e_lastfm_tests(void) {
     while (npages > 1 && pages[npages - 1] != scr_page_obj) { page_pop(); frame(300); }
     /* signed out: the file goes */
     lv_obj_send_event(scr_lfm_out_row, LV_EVENT_CLICKED, NULL); scr_poll(); frame(300);
-    assert(scr_st.lfm == SL_LFM_OUT && access("/tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.session", F_OK) != 0);
+    assert(scr_st.lfm == SL_LFM_OUT && access(SIM_ROOT "/.rockbox/sloppy/lastfm.session", F_OK) != 0);
     assert(has_text(scr_page_obj, "Not signed in") && lv_obj_has_flag(scr_lfm_out_row, LV_OBJ_FLAG_HIDDEN));
     /* never in the log, never on screen */
     assert(!lbf_log_has("sk0123456789secretSESSION") && !lbf_log_has("right pass") && !lbf_log_has("tok0123456789") && lbf_log_has("Last.fm: 1 scrobbled"));
@@ -580,7 +580,7 @@ static void e_lastfm_tests(void) {
     /* a release carries the key in the card's keys file, scrambled as make-keys.py writes it;
      * a file that is not one is left alone */
     {
-        const char *kf = "/tmp/sloppy-ui-test-root/.rockbox/sloppy/keys.bin";
+        const char *kf = SIM_ROOT "/.rockbox/sloppy/keys.bin";
         for (int bad = 0; bad < 2; bad++) {
             unsigned char b[64] = "GBK1lastfm\tfilekey123\tfilesecret456\n";
             size_t n = strlen((char *)b);
@@ -608,7 +608,7 @@ static void e_lastfm_tests(void) {
 }
 
 /* ---- lyrics and covers for the library: a fake LRCLIB, MusicBrainz and Cover Art Archive ---- */
-#define E_LIB_ROOT "/tmp/sloppy-ui-test-root/Music/E-Lib"
+#define E_LIB_ROOT SIM_ROOT "/Music/E-Lib"
 static pthread_mutex_t ljf_lock = PTHREAD_MUTEX_INITIALIZER;
 static int ljf_n, ljf_slow_ms;
 static char ljf_urls[64][400];
@@ -660,7 +660,7 @@ static void e_lib_make(void) {
         free(e_lib_paths[i]); e_lib_paths[i] = strdup(p);
         tr[i] = (struct sl_track){ e_lib_paths[i], titles[i], a, i % 2 + 1, 1, 200000 + i * 1000, 0, true, NULL, 0, 0, 0 }; tsplit(&tr[i]);
         tl[a][i % 2] = i; st[i] = i;
-        char real[400]; snprintf(real, sizeof real, "/tmp/sloppy-ui-test-root%s", p);
+        char real[400]; snprintf(real, sizeof real, SIM_ROOT "%s", p);
         FILE *f = fopen(real, "wb"); assert(f); fputs("x", f); fclose(f);
     }
     /* one song with its words already; one folder with its own cover */
@@ -687,8 +687,8 @@ static void e_libjob_tests(void) {
     assert(sl_libjob_lrc_path("/Music/a.b/noext", b, sizeof b, ".lrc") && !strcmp(b, "/Music/a.b/noext.lrc"));
     assert(sl_libjob_json_str("{\"x\":\"a\\\"b\\u00e9\\ud83d\\ude00\"}", "x", b, sizeof b) && !strcmp(b, "a\"b\xc3\xa9\xf0\x9f\x98\x80"));
     assert(!sl_libjob_json_str("{\"x\":null}", "x", b, sizeof b));
-    assert(!system("rm -f /tmp/sloppy-ui-test-root/.rockbox/sloppy/lyrics.miss /tmp/sloppy-ui-test-root/.rockbox/sloppy/covers.miss "
-                   "/tmp/sloppy-ui-test-root/.rockbox/sloppy/lyrics.pos /tmp/sloppy-ui-test-root/.rockbox/sloppy/covers.pos"));
+    assert(!system("rm -f " SIM_ROOT "/.rockbox/sloppy/lyrics.miss " SIM_ROOT "/.rockbox/sloppy/covers.miss "
+                   SIM_ROOT "/.rockbox/sloppy/lyrics.pos " SIM_ROOT "/.rockbox/sloppy/covers.pos"));
     int ps = fake_find(ROCKBOX_DIR "/sloppy/lyrics.pos"); (void)ps;
     bool conn0 = wf_st.connected;
     e_lib_make();
@@ -718,7 +718,7 @@ static void e_libjob_tests(void) {
     lb_start(SL_LIBJOB_LYRICS); e_job_wait(10000);
     assert(lb_st.state == SL_LIBJOB_DONE && ljf_n == 0 && lb_st.had == 3 && lb_st.missing == 5 && lb_st.found == 0);
     /* stopped half way, then carried on from there */
-    assert(!system("rm -f /tmp/sloppy-ui-test-root/.rockbox/sloppy/lyrics.miss '" E_LIB_ROOT "/Blue Hours/01 Night Drive.lrc' '" E_LIB_ROOT "/Blue Hours/02 Harbor.lrc'"));
+    assert(!system("rm -f " SIM_ROOT "/.rockbox/sloppy/lyrics.miss '" E_LIB_ROOT "/Blue Hours/01 Night Drive.lrc' '" E_LIB_ROOT "/Blue Hours/02 Harbor.lrc'"));
     ljf_n = 0; sl_libjob_lrclib_ms = 300;
     lb_start(SL_LIBJOB_LYRICS);
     for (int i = 0; i < 400 && lb_st.fed < 3; i++) { lb_poll(); frame(20); usleep(5000); }
@@ -731,7 +731,7 @@ static void e_libjob_tests(void) {
     lb_start(SL_LIBJOB_LYRICS); e_job_wait(10000);
     assert(lb_st.state == SL_LIBJOB_DONE && lb_st.fed == 8 && ljf_n - asked == 8 - stopped_at - (stopped_at <= 4 ? 1 : 0) && lb_pos_load(SL_LIBJOB_LYRICS) == 0);
     /* a server that does not answer for seconds: the player goes on, and Stop is at once */
-    assert(!system("rm -f /tmp/sloppy-ui-test-root/.rockbox/sloppy/lyrics.miss /tmp/sloppy-ui-test-root/.rockbox/sloppy/lyrics.pos '" E_LIB_ROOT "/Blue Hours/01 Night Drive.lrc'"));
+    assert(!system("rm -f " SIM_ROOT "/.rockbox/sloppy/lyrics.miss " SIM_ROOT "/.rockbox/sloppy/lyrics.pos '" E_LIB_ROOT "/Blue Hours/01 Night Drive.lrc'"));
     ljf_slow_ms = 3000; ljf_n = 0; sl_libjob_lrclib_ms = 20;
     lb_start(SL_LIBJOB_LYRICS);
     uint64_t worst = 0, t0 = e_ms();
@@ -744,7 +744,7 @@ static void e_libjob_tests(void) {
     assert(worst < 100 && stop_ms < 20 && lb_kind < 0 && lb_st.state == SL_LIBJOB_STOPPED);
     ljf_slow_ms = 0;
     /* no Wi-Fi: it waits, and goes on when it is back; USB mode the same */
-    assert(!system("rm -f /tmp/sloppy-ui-test-root/.rockbox/sloppy/lyrics.pos"));
+    assert(!system("rm -f " SIM_ROOT "/.rockbox/sloppy/lyrics.pos"));
     wf_st.connected = false; ljf_n = 0;
     lb_start(SL_LIBJOB_LYRICS);
     for (int i = 0; i < 40; i++) { lb_poll(); frame(20); usleep(5000); }
@@ -854,9 +854,9 @@ static void e_radio_format_tests(void) {
     static int16_t pcm[2 * 400000];
     size_t got; unsigned rate;
     /* native FLAC and FLAC in Ogg: every sample as encoded (lossless) */
-    e_copy("sloppyos/apps/sloppy/tests/tone.flac", "/tmp/sloppy-e.flac");
-    e_copy("sloppyos/apps/sloppy/tests/tone-flac.ogg", "/tmp/sloppy-e-flac.ogg");
-    const char *flacs[2] = { "/tmp/sloppy-e.flac", "/tmp/sloppy-e-flac.ogg" };
+    e_copy("sloppyos/apps/sloppy/tests/tone.flac", SIM_TMP "/sloppy-e.flac");
+    e_copy("sloppyos/apps/sloppy/tests/tone-flac.ogg", SIM_TMP "/sloppy-e-flac.ogg");
+    const char *flacs[2] = { SIM_TMP "/sloppy-e.flac", SIM_TMP "/sloppy-e-flac.ogg" };
     for (int k = 0; k < 2; k++) {
         int st = e_radio_play(flacs[k], pcm, 400000, &got, &rate);
         assert(st == SL_RADIO_ENDED && rate == 44100 && got >= 44100);
@@ -867,44 +867,44 @@ static void e_radio_format_tests(void) {
     /* Ogg Vorbis: a sample from this Mac when given (not in git: the vectors here can't be made without an encoder) */
     const char *vs = getenv("SLOPPY_VORBIS_SAMPLE");
     if (vs) {
-        e_copy(vs, "/tmp/sloppy-e-vorbis.ogg");
-        int st = e_radio_play("/tmp/sloppy-e-vorbis.ogg", pcm, 400000, &got, &rate);
+        e_copy(vs, SIM_TMP "/sloppy-e-vorbis.ogg");
+        int st = e_radio_play(SIM_TMP "/sloppy-e-vorbis.ogg", pcm, 400000, &got, &rate);
         assert((st == SL_RADIO_ENDED || st == SL_RADIO_PLAYING) && rate >= 8000 && got > 1000);
-        FILE *o = fopen("/tmp/sloppy-e-vorbis.raw", "wb"); if (o) { fwrite(pcm, 4, got, o); fclose(o); }
+        FILE *o = fopen(SIM_TMP "/sloppy-e-vorbis.raw", "wb"); if (o) { fwrite(pcm, 4, got, o); fclose(o); }
     }
     /* HLS: a playlist of MPEG-TS segments, one packed ADTS segment with its ID3 tag; on demand (ENDLIST) */
     const char *aac = "sloppyos/apps/sloppy/tests/tone.aac";
-    assert(!system("rm -rf /tmp/sloppy-e-hls && mkdir -p /tmp/sloppy-e-hls/media"));
+    assert(!system("rm -rf " SIM_TMP "/sloppy-e-hls && mkdir -p " SIM_TMP "/sloppy-e-hls/media"));
     size_t c1 = e_adts_cut(aac, 8000), c2 = e_adts_cut(aac, 16000), c3 = e_adts_cut(aac, 200000);
-    e_make_ts(aac, 0, c1, "/tmp/sloppy-e-hls/media/seg0.ts");
-    e_make_ts(aac, c1, c2 - c1, "/tmp/sloppy-e-hls/media/seg1.ts");
+    e_make_ts(aac, 0, c1, SIM_TMP "/sloppy-e-hls/media/seg0.ts");
+    e_make_ts(aac, c1, c2 - c1, SIM_TMP "/sloppy-e-hls/media/seg1.ts");
     {   FILE *in = fopen(aac, "rb"); static unsigned char all[200000]; size_t n = fread(all, 1, sizeof all, in); fclose(in);
-        FILE *f = fopen("/tmp/sloppy-e-hls/media/seg2.aac", "wb");
+        FILE *f = fopen(SIM_TMP "/sloppy-e-hls/media/seg2.aac", "wb");
         static const unsigned char id3[] = { 'I', 'D', '3', 4, 0, 0, 0, 0, 0, 10, 'P', 'R', 'I', 'V', 0, 0, 0, 0, 0, 0 };
         fwrite(id3, 1, sizeof id3, f); fwrite(all + c2, 1, (c3 < n ? c3 : n) - c2, f); fclose(f); }
-    FILE *m = fopen("/tmp/sloppy-e-hls/media/live.m3u8", "w");
+    FILE *m = fopen(SIM_TMP "/sloppy-e-hls/media/live.m3u8", "w");
     fputs("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:0.5,\nseg0.ts\n#EXTINF:0.5,\nseg1.ts\n#EXTINF:1.0,\nseg2.aac\n#EXT-X-ENDLIST\n", m); fclose(m);
-    m = fopen("/tmp/sloppy-e-hls/master.m3u8", "w");
+    m = fopen(SIM_TMP "/sloppy-e-hls/master.m3u8", "w");
     fputs("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=96000,CODECS=\"mp4a.40.2\"\nmedia/live.m3u8\n"
           "#EXT-X-STREAM-INF:BANDWIDTH=5000000,CODECS=\"avc1.4d401f,mp4a.40.2\"\nvideo/big.m3u8\n", m); fclose(m);
-    int st = e_radio_play("/tmp/sloppy-e-hls/master.m3u8", pcm, 400000, &got, &rate);
+    int st = e_radio_play(SIM_TMP "/sloppy-e-hls/master.m3u8", pcm, 400000, &got, &rate);
     assert(st == SL_RADIO_ENDED && rate >= 32000 && got > (size_t)rate * 2);   /* through all three segments */
     size_t whole = got;
     double sum = 0; for (size_t i = 0; i < got; i++) sum += (double)pcm[i * 2] * pcm[i * 2];
     assert(sqrt(sum / (double)got) > 1000);   /* sound, not silence */
     /* live: the playlist grows while it plays; the new segment is fetched, the old ones are not again */
-    m = fopen("/tmp/sloppy-e-hls/media/grow.m3u8", "w");
+    m = fopen(SIM_TMP "/sloppy-e-hls/media/grow.m3u8", "w");
     fputs("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:100\n#EXTINF:0.5,\nseg0.ts\n#EXTINF:0.5,\nseg1.ts\n", m); fclose(m);
-    assert(sl_net_radio_start("/tmp/sloppy-e-hls/media/grow.m3u8"));
+    assert(sl_net_radio_start(SIM_TMP "/sloppy-e-hls/media/grow.m3u8"));
     got = 0;
     uint64_t t0 = e_ms();
     bool grown = false;
     while (e_ms() - t0 < 8000) {
         got += sl_net_radio_read(pcm + got * 2, 400000 - got < 4096 ? 400000 - got : 4096);
         if (!grown && e_ms() - t0 > 300) {
-            m = fopen("/tmp/sloppy-e-hls/media/grow.m3u8.new", "w");
+            m = fopen(SIM_TMP "/sloppy-e-hls/media/grow.m3u8.new", "w");
             fputs("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:101\n#EXTINF:0.5,\nseg1.ts\n#EXTINF:1.0,\nseg2.aac\n#EXT-X-ENDLIST\n", m); fclose(m);
-            assert(!system("mv -f /tmp/sloppy-e-hls/media/grow.m3u8.new /tmp/sloppy-e-hls/media/grow.m3u8"));   /* rename() here is Rockbox's */
+            assert(!system("mv -f " SIM_TMP "/sloppy-e-hls/media/grow.m3u8.new " SIM_TMP "/sloppy-e-hls/media/grow.m3u8"));   /* rename() here is Rockbox's */
             grown = true;
         }
         if (sl_net_radio_state() == SL_RADIO_ENDED && !sl_net_radio_buffered()) break;
@@ -915,17 +915,17 @@ static void e_radio_format_tests(void) {
     printf("radio grow.m3u8: %zu frames after the playlist grew (the whole tone is %zu)\n", live_frames, whole);
     assert(st == SL_RADIO_ENDED && live_frames + 4096 >= whole && live_frames <= whole + 4096);   /* the first two and the one added, each once */
     /* the ones it can't: said by name */
-    m = fopen("/tmp/sloppy-e-hls/locked.m3u8", "w");
+    m = fopen(SIM_TMP "/sloppy-e-hls/locked.m3u8", "w");
     fputs("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXTINF:6,\nmedia/seg0.ts\n", m); fclose(m);
-    st = e_radio_play("/tmp/sloppy-e-hls/locked.m3u8", pcm, 400000, &got, &rate);
+    st = e_radio_play(SIM_TMP "/sloppy-e-hls/locked.m3u8", pcm, 400000, &got, &rate);
     char why[256]; sl_net_radio_why(why, sizeof why);
     assert(st == SL_RADIO_FAILED && strstr(why, "encrypted HLS"));
     /* Ogg Opus: macOS's encoder made the vector (make_opus_vector.py); the
      * decode against the tone it came from, and against Apple's decoder */
-    e_copy("sloppyos/apps/sloppy/tests/tone-opus.ogg", "/tmp/sloppy-e-opus.ogg");
-    st = e_radio_play("/tmp/sloppy-e-opus.ogg", pcm, 400000, &got, &rate);
+    e_copy("sloppyos/apps/sloppy/tests/tone-opus.ogg", SIM_TMP "/sloppy-e-opus.ogg");
+    st = e_radio_play(SIM_TMP "/sloppy-e-opus.ogg", pcm, 400000, &got, &rate);
     assert(st == SL_RADIO_ENDED && rate == 48000 && got == 76 * 960 - 312);   /* every packet, the pre-skip left out */
-    {   FILE *raw = fopen("/tmp/sloppy-e-opus.raw", "wb"); if (raw) { fwrite(pcm, 4, got, raw); fclose(raw); } }
+    {   FILE *raw = fopen(SIM_TMP "/sloppy-e-opus.raw", "wb"); if (raw) { fwrite(pcm, 4, got, raw); fclose(raw); } }
     /* each side against its tone: the sine at its frequency fitted (any delay
      * or phase the encoder adds), what is left over is the error */
     double snr_tone = 1e9, snr_apple = 0, sig, err;
@@ -941,8 +941,8 @@ static void e_radio_format_tests(void) {
         if (snr < snr_tone) snr_tone = snr;
     }
     assert(snr_tone > 30);
-    if (!system("command -v afconvert >/dev/null 2>&1 && afconvert -f WAVE -d LEI16@48000 /tmp/sloppy-e-opus.ogg /tmp/sloppy-e-opus.wav")) {
-        FILE *w = fopen("/tmp/sloppy-e-opus.wav", "rb"); assert(w);
+    if (!system("command -v afconvert >/dev/null 2>&1 && afconvert -f WAVE -d LEI16@48000 " SIM_TMP "/sloppy-e-opus.ogg " SIM_TMP "/sloppy-e-opus.wav")) {
+        FILE *w = fopen(SIM_TMP "/sloppy-e-opus.wav", "rb"); assert(w);
         static unsigned char wav[44 + 72000 * 4 + 4096]; size_t wn = fread(wav, 1, sizeof wav, w); fclose(w);
         size_t at = 12; while (at + 8 < wn && memcmp(wav + at, "data", 4)) at += 8 + (wav[at + 4] | wav[at + 5] << 8 | wav[at + 6] << 16);
         const int16_t *ref = (const int16_t *)(wav + at + 8); size_t rn = (wn - at - 8) / 4;
@@ -954,11 +954,11 @@ static void e_radio_format_tests(void) {
         assert(rn == 72000 && snr_apple > 60);
     }
     /* more than two channels: said by name */
-    FILE *o = fopen("/tmp/sloppy-e-opus6.ogg", "wb");
+    FILE *o = fopen(SIM_TMP "/sloppy-e-opus6.ogg", "wb");
     static const unsigned char opus6[] = { 'O','g','g','S',0,2, 0,0,0,0,0,0,0,0, 1,0,0,0, 0,0,0,0, 0,0,0,0, 1, 27,
         'O','p','u','s','H','e','a','d',1,6,0x38,1,0x80,0xbb,0,0,0,0,1, 4,2, 0,4,1,2,3,5 };
     fwrite(opus6, 1, sizeof opus6, o); fclose(o);
-    st = e_radio_play("/tmp/sloppy-e-opus6.ogg", pcm, 400000, &got, &rate);
+    st = e_radio_play(SIM_TMP "/sloppy-e-opus6.ogg", pcm, 400000, &got, &rate);
     sl_net_radio_why(why, sizeof why);
     assert(st == SL_RADIO_FAILED && strstr(why, "Ogg Opus with 6 channels"));
     printf("PASS: internet radio formats: FLAC and Ogg FLAC sample for sample, HLS (master playlist, MPEG-TS and packed AAC segments, a live playlist that grows), "
@@ -1050,7 +1050,7 @@ static void e_au_receive(int which) {
 static bool e_lfm_dirty;
 static void e_lfm_begin(void) {
     e_lfm_dirty = true;
-    assert(!system("rm -f /tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.tsv /tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.session"));
+    assert(!system("rm -f " SIM_ROOT "/.rockbox/sloppy/lastfm.tsv " SIM_ROOT "/.rockbox/sloppy/lastfm.session"));
     sl_lastfm_key = "testkey"; sl_lastfm_secret = "testsecret"; sl_lastfm_poll_ms = 0;
     sl_net_scrobble_fake = lff; lff_lost = 0; lff_polls = 0;
     wf_st.connected = true; sl_net_scrobble_online(true); sl_net_scrobble_hold(false);
@@ -1061,7 +1061,7 @@ static void e_lfm_end(void) {
     e_lfm_dirty = false;
     sl_net_lastfm_signout(); global_settings.sloppy_lastfm = 0; scr_apply(); scr_poll();
     sl_net_scrobble_fake = NULL; sl_lastfm_key = ""; sl_lastfm_secret = ""; sl_lastfm_poll_ms = 4000; lff_approve_after = 2; lff_lost = 0;
-    assert(!system("rm -f /tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.tsv /tmp/sloppy-ui-test-root/.rockbox/sloppy/lastfm.session"));
+    assert(!system("rm -f " SIM_ROOT "/.rockbox/sloppy/lastfm.tsv " SIM_ROOT "/.rockbox/sloppy/lastfm.session"));
 }
 static void e_au_lastfm(int which) {
     if (!e_au_dirty) e_au_conn0 = wf_st.connected;

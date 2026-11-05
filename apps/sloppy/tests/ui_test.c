@@ -8,6 +8,13 @@ static const uint16_t *sl_test_pixels(void);
 #define SL_SCREEN_STRIDE W
 /* the card's root: here, the fake card */
 #define SL_CARD_ROOT "/Card"
+/* the harness's real files: a folder of this checkout's own (build-ui-tests.py
+ * names it), so two checkouts' runs never read each other's files */
+#ifndef SIM_ROOT
+#define SIM_ROOT "/tmp/sloppy-ui-test-root"
+#endif
+#define SIM_TMP SIM_ROOT "-scratch"   /* the tests' own files, beside the card, not on it */
+const char rbversion[] = "test-build";
 #include "../sloppy.c"
 #include "gb_testrom.h"
 /* the Audiobook Mod, as far as the Audiobooks page sees it (defined at the end) */
@@ -219,7 +226,7 @@ int playlist_randomise(struct playlist_info *p, unsigned int seed, bool start) {
 int playlist_sort(struct playlist_info *p, bool start) {(void)p;(void)start;return 0;}
 int playlist_amount(void) { return queued; }
 int playlist_add(const char *f) { (void)f; queued++; return 0; }
-const char *sim_root_dir = "/tmp/sloppy-ui-test-root";   /* sloppy_net.c's card root */
+const char *sim_root_dir = SIM_ROOT "";   /* sloppy_net.c's card root */
 volatile bool sim_card_away;   /* USB mode's handover, as usb_card_away() says on the R1 */
 #include "../../../firmware/target/hosted/card-guard.h"   /* the R1's file layer's very check */
 #define SIM_CARD_GUARD(p) do { if (card_guard_refuses((p), sim_card_away, "")) { errno = EROFS; return -1; } } while (0)
@@ -295,6 +302,7 @@ enum channel_status mixer_channel_status(enum pcm_mixer_channel c) { (void)c; re
 void mixer_channel_play_pause(enum pcm_mixer_channel c, bool play) { (void)c; test_chan = play ? CHANNEL_PLAYING : CHANNEL_PAUSED; }
 static pcmbuf_filter_fn test_filter;
 void pcmbuf_set_filter(pcmbuf_filter_fn fn) { test_filter = fn; }
+bool pcmbuf_is_lowdata(void) { return false; }   /* Record lag's underrun lines */
 static int test_fades;   /* Your taste: a snippet faded out as its card went */
 void pcmbuf_fade(bool fade, bool in) { if (fade && !in) test_fades++; }
 static long test_sleep_fade = -2; static bool test_sleep_fade_voice; static int test_sleep_fades;
@@ -338,8 +346,9 @@ void lcd_set_sleep_after_backlight_off(int s) { test_lcd_sleep = s; }
 void backlight_set_dim_brightness(int v) { (void)v; }
 void backlight_set_fade_in(bool v) { (void)v; }
 void backlight_set_off_timeout(int v) { (void)v; }
-void backlight_set_timeout(int v) { (void)v; }
-void backlight_set_timeout_plugged(int v) { (void)v; }
+static int test_bl_tmo = -1, test_bl_tmo_plugged = -1, test_usb_bl_tmo = -1, test_usb_bl_tmo_plugged = -1;
+void backlight_set_timeout(int v) { test_bl_tmo = v; }
+void backlight_set_timeout_plugged(int v) { test_bl_tmo_plugged = v; }
 void touchscreen_set_mode(enum touchscreen_mode mode) { (void)mode; }
 int plugin_load(const char *p, const void *a) { (void)p; (void)a; return 0; }
 #include <unistd.h>
@@ -354,7 +363,7 @@ static int test_usb_fds = -1, test_usb_screens;
 static int test_open_fds(void) { int n = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) n++; return n; }
 long default_event_handler(long event) {
     test_events++; if (event == SYS_PHONE_UNPLUGGED) audio_pause();
-    if (event == SYS_USB_CONNECTED) { test_usb_lib_frees = test_lib_frees; test_usb_dirs_open = fake_dirs_open; test_usb_fds = test_open_fds(); test_usb_screens++; }   /* what had let go when Rockbox took the card */
+    if (event == SYS_USB_CONNECTED) { test_usb_lib_frees = test_lib_frees; test_usb_dirs_open = fake_dirs_open; test_usb_fds = test_open_fds(); test_usb_screens++; test_usb_bl_tmo = test_bl_tmo; test_usb_bl_tmo_plugged = test_bl_tmo_plugged; }   /* what had let go when Rockbox took the card */
     return event;
 }
 struct viewport *lcd_set_viewport(struct viewport *vp) { return vp; }
@@ -1677,6 +1686,13 @@ static void test_packs(void) {
         void *b = malloc(n); assert(fread(b, 1, n, f) == (size_t)n); fclose(f);
         snprintf(dst, sizeof dst, ROCKBOX_DIR "/sloppy/fonts/%s.slf", xf_packs[i].name); fake_put(dst, b, n); free(b);
     }
+    for (unsigned i = 0; i < ARRAYLEN(xe_packs); i++) {   /* and the colour emoji */
+        char src[700], dst[100]; snprintf(src, sizeof src, "%s/../fonts/packs/%s.slf", dir, xe_packs[i].name);
+        FILE *f = fopen(src, "rb"); assert(f);
+        fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+        void *b = malloc(n); assert(fread(b, 1, n, f) == (size_t)n); fclose(f);
+        snprintf(dst, sizeof dst, ROCKBOX_DIR "/sloppy/fonts/%s.slf", xe_packs[i].name); fake_put(dst, b, n); free(b);
+    }
 }
 /* SLOPPY_B9_PERF=1: frames of the batch 9 games, at the R1's estimated cost */
 static void b9_perf(void) {
@@ -2127,6 +2143,40 @@ static void bt13_tests(void)
     bt_tap_label(sl_bt_body, "Studio headphones"); frame(100); frame(100);
     assert(sl_bt_state.routed);
     printf("PASS: a slow or stuck Bluetooth never blocks the UI; the watchdog lets go at 180 s and says why.\n");
+    {   /* after a forced reboot (a tester, 5 Nov: "the Bluetooth toggle does nothing"): left on, the stack never
+         * answers. The panel's tile opens the page; once the power-on is let go the page stops asking (each
+         * ask hung for 45 s and kept the switch grey for good) and says so, and the switch tries again */
+        while (npages > 1) { page_pop(); frame(500); }
+        sl_bt_known = false; sl_bt_silent = false; sl_bt_demo_hang = true;
+        sl_bt_startup(); frame(100);
+        assert(sl_bt_busy && sl_bt_job == SL_BT_JOB_POWER);
+        ccx_open(); ccx_grow(); ccx_tap(qp_tiles[ccx_tile(9)]); frame(500); frame(500);
+        assert(!qp_open && sl_bt_page_obj == pages[npages - 1]);   /* not a toggle: the page */
+        assert(sl_bt_switch && lv_obj_has_state(sl_bt_switch, LV_STATE_DISABLED) && find_label(sl_bt_body, "Checking Bluetooth…"));
+        lv_obj_send_event(sl_bt_switch, LV_EVENT_VALUE_CHANGED, NULL); frame(100);
+        assert(sl_bt_busy && sl_bt_job == SL_BT_JOB_POWER);   /* busy: the switch is put back */
+        int s = 0; while (sl_bt_busy && s < 90) { frame(1000); s++; }
+        assert(!sl_bt_busy && sl_bt_silent && bt_note_has("Bluetooth stopped answering"));
+        int dead = 0, asked = 0;
+        for (int i = 0; i < 120; i++)
+        {
+            frame(1000);
+            dead += !sl_bt_switch || lv_obj_has_state(sl_bt_switch, LV_STATE_DISABLED);
+            asked += sl_bt_busy;
+        }
+        assert(!asked);
+        assert(!dead);
+        assert(find_label(sl_bt_body, "Not answering · Tap to retry"));
+        printf("stack gone after a reset: the power-on let go after %d s with one note; then the switch was live and nothing hung for 120 s\n", s);
+        /* the stack is back: a tap on the switch tries the power-on again */
+        sl_bt_demo_hang = false;
+        lv_obj_add_state(sl_bt_switch, LV_STATE_CHECKED);
+        lv_obj_send_event(sl_bt_switch, LV_EVENT_VALUE_CHANGED, NULL);
+        assert(sl_bt_busy && sl_bt_job == SL_BT_JOB_POWER && sl_bt_job_power);   /* the answer comes within a frame */
+        s = 0; while ((sl_bt_busy || !sl_bt_known) && s < 60) { frame(1000); s++; }
+        frame(4100); frame(100);
+        assert(sl_bt_known && !sl_bt_silent && sl_bt_state.enabled && sl_bt_switch && !lv_obj_has_state(sl_bt_switch, LV_STATE_DISABLED));
+    }
 
     /* AirPods: battery and noise control from AAP, a mode asked for */
     sl_bt_demo_aap = (struct hiby_bt_aap){ .up = true, .left = 99, .right = 100, .box = 17, .left_charging = true, .noise = 2 };
@@ -2273,6 +2323,7 @@ static void dt_probe(void)
 }
 
 int main(void) {
+    if (system("mkdir -p '" SIM_ROOT "' '" SIM_TMP "'")) return 1;
     if (getenv("SLOPPY_LOG_DUMP")) atexit(log_dump_atexit);
     sl_share_web_port=sl_share_ls_port=0;   /* any free ports: the Mac may run the real ones */
     {   /* the harness's clock never moves, so every screenshot has one name; the card's Screenshots
@@ -3133,7 +3184,7 @@ int main(void) {
         sl_test_out_latency_ms=640;int heard_bt=sl_lrc_find(&l,(uint32_t)visible_elapsed(&test_track)+150);
         assert(heard_now==1 && heard_bt==0);   /* "second" at the mixer, "first" in the speaker */
         int st0=test_status;test_status=AUDIO_STATUS_PLAY;
-        np_show();frame(500);np_update(true);frame(100);assert(np_open);
+        np_show();frame(500);np_update(true);frame(100);assert(np_open && !strcmp(sl_doing,"Now Playing"));
         assert(!strcmp(lv_label_get_text(np_t0),"0:09"));
         sl_test_out_latency_ms=0;np_update(true);frame(100);
         assert(!strcmp(lv_label_get_text(np_t0),"0:10"));
@@ -3715,6 +3766,20 @@ int main(void) {
     shot("magic-long-answer.ppm");
     lv_obj_send_event(lv_obj_get_parent(magic_button_text),LV_EVENT_CLICKED,NULL);magic_started-=1700;frame(100);
     page_pop();frame(500);assert(!magic_page_obj && !magic_timer);
+    {   /* the shake's turned copies (~4 MB all told) only with room for the music: short, as on an R1
+         * with Bluetooth on, none are kept and the ball is turned as it is drawn; with room, they are */
+        for(int pass=0;pass<2;pass++){
+            sl_mem_test_kb=pass?0:SL_MEM_LOW_KB+500;
+            magic_page();for(int i=0;i<60;i++)frame(100);
+            int kept=0;for(int i=0;i<2*MAGIC_TILT+1;i++)kept+=magic_tilt[i]!=NULL;
+            if(!pass)assert(magic_shot565 && !kept && magic_tilt_short);
+            else assert(kept>0 && !magic_tilt_short);
+            lv_obj_send_event(magic_ball,LV_EVENT_CLICKED,NULL);magic_started=sl_ms()-120;frame(16);frame(16);
+            assert(lv_image_get_src(magic_shot) && (pass || lv_image_get_rotation(magic_shot)!=0 || lv_obj_has_flag(magic_shot,LV_OBJ_FLAG_HIDDEN)));
+            magic_started-=1800;frame(100);page_pop();frame(500);
+        }
+        sl_mem_test_kb=0;
+    }
     /* Chess: the new game sheet, tap and drag moves with their hints, the
      * computer on its own thread, undo, review, promotion, every draw rule,
      * the game over card, and the save. */
@@ -4235,6 +4300,22 @@ int main(void) {
         assert(test_lib_begins==begins+1&&lib_state==SL_LIB_LOADING);
         assert(access(DB_USB_NOTE,F_OK)==0&&db_update_state==dbu);
         unlink(DB_USB_NOTE);test_lib_begin_state=SL_LIB_READY;lib_state=saved;
+    }
+    {   /* 5 Nov: the USB screen stayed lit for as long as the Mac was
+         * attached. It goes dark after our sleep time, even when the user's
+         * own timeouts are "always on", and ours (0, the UI's idle policy)
+         * are back after */
+        int sl0=global_settings.sloppy_sleep,bt0=global_settings.backlight_timeout,bp0=global_settings.backlight_timeout_plugged;
+        global_settings.backlight_timeout=0;global_settings.backlight_timeout_plugged=0;
+        for (int s=0;s<3;s++) {
+            global_settings.sloppy_sleep=s;
+            handle_button(SYS_USB_CONNECTED);unlink(DB_USB_NOTE);
+            assert(test_usb_bl_tmo==(int)(sl_power_sleep_ms()/1000)&&test_usb_bl_tmo>=30);
+            assert(test_usb_bl_tmo_plugged==test_usb_bl_tmo);
+            assert(test_bl_tmo==0&&test_bl_tmo_plugged==0);
+        }
+        global_settings.sloppy_sleep=sl0;global_settings.backlight_timeout=bt0;global_settings.backlight_timeout_plugged=bp0;
+        printf("PASS: the USB screen goes dark after the sleep time (30 s, 1 min, 2 min), never left lit; ours are back after\n");
     }
     assert(strcmp(lv_label_get_text(sb_clock),clock_before));
     global_settings.timeformat=saved_fmt;statusbar_update();
@@ -5128,6 +5209,41 @@ int main(void) {
         np_show();frame(500);assert(np_glow_buf && lv_image_get_src(np_glow)==&np_glow_img);
         sl_mem_release("test",false);assert(np_glow_buf);   /* open: kept */
     }
+    {   /* the budget: the music's floor, more over Bluetooth, is never borrowed into; short, the
+         * UI gives back what it can and the extra goes without (the R1 froze with Cover Flow up) */
+        int ss=test_status;bool bt0=sl_test_out_bt;
+        test_status=AUDIO_STATUS_PLAY;sl_test_out_bt=false;
+        assert(sl_mem_floor_kb()==SL_MEM_LOW_KB);
+        sl_test_out_bt=true;assert(sl_mem_floor_kb()==SL_MEM_LOW_KB+SL_MEM_BT_EXTRA_KB);
+        sl_mem_test_kb=SL_MEM_LOW_KB+SL_MEM_BT_EXTRA_KB+1600;assert(sl_mem_room(1500,"test"));
+        np_hide(0);frame(500);assert(np_glow_buf || !np_glass());
+        sl_mem_test_kb=SL_MEM_LOW_KB+SL_MEM_BT_EXTRA_KB+1000;assert(!sl_mem_room(1500,"test"));
+        assert(!np_glow_buf);                                   /* gave back on the way */
+        sl_test_out_bt=false;assert(sl_mem_room(1500,"test"));   /* the jack: less held back */
+        sl_mem_test_kb=0;test_status=ss;sl_test_out_bt=bt0;np_show();frame(500);
+    }
+    {   /* short of memory over Bluetooth (a test R1, 4 Nov: the bottom half black): the reflection and
+         * Centred's backdrop drawn small and stretched, never black; the full ones back with room */
+        int ss=test_status;bool bt0=sl_test_out_bt;int sty=global_settings.sloppy_np_style;
+        test_status=AUDIO_STATUS_PLAY;sl_test_out_bt=true;
+        for(int k=0;k<2;k++){
+            np_hide(0);frame(500);sl_mem_release("test",true);
+            sl_mem_test_kb=SL_MEM_SWAP_KB;
+            global_settings.sloppy_np_style=k?2:0;now_playing_retheme();np_show();frame(700);
+            if(!k)assert(!np_glow_buf && ng_small_on && lv_image_get_src(np_glow)==&np_glow_img && np_glow_img.header.w==NG_GW);
+            else assert(!nc_bd_px && nc_small_on && nc_bd && !lv_obj_has_flag(nc_bd,LV_OBJ_FLAG_HIDDEN));
+            long lit=0,n=0;for(int y=H-48;y<H;y+=3)for(int x=8;x<W-8;x+=5){n++;lit+=pixels[y*W+x]!=0;}
+            if(lit<n/2){printf("backdrop %d: %ld of %ld points lit\n",k,lit,n);assert(0);}   /* never a black floor */
+            np_hide(0);frame(500);
+        }
+        sl_mem_test_kb=0;global_settings.sloppy_np_style=2;now_playing_retheme();np_show();frame(700);
+        assert(nc_bd_px && !nc_small_on && lv_image_get_scale_x(nc_bd)==LV_SCALE_NONE && lv_image_get_scale_y(nc_bd)==LV_SCALE_NONE);
+        np_hide(0);frame(500);
+        sl_mem_test_kb=0;global_settings.sloppy_np_style=0;now_playing_retheme();np_show();frame(700);
+        assert(np_glow_buf && !ng_small_on && lv_image_get_scale_x(np_glow)==LV_SCALE_NONE);   /* room again: the full one, one to one */
+        np_hide(0);frame(500);global_settings.sloppy_np_style=sty;now_playing_retheme();
+        test_status=ss;sl_test_out_bt=bt0;np_show();frame(500);
+    }
     {   /* swipe the cover: the neighbour's cover follows the finger, and is the song that plays */
         int q0=queued,s0=started,f0=first_index,rep0=global_settings.repeat_mode;char p0[MAX_PATH];strlcpy(p0,test_track.path,sizeof p0);
         unsigned long el0=test_track.elapsed;
@@ -5491,13 +5607,25 @@ int main(void) {
           assert(global_status.volume>v0&&sl_power_is_locked());
           /* the player card's own bar, or the side bar over the lock screen */
           assert(lp_volume_shown()||(hud&&!lv_obj_has_flag(hud,LV_OBJ_FLAG_HIDDEN)&&lv_obj_get_index(hud)>lv_obj_get_index(sl_power_overlay))); }
-        {   /* dark: the reader is stopped, but a tap on the panel still wakes
-             * the lock screen (the R1 posts no event for it), and nothing
-             * under the finger is pressed */
+        {   /* dark: the reader is stopped, but a double tap on the panel
+             * still wakes the lock screen (the R1 posts no event for it), and
+             * nothing under the finger is pressed. One tap, two slow ones or
+             * two far apart (a pocket) leave it dark. */
             sl_power.mode=SL_POWER_DARK;sl_power_apply();frame(100);
             t_down=false;touch_dark_poll();assert(touch_paused);
             touch_dark_poll();assert(touch_paused);              /* no finger: still stopped */
-            t_x=W/2;t_y=400;t_down=true;touch_dark_poll();assert(!touch_paused);
+            t_x=W/2;t_y=400;t_down=true;touch_dark_poll();assert(touch_paused&&dark_tap_armed);   /* one tap */
+            touch_dark_poll();t_down=false;touch_dark_poll();assert(touch_paused);
+            dark_tap_ms-=450;touch_dark_poll();assert(touch_paused&&!dark_tap_armed);
+            t_down=true;touch_dark_poll();t_down=false;touch_dark_poll();dark_tap_ms-=450;   /* two slow taps */
+            t_down=true;touch_dark_poll();assert(touch_paused&&dark_tap_armed);
+            t_down=false;touch_dark_poll();dark_tap_ms-=450;touch_dark_poll();
+            t_x=60;t_y=200;t_down=true;touch_dark_poll();t_down=false;touch_dark_poll();   /* two quick taps far apart */
+            t_x=400;t_y=650;t_down=true;touch_dark_poll();assert(touch_paused);
+            t_down=false;touch_dark_poll();dark_tap_ms-=450;touch_dark_poll();
+            frame(40);assert(sl_power.mode==SL_POWER_DARK);
+            t_x=W/2;t_y=400;t_down=true;touch_dark_poll();t_down=false;touch_dark_poll();   /* a double tap */
+            dark_tap_ms-=200;t_x=W/2+14;t_y=388;t_down=true;touch_dark_poll();assert(!touch_paused);
             frame(40);assert(sl_power.mode==SL_POWER_LOCKED);
             t_down=false;frame(40);frame(40);
             assert(sl_power_is_locked()&&sl_power.mode==SL_POWER_LOCKED);
@@ -5507,8 +5635,8 @@ int main(void) {
             global_settings.sloppy_tap_wake=0;sl_power_tap_wake_apply();assert(test_lcd_sleep==2);
             global_settings.sloppy_tap_wake=1;sl_power_tap_wake_apply();assert(test_lcd_sleep==-1);
             sl_power_restore_display();assert(test_lcd_sleep==2);sl_power_take_display();
-            printf("PASS: a tap wakes a dark screen to the lock screen, the LCD stays awake for it.\n");
-            /* Tap to wake off: a finger on the dark screen (a pocket) is not
+            printf("PASS: a double tap wakes a dark screen to the lock screen (one tap, two slow or far apart do not), the LCD stays awake for it.\n");
+            /* Double tap to wake off: a finger on the dark screen (a pocket) is not
              * looked at, and one the panel posts anyway is swallowed */
             global_settings.sloppy_tap_wake=0;
             sl_power.mode=SL_POWER_DARK;sl_power_apply();frame(100);
@@ -5522,7 +5650,7 @@ int main(void) {
             sl_power_filter_button(BUTTON_POWER|BUTTON_REL);
             assert(!sl_power_filter_touch(false,0,0)||sl_power.mode==SL_POWER_LOCKED);
             global_settings.sloppy_tap_wake=1;touch_wake(0,0);   /* the reader on again, as a key would */
-            printf("PASS: with Tap to wake off a touch leaves a dark screen dark; the power key still wakes it.\n");
+            printf("PASS: with Double tap to wake off a touch leaves a dark screen dark; the power key still wakes it.\n");
         }
         /* the power key wakes a dark screen on its press, and its release keeps it awake */
         sl_power.mode=SL_POWER_DARK;sl_power_apply();
@@ -6992,6 +7120,71 @@ int main(void) {
             }
             printf("PASS: the card keeps .metadata_never_index and .fseventsd/no_log; a read-only card is asked about once, in every language\n");
         }
+        {   /* bug reports: one file on the card's top, scrubbed for a public GitHub issue; Record lag for a day */
+            static const struct { const char *in, *out; } sc[] = {
+                { "bluetooth: reconnecting to 4C:87:5D:12:AB:EF (asleep)", "bluetooth: reconnecting to xx:xx:xx:xx:xx:xx (asleep)" },
+                { "btrx: /org/bluez/hci0/dev_4C_87_5D_12_AB_EF connected as 'Kitchen Speaker'", "btrx: /org/bluez/hci0/dev_xx:xx:xx:xx:xx:xx connected as '<name>'" },
+                { "subsonic: https://music.example.org/rest/ping?u=me&t=abc&s=def failed", "subsonic: <address> failed" },
+                { "scrobble: signed in as someone@example.com", "scrobble: signed in as <email>" },
+                { "wifi job 3 failed: ssid=HomeNet psk=hunter22 at 192.168.1.20", "wifi job 3 failed: ssid=<hidden> psk=<hidden> at x.x.x.x" },
+                { "remote: token: 0123abcd from \"Sam's phone\"", "remote: token: <hidden> from \"<name>\"" },
+                { "play 12 tracks from 0: /Music/Artist/01 - Song (live).flac", "play 12 tracks from 0: /Music/Artist/01 - Song (live).flac" },
+                { "watchdog: stuck in thread 'codec' at pc 7f3a2b10", "watchdog: stuck in thread 'codec' at pc 7f3a2b10" },
+            };
+            for (unsigned i=0;i<ARRAYLEN(sc);i++){char b[256];strlcpy(b,sc[i].in,sizeof b);sl_report_scrub(b,sizeof b);
+                if(strcmp(b,sc[i].out)){printf("scrub: %s\n   -> %s\n",sc[i].in,b);assert(0);}}
+            static const char prev[] = "[ 12.00] start\n[ 13.00] bluetooth: job 2 ok; on 1, connected 1, routed 1, AA:BB:CC:DD:EE:01 aac, 1 devices\n";
+            fake_put(ROCKBOX_DIR "/sloppy/sloppy.prev.log", prev, sizeof prev - 1);
+            char rp[MAX_PATH];assert(sl_report_write(rp,sizeof rp));
+            assert(!strncmp(rp,"/Card/gabagool-report-",22) && strstr(rp,".txt"));
+            assert(fake_has(rp,"GabagoolOS bug report") && fake_has(rp,"Version: " SL_VERSION) && fake_has(rp,"Build: test-build"));
+            assert(fake_has(rp,"----- sloppy.prev.log") && fake_has(rp,"routed 1, xx:xx:xx:xx:xx:xx aac") && !fake_has(rp,"AA:BB:CC"));
+            assert(fake_has(rp,"----- crash.log") && fake_has(rp,"----- end -----"));
+            sim_remove(rp);sim_remove(ROCKBOX_DIR "/sloppy/sloppy.prev.log");
+            /* Record lag: on for a day, kept across a restart, then off by itself */
+            lag_test_now=1000000;lag_set(1);assert(lag_until==1000000+LAG_DAY && fake_find(LAG_FILE)>=0);
+            lag_until=0;lag_load();assert(lag_until==1000000+LAG_DAY && lag_on());
+            unsigned x0=lag_xruns_seen;lag_test_xruns=x0+2;lag_audio();assert(lag_xruns_seen==x0+2);
+            lag_test_now+=LAG_DAY;assert(!lag_on() && !lag_until && fake_find(LAG_FILE)<0);
+            lag_test_now=0;
+            /* both under Advanced, in every language, and the phone page's button */
+            advanced_page();frame(400);
+            assert(has_text(lv_screen_active(),"Make a bug report") && has_text(lv_screen_active(),"Record lag"));
+            page_pop();frame(400);
+            static const char *const words[] = { "TROUBLESHOOTING", "Make a bug report", "A file on the card for a GitHub issue", "Record lag",
+                "For a day, every slow moment and audio dropout goes in the log", "Bug report saved on the card: %s",
+                "The bug report could not be saved", "Download bug report" };
+            int l0=global_settings.sloppy_language;
+            for(int l=1;l<=SL_LANG_LAST;l++){global_settings.sloppy_language=l;
+                for(unsigned k=0;k<ARRAYLEN(words);k++)assert(strcmp(sl_tr(words[k]),words[k])!=0);}
+            global_settings.sloppy_language=l0;
+            assert(strstr(sl_remote_html,"/report.txt") && strstr(sl_remote_html,"Download bug report"));
+            printf("PASS: a bug report is one scrubbed file on the card (no addresses, names, accounts or keys); Record lag stops after a day\n");
+        }
+        {   /* the log of a frozen start outlives a few resets: eight earlier starts are kept, and a start
+             * that ended without a clean shutdown has its last lines copied to the top of the next log */
+            #define LG(n) ROCKBOX_DIR "/sloppy/" n
+            static const char frozen[] = "[   1.00] start\n[   9.00] cover flow: 3 albums\n[  12.00] watchdog: main loop stuck for 3000 ms in 'lvgl'\n";
+            static const char clean[] = "[   1.00] start\n[  20.00] power: off, the card let go\n";
+            if (log_fd>=0) { sim_close(log_fd); log_fd=-1; }
+            for (int k=2;k<=8;k++){char n[64];snprintf(n,sizeof n,LG("sloppy.prev%d.log"),k);sim_remove(n);}
+            fake_put(LG("sloppy.prev7.log"),"seven",5);fake_put(LG("sloppy.prev8.log"),"eight",5);
+            fake_put(LG("sloppy.prev.log"),"one before",10);fake_put(LG("sloppy.log"),frozen,sizeof frozen-1);
+            log_started=log_rotated=false;sl_log("start again");
+            assert(fake_equals(LG("sloppy.prev.log"),frozen) && fake_equals(LG("sloppy.prev2.log"),"one before"));
+            assert(fake_equals(LG("sloppy.prev8.log"),"seven"));                       /* the oldest went */
+            assert(fake_has(LG("sloppy.log"),"last start: ended without a clean shutdown") &&
+                   fake_has(LG("sloppy.log"),"    | [  12.00] watchdog: main loop stuck") && fake_has(LG("sloppy.log"),"start again"));
+            /* the open tried again (the card not up yet): nothing pushed further back */
+            sim_close(log_fd);log_fd=-1;log_started=false;log_rotated=false;sim_remove(LG("sloppy.log"));
+            sl_log("card up");assert(fake_equals(LG("sloppy.prev.log"),frozen) && !fake_has(LG("sloppy.log"),"last start"));
+            /* a clean end: no note */
+            sim_close(log_fd);log_fd=-1;log_started=log_rotated=false;fake_put(LG("sloppy.log"),clean,sizeof clean-1);
+            sl_log("after a clean end");assert(fake_equals(LG("sloppy.prev.log"),clean) && !fake_has(LG("sloppy.log"),"last start"));
+            for (int k=2;k<=8;k++){char n[64];snprintf(n,sizeof n,LG("sloppy.prev%d.log"),k);sim_remove(n);}
+            #undef LG
+            printf("PASS: eight earlier logs are kept, and a start that froze has its last lines at the top of the next log\n");
+        }
         {   /* by itself, never the rebuild that deletes the database first: back from USB mode
              * before the library was up, a test R1 rebuilt, was switched off, and had none (3 Nov) */
             long st0=current_tick;int ss=test_status,rb=test_rebuilds,ups=test_updates;current_tick=30*HZ;test_status=0;
@@ -7241,10 +7434,39 @@ int main(void) {
     cf_open_album();for(int i=0;i<8;i++)frame(100);
     assert(cf.panel && cf.open_at==5 && lv_obj_get_child_count(cf.list)>=1);
     shot("coverflow-album.ppm");
+    {   /* a finger held ten seconds on a song in the album, music going out over Bluetooth and memory as
+         * short as the R1's (a test R1 froze so, 4 Nov): nothing stalls, the breadcrumbs say where it was */
+        int ss=test_status;bool bt0=sl_test_out_bt;test_status=AUDIO_STATUS_PLAY;sl_test_out_bt=true;
+        sl_mem_test_kb=SL_MEM_LOW_KB+SL_MEM_BT_EXTRA_KB+1500;
+        struct sl_album *al5=&sl_lib.albums[sl_lib.albums_by_title[5]];   /* the test library's albums have no songs: lend it three */
+        int *t5=al5->tracks,n5=al5->n_tracks;static int lent[3]={0,1,2};assert(sl_lib.n_tracks>=3);al5->tracks=lent;al5->n_tracks=3;
+        cf_close_album(0);for(int i=0;i<6;i++)frame(100);cf_go(5*CF_ONE,0);frame(300);cf_open_album();for(int i=0;i<8;i++)frame(100);
+        lv_obj_update_layout(cf.scr);
+        lv_obj_t *row=lv_obj_get_child(cf.list,0);lv_area_t c;lv_obj_get_coords(row,&c);
+        assert(cf.panel && lv_obj_has_flag(row,LV_OBJ_FLAG_CLICKABLE));
+        int lx=(c.x1+c.x2)/2,ly=(c.y1+c.y2)/2;
+        t_x=ly;t_y=H-1-lx;t_down=true;   /* the panel's own point: LVGL turns it a quarter for the landscape screen */
+        struct timespec a,b;double worst=0;
+        for(int i=0;i<100;i++){clock_gettime(CLOCK_MONOTONIC,&a);frame(100);clock_gettime(CLOCK_MONOTONIC,&b);
+            double ms=(b.tv_sec-a.tv_sec)*1e3+(b.tv_nsec-a.tv_nsec)/1e6;if(ms>worst)worst=ms;}
+        assert(lv_obj_has_state(row,LV_STATE_PRESSED) && cf.active && cf.panel);
+        touch_down_since=(sl_ms()-9000)|1;sl_hold_watch();   /* the watch reads the real clock: the press, nine seconds old */
+        assert(fake_has(ROCKBOX_DIR "/sloppy/sloppy.log","hold: Cover Flow") &&
+               fake_has(ROCKBOX_DIR "/sloppy/sloppy.log","doing Cover Flow's album"));
+        t_down=false;frame(100);frame(300);
+        assert(cf.active && !lv_obj_has_state(row,LV_STATE_PRESSED));
+        printf("cover flow: a song held 10 s over Bluetooth at %ld KiB free, worst frame %.1f ms (Mac)\n",sl_mem_test_kb,worst);
+        sl_mem_test_kb=0;test_status=ss;sl_test_out_bt=bt0;
+        if(cf.panel){cf_close_album(0);for(int i=0;i<6;i++)frame(100);}   /* album 5 as it was, open again, as the checks below expect */
+        al5->tracks=t5;al5->n_tracks=n5;
+        cf_go(5*CF_ONE,0);frame(300);cf_open_album();for(int i=0;i<8;i++)frame(100);
+    }
     cf_close_album(1);for(int i=0;i<10;i++)frame(100);
     assert(!cf.panel && cf.flip==0 && cf.pos==6*CF_ONE);
     cf_close();frame(300);
     assert(!cf.active && lv_display_get_rotation(disp)==LV_DISPLAY_ROTATION_0 && lv_screen_active()==home_scr);
+    /* what a freeze line says it was doing follows the screen: a stale "Cover Flow" had sent a hunt the wrong way (5 Nov) */
+    assert(!strcmp(sl_doing,"back from Cover Flow"));
     { /* covers stay cached: reopening reads nothing and shows the same art */
         int cached=0;for(int i=0;i<CF_SLOTS;i++)cached+=cf.art[i].px!=NULL;
         assert(cached>=8);
@@ -7270,6 +7492,18 @@ int main(void) {
          assert(mid_real||last==sl_lib.albums_by_title[c]);
          for(int i=0;i<test_n_prefer;i++){bool r=false;for(int j=0;j<CF_SLOTS;j++)r|=cf.art[j].px&&cf.art[j].album==test_prefer[i]&&cf.art[j].real;assert(!r);}}
         cf_close();frame(300);
+        {   /* a test R1, 5 Nov: Cover Flow shut with its covers held, a 4,249-song shuffle filled the music
+             * buffer and the control panel was pulled at 2.5 MB free; nothing was given back, and it froze.
+             * The budget counts the buffer still to fill as taken, and short, the shut covers go */
+            int held=cf_covers_held();assert(held>=8);
+            sl_mem_test_kb=18700;sl_mem_test_unfilled_kb=7168;
+            assert(sl_mem_available_kb()==18700-7168);         /* free before anything plays: not all of it is */
+            sl_mem_test_unfilled_kb=0;sl_mem_test_kb=2500;    /* the buffer filled */
+            assert(!sl_mem_room(1500,"the glass"));           /* the panel's pull: the glass goes without... */
+            assert(!cf_covers_held() && cf_covers_held()<held); /* ...and the covers went on the way */
+            printf("short of memory with Cover Flow shut: its %d covers given back, %d KiB\n",held,held*(CF_ART*CF_ART*2/1024));
+            sl_mem_test_kb=0;
+        }
         {   /* the home built again while Cover Flow is up (a pull to refresh finishing as the
              * player turned) is built on the home screen, not freed when Cover Flow closes */
             while(npages>1){page_pop();frame(400);}
@@ -7329,6 +7563,12 @@ int main(void) {
         cf_style_page();frame(400);shot("coverflow-setting.ppm");page_pop();frame(500);
     }
 
+    {   /* memory short of the floor, nothing playing (a test R1, 4 Nov: it never opened, Bluetooth off
+         * and no music): Cover Flow opens all the same, holding the fewest covers */
+        free(qp_glass_px);qp_glass_px=NULL;qp_glass_ok=false;sl_mem_test_kb=5000;
+        cf_open();frame(900);assert(cf.active && cf_cap==18);
+        cf_close();frame(300);sl_mem_test_kb=0;
+    }
     {   /* Cover Flow left by the power key: dark, then the lock screen draws
          * and a swipe up unlocks (the R1 log: a dark screen, swipes of 0 px) */
         int saved_run=sl_power_running;
@@ -7361,6 +7601,20 @@ int main(void) {
         assert(sl_direct && lv_display_get_buf_active(disp)->header.stride==W*2);
         frame(300);
         sl_direct_ok=saved_ok;sl_set_rotation(LV_DISPLAY_ROTATION_0);frame(100);
+    }
+    {   /* short of memory while music plays over Bluetooth: Cover Flow opens lighter (the fewest covers);
+         * only under the line the R1 swaps at is the user asked, never turned away with a toast */
+        int ss=test_status;bool bt0=sl_test_out_bt;test_status=AUDIO_STATUS_PLAY;sl_test_out_bt=true;
+        free(qp_glass_px);qp_glass_px=NULL;qp_glass_ok=false;
+        sl_mem_test_kb=SL_MEM_SWAP_KB+CF_NEED_KB+200;
+        cf_open();frame(900);assert(cf.active && cf_cap==CF_MIN_COVERS && !acts_open_now);
+        cf_close();frame(300);free(qp_glass_px);qp_glass_px=NULL;qp_glass_ok=false;
+        sl_mem_test_kb=SL_MEM_SWAP_KB+CF_NEED_KB-200;int stops=audio_stops;
+        cf_open();frame(500);assert(!cf.active && acts_open_now && has_text(acts,"Cover Flow needs more memory"));
+        acts_close();frame(400);cf_short_pick(0);for(int i=0;i<12;i++)frame(100);
+        assert(audio_stops==stops+1 && cf.active);   /* stopped, then open with what there is */
+        cf_close();frame(300);
+        sl_mem_test_kb=0;test_status=ss;sl_test_out_bt=bt0;
     }
     {   /* the Spectrum app used like on the R1: taps bring the chrome back
          * and it fades, swipes change mode mid fade, ~8 s at 60 Hz */
@@ -9237,9 +9491,9 @@ int main(void) {
             assert(find_label(sq_body,"Volume button step")&&find_label(sq_body,"Power-on volume"));
             shot("settings-search.ppm");
             sq_clear_cb(NULL);sq_add("W");sq_add("A");sq_add("K");sq_add("E");frame(300);   /* by what it does */
-            assert(find_label(sq_body,"Tap to wake"));
-            lv_obj_send_event(lv_obj_get_parent(find_label(sq_body,"Tap to wake")),LV_EVENT_CLICKED,NULL);frame(500);
-            assert(find_label(pages[npages-1],"Tap to wake")&&pages[npages-1]!=sq_page);   /* Buttons */
+            assert(find_label(sq_body,"Double tap to wake"));
+            lv_obj_send_event(lv_obj_get_parent(find_label(sq_body,"Double tap to wake")),LV_EVENT_CLICKED,NULL);frame(500);
+            assert(find_label(pages[npages-1],"Double tap to wake")&&pages[npages-1]!=sq_page);   /* Buttons */
             while(npages>1){page_pop();frame(300);}
             assert(!sq_page);
             printf("PASS: Settings search: bubble, names and keywords, opens the page.\n");
@@ -9444,16 +9698,15 @@ int main(void) {
             }
             /* emoji in a name (headphones, a title): drawn, and what joins them takes no room */
             {   const char *t0=sl_lib.tracks[0].title,*t1=sl_lib.tracks[1].title;
-                assert(!xf_packs[XF_EMO+1].mem);
                 sl_lib.tracks[0].title="Sam's \xf0\x9f\x8e\xa7\xef\xb8\x8f Buds \xe2\x9c\xa8";                 /* 🎧️ ✨ */
                 sl_lib.tracks[1].title="\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbd \xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbb \xe2\x9d\xa4\xef\xb8\x8f";   /* 👍🏽 👩‍💻 ❤️ */
                 songs_page();frame(500);
                 assert(find_label(pages[npages-1],sl_lib.tracks[0].title)&&!glyphs_missing(pages[npages-1]));
                 shot("library-emoji.ppm");page_pop();frame(400);
                 sl_lib.tracks[0].title=t0;sl_lib.tracks[1].title=t1;
-                assert(xf_packs[XF_EMO+1].mem);
+                assert(xe_slots);   /* in colour, read a picture at a time */
                 lv_font_glyph_dsc_t g;
-                assert(lv_font_get_glyph_dsc(&ss_semibold_23,&g,0x1f3a7,0)&&!g.is_placeholder&&g.adv_w>10);
+                assert(lv_font_get_glyph_dsc(&ss_semibold_23,&g,0x1f3a7,0)&&!g.is_placeholder&&g.adv_w>10&&g.format==LV_FONT_GLYPH_FORMAT_IMAGE);
                 assert(lv_font_get_glyph_dsc(&ss_semibold_23,&g,0xfe0f,0)&&!g.is_placeholder&&g.adv_w==0);
                 assert(lv_font_get_glyph_dsc(&ss_semibold_23,&g,0x1f3fd,0)&&g.adv_w==0);   /* a skin tone */
             }
@@ -9553,6 +9806,38 @@ int main(void) {
         }
         test_status=0;
     }
+    if (getenv("SLOPPY_MEMMAP")) {   /* SLOPPY_MEMMAP=1: each screen's heap while open, and what it keeps after closing */
+        static const struct { const char *name; void (*open)(void); } scr[] = {
+            {"games",sl_games_page},{"library",sl_library_page},{"settings",system_page},{"customization",appearance_page},
+            {"theme",theme_page},{"home style",home_style_page},{"accent",accent_page},{"coin",coin_page},{"magic",magic_page},
+            {"chess",chess_page},{"graveyard",grave_page},{"wrapped",wrapped_page},{"mixtape",mix_page},{"for you",foryou_page},
+            {"pet",pet_page},{"eq",eq_page},{"playback",play_settings_page},{"quiz",quiz_page},{"ragdoll",ragdoll_page},
+            {"search",search_page},{"radio",radio_page},{"spoon",spoon_page},{"snake",snake_page},{"albums",albums_page},
+            {"songs",songs_page},{"artists",artists_page},{"music",music_page},{"cover flow",cf_open},
+        };
+        while(npages>1){page_pop();frame(400);}
+        test_status=AUDIO_STATUS_PLAY;
+        malloc_statistics_t ms;
+        for(int pass=0;pass<2;pass++){   /* the first pass warms caches made once; the second is what a visit costs */
+            if(pass)printf("memmap: %-14s %8s %8s %8s\n","screen","open KB","kept KB","2nd kept");
+            for(unsigned k=0;k<sizeof scr/sizeof scr[0];k++){
+                for(int i=0;i<10;i++)frame(100);
+                malloc_zone_statistics(NULL,&ms);size_t before=ms.size_in_use;
+                scr[k].open();for(int i=0;i<20;i++)frame(100);
+                malloc_zone_statistics(NULL,&ms);size_t open=ms.size_in_use;
+                if(cf_is_open()){cf_close();frame(300);}
+                if(np_open){np_hide(0);frame(500);}
+                while(npages>1){page_pop();frame(300);}
+                for(int i=0;i<20;i++)frame(100);
+                malloc_zone_statistics(NULL,&ms);size_t after=ms.size_in_use;
+                scr[k].open();for(int i=0;i<20;i++)frame(100);if(cf_is_open()){cf_close();frame(300);}while(npages>1){page_pop();frame(300);}
+                for(int i=0;i<20;i++)frame(100);
+                malloc_zone_statistics(NULL,&ms);size_t again=ms.size_in_use;
+                if(pass)printf("memmap: %-14s %8ld %8ld %8ld\n",scr[k].name,(long)(open-before)/1024,(long)(after-before)/1024,(long)(again-after)/1024);
+            }
+        }
+        test_status=0;
+    }
     if (getenv("SLOPPY_FUZZ")) {   /* SLOPPY_FUZZ=<rounds>: random taps and drags on every page (run the ASan build) */
         static void (*const opens[])(void) = { sl_games_page, sl_library_page, system_page, appearance_page,
             settings_icon_page, theme_page, home_style_page, lock_player_page, sounds_page, accent_page,
@@ -9566,8 +9851,11 @@ int main(void) {
         for(int r=0;r<rounds;r++){
             test_status=rand()%3?AUDIO_STATUS_PLAY:0;
             int which=rand()%(int)(sizeof opens/sizeof opens[0]);
-            if(getenv("SLOPPY_FUZZ_LOG"))fprintf(stderr,"fuzz round %d page %d\n",r,which);
-            opens[which]();frame(400);
+            bool fcf=getenv("SLOPPY_FUZZ_CF")!=NULL;   /* =1: Cover Flow and its album, holds of seconds, Bluetooth and the R1's memory */
+            if(getenv("SLOPPY_FUZZ_LOG"))fprintf(stderr,"fuzz round %d page %d%s\n",r,which,fcf?" (cover flow)":"");
+            if(fcf){sl_test_out_bt=rand()%2;sl_mem_test_kb=SL_MEM_LOW_KB+rand()%16000;
+                cf_open();frame(900);if(cf.active&&rand()%3){cf_go((rand()%LV_MAX(cf.n,1))*CF_ONE,200);frame(400);cf_open_album();frame(800);}}
+            else{opens[which]();frame(400);}
             if(getenv("SLOPPY_FUZZ_LOG"))for(int i=1;i<npages;i++)lv_obj_add_event_cb(pages[i],fuzz_page_deleted,LV_EVENT_DELETE,NULL);
             for(int e=0;e<30;e++){
                 int x=rand()%W,y=rand()%H,kind=rand()%10;
@@ -9575,6 +9863,7 @@ int main(void) {
                 if(kind<5){touch_at(x,y,true);touch_at(x,y,false);}
                 else if(kind<7){int dx=(rand()%600)-300,dy=(rand()%600)-300;
                     for(int k=0;k<=6;k++)touch_at(x+dx*k/6<0?0:x+dx*k/6>=W?W-1:x+dx*k/6,y+dy*k/6<0?0:y+dy*k/6>=H?H-1:y+dy*k/6,k<6);}
+                else if(kind==7&&fcf){touch_at(x,y,true);for(int k=rand()%100+20;k>0;k--)frame(100);touch_at(x,y,false);}   /* held 2-12 s */
                 else if(kind==7)frame(rand()%1500);
                 else if(kind==8&&npages>1){pet_tick();page_pop();frame(300);}
                 else if(test_status){if(np_open)np_hide(0);else np_show();frame(500);}
@@ -9583,6 +9872,7 @@ int main(void) {
                  if(nl!=1){fprintf(stderr,"FUZZ: %d draw layers left after round %d event %d (page %d)\n",nl,r,e,which);abort();}}
                 for(int i=0;i<npages;i++)if(!lv_obj_is_valid(pages[i])){fprintf(stderr,"FUZZ: pages[%d] of %d deleted after round %d event %d (kind %d at %d,%d)\n",i,npages,r,e,kind,x,y);abort();}
             }
+            if(fcf&&cf_is_open()){cf_close();frame(300);}
             if(np_open){np_hide(0);frame(500);}
             if(pet_care_locked){pet_care_until=sl_ms()-1;pet_tick();}   /* the UI tick ends care scenes; the harness has none */
             while(npages>1){page_pop();frame(300);}
@@ -9591,6 +9881,7 @@ int main(void) {
         }
         /* a tap may have opened Cover Flow, Spectrum or the visualizer: their own
          * screens, with no system gestures over them */
+        sl_mem_test_kb=0;sl_test_out_bt=false;   /* SLOPPY_FUZZ_CF's squeeze, let go */
         if(cf_is_open()){printf("fuzz: cover flow left open (cf %d spa %d vz %d)\n",cf.active,spa.active,vz.active);cf_close();frame(300);}
         /* a swipe may have left Up Next or the actions sheet up: no pull
          * from the top edge over them */
@@ -9980,6 +10271,22 @@ int main(void) {
         }
         pf_end();assert(poweroffs==offs && po_is_open());
         pf_begin("power close");po_close();for(int i=0;i<30;i++)pf_frame(16);pf_end();assert(!po_is_open());sl_power_running=was_running;for(int i=0;i<30;i++)frame(16);}
+        if(!only||!strcmp(only,"play")){   /* music started (all songs, shuffled), shuffle switched, the frames after:
+                                           * what the UI thread holds while the decoder needs it (stutters at a start) */
+            int n=sl_lib.n_tracks,*all=malloc(sizeof(int)*(size_t)n);for(int i=0;i<n;i++)all[i]=i;
+            struct timespec a,b;double play_ms=0,shuf_ms=0;
+            for(int r=0;r<3*reps;r++){
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID,&a);play_list(all,n,0,true);clock_gettime(CLOCK_THREAD_CPUTIME_ID,&b);
+                play_ms+=((b.tv_sec-a.tv_sec)*1e9+(b.tv_nsec-a.tv_nsec))/1e6;test_status=AUDIO_STATUS_PLAY;
+                pf_begin("play start: the frames after");for(int i=0;i<60;i++)pf_frame(16);pf_end();
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID,&a);sl_set_shuffle(!global_settings.playlist_shuffle);clock_gettime(CLOCK_THREAD_CPUTIME_ID,&b);
+                shuf_ms+=((b.tv_sec-a.tv_sec)*1e9+(b.tv_nsec-a.tv_nsec))/1e6;
+                pf_begin("shuffle: the frames after");for(int i=0;i<60;i++)pf_frame(16);pf_end();
+            }
+            printf("perf play: starting %d songs shuffled R1 est %.1f ms (%.3f ms a song); shuffle switched R1 est %.1f ms\n",
+                   n,play_ms/(3*reps)*PF_K,play_ms/(3*reps)*PF_K/n,shuf_ms/(3*reps)*PF_K);
+            free(all);
+        }
         if(!only||!strcmp(only,"list")){   /* the list home, scrolled */
         global_settings.sloppy_home_style=2;appearance_reload(NULL);frame(700);frame(700);
         for(int i=0;i<60;i++)frame(16);
@@ -10337,9 +10644,9 @@ int main(void) {
             while(npages>1){page_pop();frame(400);}
             system_page();frame(500);int n=npages;
             lv_obj_t *row=find_label(pages[npages-1],"Sound");assert(row);
-            /* clear of the mini player, which a fuzz run may have left up */
+            /* mid-screen: clear of the mini player and whatever else a fuzz run left along the bottom */
             lv_obj_t *body1=lv_obj_get_child(pages[npages-1],1);lv_obj_update_layout(body1);
-            {lv_area_t r0;lv_obj_get_coords(row,&r0);if(r0.y2>H-140)lv_obj_scroll_by(body1,0,-(r0.y2-(H-140)),LV_ANIM_OFF);}frame(100);
+            {lv_area_t r0;lv_obj_get_coords(row,&r0);if(r0.y2>H/2)lv_obj_scroll_by(body1,0,-(r0.y2-H/2),LV_ANIM_OFF);}frame(100);
             lv_area_t a;lv_obj_get_coords(row,&a);int x=(a.x1+a.x2)/2,y=(a.y1+a.y2)/2;
             touch_at(x,y,true);touch_at(x,y,false);
             assert(npages==n+1);
@@ -11391,8 +11698,8 @@ int main(void) {
          * on, a token typed and checked, plays that count and plays that do
          * not, offline, a server in trouble, a bad token; the token never in
          * the log nor on screen */
-        assert(!system("rm -rf /tmp/sloppy-ui-test-root/.scrobbler.log /tmp/sloppy-ui-test-root/.rockbox/sloppy/scrobble.tsv "
-                       "/tmp/sloppy-ui-test-root/.rockbox/sloppy/listenbrainz.token && mkdir -p /tmp/sloppy-ui-test-root/.rockbox/sloppy"));
+        assert(!system("rm -rf " SIM_ROOT "/.scrobbler.log " SIM_ROOT "/.rockbox/sloppy/scrobble.tsv "
+                       SIM_ROOT "/.rockbox/sloppy/listenbrainz.token && mkdir -p " SIM_ROOT "/.rockbox/sloppy"));
         sl_net_scrobble_fake = lbf;
         while(npages>1){page_pop();frame(300);}
         int st0=test_status; struct mp3entry tt0=test_track; bool conn0=wf_st.connected;
@@ -11433,7 +11740,7 @@ int main(void) {
         lv_obj_scroll_to_y(lv_obj_get_child(scr_page_obj,1),2000,LV_ANIM_OFF);frame(100);shot("scrobble-page-end.ppm");
         assert(has_text(scr_page_obj,"Forget token"));
         lv_obj_scroll_to_y(lv_obj_get_child(scr_page_obj,1),0,LV_ANIM_OFF);frame(100);
-        {   FILE *tf=fopen("/tmp/sloppy-ui-test-root/.rockbox/sloppy/listenbrainz.token","r");char tb[80]={0};
+        {   FILE *tf=fopen(SIM_ROOT "/.rockbox/sloppy/listenbrainz.token","r");char tb[80]={0};
             assert(tf && fgets(tb,sizeof tb,tf));fclose(tf);assert(!strcmp(tb,"good-6f1c2a9e-ui\n")); }
         /* plays: 110 s of 200 is a listen; 40 s is history's play but no listen */
         long hist0=fake_size(HIST_FILE)<0?4:fake_size(HIST_FILE);   /* a new log starts with its magic */
@@ -11447,7 +11754,7 @@ int main(void) {
         assert(fake_size(HIST_FILE)==hist0+12);                    /* history: one play, as before */
         assert(lbf_requests==r0+3 && strstr(lbf_body,"\"single\"") && strstr(lbf_body,"Blue Hours") &&
                strstr(lbf_body,"\"tracknumber\":3") && strstr(lbf_body,"\"duration_ms\":200000"));
-        {   FILE *lf=fopen("/tmp/sloppy-ui-test-root/.scrobbler.log","r");static char lb[4096];size_t ln=lf?fread(lb,1,sizeof lb-1,lf):0;
+        {   FILE *lf=fopen(SIM_ROOT "/.scrobbler.log","r");static char lb[4096];size_t ln=lf?fread(lb,1,sizeof lb-1,lf):0;
             if(lf)fclose(lf);lb[ln]=0;
             assert(!strncmp(lb,"#AUDIOSCROBBLER/1.1\n#TZ/UTC\n#CLIENT/GabagoolOS HiBy R1\n",54));
             assert(strstr(lb,"\nMira Sol\tNight Bus\tBlue Hours\t3\t200\tL\t17") && !strstr(lb,"Short Skip")); }
@@ -11480,7 +11787,7 @@ int main(void) {
         shot("scrobble-bad-token.ppm");
         /* forgotten: no file, nothing more is sent */
         lv_obj_send_event(scr_forget_row,LV_EVENT_CLICKED,NULL);scr_poll();frame(300);
-        assert(!scr_st.has_token && has_text(scr_page_obj,"Not set") && access("/tmp/sloppy-ui-test-root/.rockbox/sloppy/listenbrainz.token",F_OK)!=0);
+        assert(!scr_st.has_token && has_text(scr_page_obj,"Not set") && access(SIM_ROOT "/.rockbox/sloppy/listenbrainz.token",F_OK)!=0);
         /* the log says what happened, and never the token */
         assert(fake_find(ROCKBOX_DIR "/sloppy/sloppy.log")>=0);
         assert(!lbf_log_has("6f1c2a9e") && !lbf_log_has("1234-5678") && lbf_log_has("scrobble: batch sent"));
@@ -11852,6 +12159,8 @@ int main(void) {
     c_scale_tests();
     c_unicode_tests();
     xf_script_tests();
+    emoji_tests();
+    tofu_tests();
     c_cue_tests();
     c_big_cover_tests();
     e_tests();

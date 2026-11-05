@@ -53,6 +53,8 @@ static lv_base_dir_t get_next_run(lv_bidi_ctx_t * ctx, const char * txt, lv_base
 static void rtl_reverse(char * dest, const char * src, uint32_t len, uint16_t * pos_conv_out, uint16_t pos_conv_rd_base,
                         uint16_t pos_conv_len);
 static uint32_t char_change_to_pair(uint32_t letter);
+static bool emoji_joins(uint32_t letter);
+static bool emoji_ri(uint32_t letter);
 static lv_base_dir_t bracket_process(lv_bidi_ctx_t * ctx, const char * txt, uint32_t next_pos, uint32_t len,
                                      uint32_t letter,
                                      lv_base_dir_t base_dir);
@@ -544,6 +546,33 @@ static void rtl_reverse(char * dest, const char * src, uint32_t len, uint16_t * 
             pos_conv_wr += pos_conv_last_weak - pos_conv_first_weak + 1;
         }
 
+        /*GabagoolOS: an emoji sequence (a skin tone, U+200D, a flag's two letters) is one
+         *picture: kept in its order, as numbers are*/
+        else if(emoji_joins(letter) || emoji_ri(letter) || (letter >= 0x1f000 && letter <= 0x1faff)) {
+            uint32_t end = i + lv_text_encoded_size(&src[i]);
+            uint16_t n = 1;
+            uint32_t x = letter;
+            while(i) {
+                uint32_t j = i;
+                uint32_t p = lv_text_encoded_prev(src, &j);
+                bool take = emoji_joins(x) || p == 0x200d;
+                if(!take && emoji_ri(x) && emoji_ri(p)) {
+                    uint32_t k = 0, m = i;   /*the flag letters before x: x ends a pair when they are odd*/
+                    while(m && emoji_ri(lv_text_encoded_prev(src, &m))) k++;
+                    take = k & 1;
+                }
+                if(!take) break;
+                i = j;
+                x = p;
+                n++;
+                pos_conv_i--;
+            }
+            if(dest) lv_memcpy(&dest[wr], &src[i], end - i);
+            if(pos_conv_out) fill_pos_conv(&pos_conv_out[pos_conv_wr], n, pos_conv_rd_base + pos_conv_i);
+            wr += end - i;
+            pos_conv_wr += n;
+        }
+
         /*Simply store in reversed order*/
         else {
             uint32_t letter_size = lv_text_encoded_size((const char *)&src[i]);
@@ -564,6 +593,17 @@ static void rtl_reverse(char * dest, const char * src, uint32_t len, uint16_t * 
             }
         }
     }
+}
+
+static bool emoji_joins(uint32_t letter)
+{
+    return letter == 0x200d || letter == 0x20e3 || letter == 0xfe0e || letter == 0xfe0f ||
+           (letter >= 0x1f3fb && letter <= 0x1f3ff) || (letter >= 0xe0020 && letter <= 0xe007f);
+}
+
+static bool emoji_ri(uint32_t letter)
+{
+    return letter >= 0x1f1e6 && letter <= 0x1f1ff;
 }
 
 static uint32_t char_change_to_pair(uint32_t letter)

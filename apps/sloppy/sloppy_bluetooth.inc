@@ -361,6 +361,10 @@ static lv_obj_t *sl_bt_page_obj, *sl_bt_body, *sl_bt_busy_label, *sl_bt_scan_lab
 static lv_timer_t *sl_bt_scan_timer, *sl_bt_refresh_timer;
 static struct hiby_bt_status sl_bt_state;
 static bool sl_bt_known;                 /* sl_bt_state came from the stack, not a guess */
+/* A job was let go with no answer. Until the stack answers again the page
+ * stops asking every 4 s (each ask hung too, and the switch stayed grey
+ * for good: a test R1 after a forced reset, 5 Nov) and a tap tries again. */
+static bool sl_bt_silent;
 static lv_obj_t *sl_bt_switch;
 static lv_timer_t *sl_bt_watch_timer;
 static struct hiby_bt_device sl_bt_found[HIBY_BT_MAX_DEVICES];
@@ -543,6 +547,7 @@ static void sl_bt_job_cb(lv_timer_t *timer)
             sl_bt_job = SL_BT_JOB_NONE;
             sl_bt_busy = false;
             sl_bt_known = false;
+            sl_bt_silent = true;
             lv_timer_pause(timer);
             sl_bt_ask_poll();
             if (job != SL_BT_JOB_REFRESH && job != SL_BT_JOB_RECONNECT)
@@ -663,7 +668,7 @@ static void sl_bt_job_cb(lv_timer_t *timer)
     }
     if (result.job != SL_BT_JOB_SCAN)
     {
-        if (result.job != SL_BT_JOB_SCAN_FINISH) { sl_bt_state = result.state; sl_bt_known = true; }
+        if (result.job != SL_BT_JOB_SCAN_FINISH) { sl_bt_state = result.state; sl_bt_known = true; sl_bt_silent = false; }
         sl_bt_count = result.count < 0 ? 0 : result.count;
         if (sl_bt_count > HIBY_BT_MAX_DEVICES) sl_bt_count = HIBY_BT_MAX_DEVICES;
         memcpy(sl_bt_found, result.devices, sl_bt_count * sizeof sl_bt_found[0]);
@@ -962,7 +967,7 @@ static void sl_bt_rc_tick(lv_timer_t *t)
     uint32_t now = lv_tick_get();
     if ((int32_t)(now - sl_bt_rc.next) < 0) return;
     if (now - sl_bt_rc.since > SL_BT_RC_GIVE_UP_MS) { sl_bt_rc_disarm("15 minutes without them"); return; }
-    if (sl_bt_busy || sl_bt_scanning || sl_btrx_on) { sl_bt_rc.next = now + 1000; return; }
+    if (sl_bt_busy || sl_bt_scanning || sl_btrx_on || sl_bt_silent) { sl_bt_rc.next = now + 1000; return; }   /* silent: each try would hang too */
     sl_bt_begin(SL_BT_JOB_RECONNECT, "");
 }
 static void sl_bt_rc_result(const struct sl_bt_result *r, bool was_routed)
@@ -1110,7 +1115,7 @@ static void sl_bt_power_cb(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_current_target(e);
     bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
-    if (sl_bt_busy || !sl_bt_known)
+    if (sl_bt_busy || (!sl_bt_known && !sl_bt_silent))
     {
         /* not now: show the truth again rather than a switch that lies */
         if (sl_bt_state.enabled) lv_obj_add_state(sw, LV_STATE_CHECKED);
@@ -1235,7 +1240,7 @@ static void sl_bt_watch_cb(lv_timer_t *timer)
     struct hiby_bt_aap a;
     sl_bt_aap_status(&a);
     if (memcmp(&a, &sl_bt_aap_shown, sizeof a)) sl_bt_refresh_soon();   /* AirPods said something new */
-    if (!sl_bt_busy && !sl_bt_scanning) sl_bt_begin(SL_BT_JOB_REFRESH, "");
+    if (!sl_bt_busy && !sl_bt_scanning && !sl_bt_silent) sl_bt_begin(SL_BT_JOB_REFRESH, "");
 }
 static void sl_bt_deleted(lv_event_t *e)
 {
@@ -1258,6 +1263,7 @@ static void sl_bt_rebuild(void)
     lv_obj_t *g = set_group(sl_bt_body, NULL);
     lv_obj_t *power = set_switch_ex(g, LV_SYMBOL_BLUETOOTH, 0x2d7ff0, "Bluetooth",
         sl_btrx_on ? "Receiving from your phone" :
+        !sl_bt_known && sl_bt_silent && !sl_bt_busy ? "Not answering · Tap to retry" :
         !sl_bt_known ? "Checking Bluetooth…" :
         sl_bt_scanning ? "Looking for nearby devices" :
         sl_bt_state.connected ? "Connected and ready to listen" :
@@ -1267,7 +1273,7 @@ static void sl_bt_rebuild(void)
     sl_bt_switch = power;
     sl_bt_busy_label = lv_obj_get_child(lv_obj_get_parent(power), 1);
     label_lines(sl_bt_busy_label, 1);
-    if (sl_bt_busy || !sl_bt_known) lv_obj_add_state(power, LV_STATE_DISABLED);
+    if (sl_bt_busy || (!sl_bt_known && !sl_bt_silent)) lv_obj_add_state(power, LV_STATE_DISABLED);
     lv_obj_add_event_cb(power, sl_bt_power_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     g = set_group(sl_bt_body, "AUDIO OUTPUT");
@@ -1362,7 +1368,7 @@ static void sl_bt_page(void)
 #endif
     sl_bt_rebuild();
     page_push(page);
-    if (!sl_bt_busy && !sl_bt_scanning)
+    if (!sl_bt_busy && !sl_bt_scanning && !sl_bt_silent)   /* silent: the switch asks */
         sl_bt_begin(SL_BT_JOB_REFRESH, "Checking Bluetooth…");
     if (!sl_bt_watch_timer) sl_bt_watch_timer = lv_timer_create(sl_bt_watch_cb, 4000, NULL);
     lv_timer_reset(sl_bt_watch_timer);

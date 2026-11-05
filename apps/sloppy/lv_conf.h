@@ -530,7 +530,7 @@
 #define LV_USE_FONT_COMPRESSED 0
 
 /*Enable drawing placeholders when glyph dsc is not found*/
-#define LV_USE_FONT_PLACEHOLDER 1
+#define LV_USE_FONT_PLACEHOLDER 0   /* never a box: lv_font.c draws a missing letter as its nearest or nothing */
 
 /*=================
  *  TEXT SETTINGS
@@ -924,7 +924,7 @@
 #define LV_USE_FRAGMENT 0
 
 /*1: Support using images as font in label or span widgets */
-#define LV_USE_IMGFONT 0
+#define LV_USE_IMGFONT 1   /* colour emoji: glyphs drawn as pictures (sloppy_xfont.inc) */
 
 /*1: Enable an observer pattern implementation*/
 #define LV_USE_OBSERVER 1

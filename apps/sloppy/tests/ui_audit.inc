@@ -793,7 +793,8 @@ static void au_check(const char *screen) {
         const lv_font_t *f = lv_obj_get_style_text_font(it->o, LV_PART_MAIN);
         const char *t = lv_label_get_text(it->o); uint32_t c;
         while (t && (c = st_utf8_next(&t))) {
-            if (c < 0x20 || c == 0xad || (c >= 0x2000 && c <= 0x200f) || (c >= 0x2028 && c <= 0x202f) || (c >= 0x2060 && c <= 0x206f) || c == 0xfeff) continue;
+            if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || c == 0xad || (c >= 0x2000 && c <= 0x200f) || (c >= 0x2028 && c <= 0x202f) || (c >= 0x2060 && c <= 0x206f) ||
+                (c >= 0xfe00 && c <= 0xfe0f) || c == 0xfeff || (c >= 0xfff9 && c <= 0xfffb) || (c >= 0xe0000 && c <= 0xe01ef)) continue;   /* nothing to draw */
             lv_font_glyph_dsc_t g; bool ok = lv_font_get_glyph_dsc(f, &g, c, 0);
             if (!ok || g.is_placeholder) {
                 if (au_glyph_missing++ < 20) printf("audit: no glyph for U+%04X in \"%s\" (%s, %s)\n", (unsigned)c, lv_label_get_text(it->o), au_screen, au_look);
@@ -1150,6 +1151,7 @@ static void b9_snake_death(void);
     X("music", music_page()) \
     X("songs", songs_page()) \
     X("songs-sort-sheet", (songs_page(), frame(500), songs_sort_cb(NULL))) \
+    X("cover-flow-short-sheet", (cf_short_ask(5000), frame(500))) \
     X("songs-picking", au_picking()) \
     X("songs-toast", (songs_page(), frame(500), au_toast())) \
     X("albums", albums_page()) \
@@ -1914,6 +1916,7 @@ static void au_run(const char *dir, const int (*combos)[3], int ncombos) {
 }
 /* the whole matrix: 7 looks x 4 sizes x 14 languages */
 static void au_full(const char *dir) {
+    ng_force_small = getenv("SLOPPY_AUDIT_SMALL_GLASS") != NULL;   /* =1: the backdrops as memory short of the floor draws them */
     static int combos[7 * 4 * (SL_LANG_LAST + 1)][3]; int n = 0;
     const char *q = getenv("SLOPPY_AUDIT_LOOKS");   /* e.g. "0,0,0;1,3,4": look, size, language */
     if (q) { int a, b, c, k; while (n < (int)ARRAYLEN(combos) && sscanf(q, "%d,%d,%d%n", &a, &b, &c, &k) == 3) {
@@ -4185,4 +4188,146 @@ static void b13_shots(const char *dir, const char *tag) {
         au_reset(); au_empty(false);
     }
     au_library_done();
+}
+/* Colour emoji: a sequence is one picture, as a phone draws it, its parts
+ * never on their own; at every text size and in a right to left line */
+static void em_walk(const lv_font_t *f, const char *s, int *pics, int *drawn, int *w) {
+    uint32_t i = 0;
+    *pics = *drawn = *w = 0;
+    while (s[i]) {   /* as a label asks: a letter's width with the next, then the letter drawn; never a marker (U+200D) */
+        uint32_t c = lv_text_encoded_next(s, &i), j = i, nx = s[j] ? lv_text_encoded_next(s, &j) : 0;
+        lv_font_glyph_dsc_t g;
+        if (lv_text_is_marker(c)) continue;
+        if (lv_font_get_glyph_dsc(f, &g, c, nx)) *w += g.adv_w;
+        if (lv_font_get_glyph_dsc(f, &g, c, 0) && g.box_w && g.box_h) { (*drawn)++; if (g.format == LV_FONT_GLYPH_FORMAT_IMAGE) (*pics)++; }
+    }
+}
+static void emoji_tests(void) {
+    static const struct { const char *s; int pics, drawn; } seqs[] = {
+        { "🧛‍♂️", 1, 1 }, { "👍🏽", 1, 1 }, { "🇮🇱", 1, 1 }, { "🇮🇱🇺🇸", 2, 2 }, { "❤️‍🔥", 1, 1 }, { "👩🏿‍💻", 1, 1 },
+        { "🏴󠁧󠁢󠁳󠁣󠁴󠁿", 1, 1 }, { "🎧️", 1, 1 }, { "🧛‍🦖", 1, 1 }, { "1️⃣", 0, 1 }, { "#️⃣", 0, 1 }, { "🏽", 0, 0 },
+        { "Satanpodz🧛‍♂️", 1, 10 }, { "😀😀", 2, 2 }, { "🙂", 1, 1 }, { "♂", -1, 1 },
+    };
+    const lv_font_t *fonts[] = { &ss_regular_16, &ss_regular_18, &ss_regular_21, &ss_semibold_23, &ss_regular_26, &ss_semibold_30 };
+    for (unsigned k = 0; k < ARRAYLEN(fonts); k++)
+        for (unsigned i = 0; i < ARRAYLEN(seqs); i++) {
+            int pics, drawn, w;
+            em_walk(fonts[k], seqs[i].s, &pics, &drawn, &w);
+            if ((seqs[i].pics >= 0 && pics != seqs[i].pics) || drawn != seqs[i].drawn)
+                printf("emoji: \"%s\" at %d px: %d pictures, %d drawn\n", seqs[i].s, fonts[k]->line_height, pics, drawn);
+            assert((seqs[i].pics < 0 || pics == seqs[i].pics) && drawn == seqs[i].drawn);
+            if (seqs[i].pics == 1 && drawn == 1) assert(w >= 16 && w <= 28);   /* one picture's room */
+        }
+    {   /* ★ ✓ ▶ on their own are drawn as they always were; with U+FE0F, the picture */
+        int pics, drawn, w; lv_font_glyph_dsc_t g;
+        if (lv_font_get_glyph_dsc(&sl_sym_20, &g, 0x25b6, 0) && !g.is_placeholder) { em_walk(&ss_regular_21, "▶", &pics, &drawn, &w); assert(!pics && drawn == 1); }
+        em_walk(&ss_regular_21, "▶️", &pics, &drawn, &w); assert(pics == 1 && drawn == 1);
+    }
+    {   /* a right to left line keeps a sequence in its order: 🇮🇱 is not 🇱🇮 */
+        static const char *const rtl[] = { "שלום 🇮🇱", "שיר 🧛‍♂️ 👍🏽", "אוזניות 1️⃣ 🇮🇱🇺🇸" };
+        static const int want[] = { 1, 2, 2 };
+        for (unsigned i = 0; i < ARRAYLEN(rtl); i++) {
+            char out[96]; lv_bidi_process(rtl[i], out, LV_BASE_DIR_RTL);
+            assert(strstr(out, "🇮🇱") || !strstr(rtl[i], "🇮🇱"));
+            assert(!strstr(out, "🇱🇮") && (!strstr(rtl[i], "🧛‍♂️") || strstr(out, "🧛‍♂️")) && (!strstr(rtl[i], "👍🏽") || strstr(out, "👍🏽")));
+            int pics, drawn, w; em_walk(&ss_regular_21, out, &pics, &drawn, &w); assert(pics == want[i]);
+        }
+    }
+    /* a Bluetooth name with them, at every text size and in Hebrew: drawn, read by the audit */
+    char name0[sizeof sl_bt_demo_devices[0].name]; strlcpy(name0, sl_bt_demo_devices[0].name, sizeof name0);
+    static const struct { int step, lang; const char *name, *shot; } looks[] = {
+        { 0, 0, "Satanpodz🧛‍♂️ 👍🏽🇮🇱", "emoji-bt-standard" }, { 1, 0, "Satanpodz🧛‍♂️ 👍🏽🇮🇱", "emoji-bt-large" },
+        { 2, 0, "Satanpodz🧛‍♂️ 👍🏽🇮🇱", "emoji-bt-larger" }, { 3, 0, "Satanpodz🧛‍♂️ 👍🏽🇮🇱", "emoji-bt-largest" },
+        { 0, 4, "אוזניות 🧛‍♂️ 🇮🇱 ❤️‍🔥", "emoji-bt-hebrew" }, { 3, 4, "אוזניות 🧛‍♂️ 🇮🇱 ❤️‍🔥", "emoji-bt-hebrew-largest" },
+    };
+    int th0 = global_settings.sloppy_theme, hs0 = global_settings.sloppy_home_style, lang0 = global_settings.sloppy_language, step0 = sl_text_step;
+    for (unsigned i = 0; i < ARRAYLEN(looks); i++) {
+        strlcpy(sl_bt_demo_devices[0].name, looks[i].name, sizeof sl_bt_demo_devices[0].name);
+        au_apply(0, looks[i].step, looks[i].lang);
+        sl_bt_page(); sl_bt_demo_index = 0; frame(4100); frame(100); frame(400);
+        assert(find_label(sl_bt_body, looks[i].name));
+        char shot[64]; snprintf(shot, sizeof shot, "%s.ppm", looks[i].shot); shot_now(shot);
+        au_check(looks[i].shot);
+        if (au_screen_findings) printf("emoji: %s: %d audit findings\n", looks[i].shot, au_screen_findings);
+        assert(!au_screen_findings);
+        while (npages > 1) { page_pop(); frame(300); }
+    }
+    strlcpy(sl_bt_demo_devices[0].name, name0, sizeof name0); sl_bt_demo_index = -1;
+    global_settings.sloppy_theme = th0; global_settings.sloppy_home_style = hs0; global_settings.sloppy_language = lang0;
+    sl_text_step = step0; global_settings.sloppy_text_size = step0; appearance_reload((void *)2); frame(700);
+    printf("PASS: colour emoji: sequences (ZWJ, skin tones, flags, tags, keycaps) one picture or their first emoji, never their parts, at %d sizes; kept in order right to left; a Bluetooth name at four text sizes and in Hebrew, the audit clean; %d KB of slots, nothing else held.\n",
+           (int)ARRAYLEN(fonts), (int)(XE_SLOTS * sizeof(struct xe_slot) / 1024));
+}
+/* Never a box: a letter no font has is drawn as its nearest (a dash, a space,
+ * a quote, ASCII for fullwidth), as nothing when it is a control or format
+ * letter, else as a thin gap */
+#if LV_USE_FONT_PLACEHOLDER
+#error "a letter without a glyph must never draw a box"
+#endif
+/* a name listed whole, or cut short with "..." where the row has no room for it */
+static lv_obj_t *tofu_find(lv_obj_t *o, const char *s) {
+    if (lv_obj_check_type(o, &lv_label_class)) {
+        const char *t = lv_label_get_text(o);
+        size_t n = strlen(t);
+        if (!strcmp(t, s) || (n > 3 && !strcmp(t + n - 3, "...") && !strncmp(t, s, n - 3))) return o;
+    }
+    for (uint32_t i = 0; i < lv_obj_get_child_count(o); i++) { lv_obj_t *f = tofu_find(lv_obj_get_child(o, i), s); if (f) return f; }
+    return NULL;
+}
+static void tofu_tests(void) {
+    static const uint32_t near[] = { 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212, 0xfe58, 0xfe63, 0xff0d,
+        0x2018, 0x2019, 0x201b, 0x201c, 0x201f, 0x2032, 0x2033, 0x2035, 0x2039, 0x203a, 0x02bc, 0x2026, 0x2024,
+        0x2044, 0x2215, 0x2030, 0xff01, 0xff21, 0xff41, 0xff5e };
+    static const uint32_t spaces[] = { 0xa0, 0x2000, 0x2002, 0x2003, 0x2007, 0x2009, 0x200a, 0x202f, 0x205f };
+    static const uint32_t none[] = { 0x200b, 0x200c, 0x200e, 0x2060, 0xfeff, 0x7f, 0x85, 0x9f, 0xfe00, 0xe0001, 0xfff9 };
+    const lv_font_t *fonts[] = { &ss_regular_16, &ss_regular_18, &ss_regular_21, &ss_semibold_23, &ss_regular_26, &ss_semibold_30 };
+    lv_font_glyph_dsc_t g;
+    for (unsigned k = 0; k < ARRAYLEN(fonts); k++) {
+        const lv_font_t *f = fonts[k];
+        for (unsigned i = 0; i < ARRAYLEN(near); i++) {
+            bool ok = lv_font_get_glyph_dsc(f, &g, near[i], 0);
+            if (!ok || g.is_placeholder || !g.box_w) printf("tofu: U+%04X at %d px has no near letter\n", (unsigned)near[i], f->line_height);
+            assert(ok && !g.is_placeholder && g.box_w && g.adv_w);
+        }
+        for (unsigned i = 0; i < ARRAYLEN(spaces); i++) {
+            assert(lv_font_get_glyph_width(f, spaces[i], 0) == lv_font_get_glyph_width(f, ' ', 0));
+        }
+        for (unsigned i = 0; i < ARRAYLEN(none); i++) {
+            lv_font_get_glyph_dsc(f, &g, none[i], 0);
+            assert(lv_font_get_glyph_width(f, none[i], 0) == 0 && (!g.box_w || !g.box_h));
+        }
+        /* none at all (an Egyptian hieroglyph): a thin gap, nothing drawn */
+        assert(!lv_font_get_glyph_dsc(f, &g, 0x13000, 0) && !g.box_w && g.adv_w > 0 && g.adv_w <= f->line_height / 4);
+    }
+    /* names with them, at every text size and in Hebrew: drawn, read by the audit */
+    static const char *const names[3][2] = {   /* on devices 0 and 2: 1 keeps a name an earlier test gave it */
+        { "Rock‐n‑Roll ‒ Live ― Take−2 ﹘﹣－", "A B C D E F G H" },
+        { "‛Rock′ ‟Roll″ ‹Mix› 1⁄2 ‰", "Zero​Width⁠Joined﻿Here‎\xc2\x85!" },
+        { "Ａｂｃ １２３！ （Ｍｉｘ）", "‘One’ … “Two” «Three» • ·" } };
+    char saved[3][sizeof sl_bt_demo_devices[0].name];
+    for (int d = 0; d < 3; d++) strlcpy(saved[d], sl_bt_demo_devices[d].name, sizeof saved[d]);
+    bool paired2 = sl_bt_demo_devices[2].paired; sl_bt_demo_devices[2].paired = true;   /* all three listed without a scan */
+    static const struct { int step, lang; const char *shot; } looks[] = {
+        { 0, 0, "tofu-bt-standard" }, { 1, 0, "tofu-bt-large" }, { 2, 0, "tofu-bt-larger" }, { 3, 0, "tofu-bt-largest" },
+        { 0, 4, "tofu-bt-hebrew" }, { 3, 4, "tofu-bt-hebrew-largest" } };
+    int th0 = global_settings.sloppy_theme, hs0 = global_settings.sloppy_home_style, lang0 = global_settings.sloppy_language, step0 = sl_text_step;
+    for (unsigned i = 0; i < ARRAYLEN(looks); i++)
+        for (int n = 0; n < 3; n++) {
+            for (int d = 0; d < 2; d++) strlcpy(sl_bt_demo_devices[d * 2].name, names[n][d], sizeof sl_bt_demo_devices[d * 2].name);
+            au_apply(0, looks[i].step, looks[i].lang);
+            sl_bt_page(); sl_bt_demo_index = 0; frame(4100); frame(100); frame(400);
+            for (int d = 0; d < 2; d++) assert(tofu_find(sl_bt_body, names[n][d]));
+            char shot[64]; snprintf(shot, sizeof shot, "%s-%d", looks[i].shot, n + 1);
+            char ppm[72]; snprintf(ppm, sizeof ppm, "%s.ppm", shot); shot_now(ppm);
+            au_check(shot);
+            if (au_screen_findings) printf("tofu: %s: %d audit findings\n", shot, au_screen_findings);
+            assert(!au_screen_findings);
+            while (npages > 1) { page_pop(); frame(300); }
+        }
+    for (int d = 0; d < 3; d++) strlcpy(sl_bt_demo_devices[d].name, saved[d], sizeof saved[d]);
+    sl_bt_demo_devices[2].paired = paired2; sl_bt_demo_index = -1;
+    global_settings.sloppy_theme = th0; global_settings.sloppy_home_style = hs0; global_settings.sloppy_language = lang0;
+    sl_text_step = step0; global_settings.sloppy_text_size = step0; appearance_reload((void *)2); frame(700);
+    printf("PASS: never a box: %d dashes, quotes and fullwidth letters drawn as their nearest, %d spaces as a space, %d control and format letters as nothing, a letter no font has as a thin gap, at %d sizes; names with them at four text sizes and in Hebrew, the audit clean.\n",
+           (int)ARRAYLEN(near), (int)ARRAYLEN(spaces), (int)ARRAYLEN(none), (int)ARRAYLEN(fonts));
 }

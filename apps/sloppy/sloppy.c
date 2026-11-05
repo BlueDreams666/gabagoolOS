@@ -22,6 +22,9 @@
 #include <pthread.h>                    /* sl_log's lock: worker threads log too, in the harness as on the R1 */
 #include <unistd.h>
 #include <errno.h>                      /* the card's errors (sloppy_card_error) */
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+#include <sys/mman.h>                   /* mincore: the music buffer still to fill */
+#endif
 #if defined(HIBY_LINUX) && !defined(SIMULATOR)
 #include <sys/syscall.h>
 #include <sys/mman.h>                   /* sl_give_back */
@@ -265,7 +268,10 @@ extern const lv_font_t sl_sym_14, sl_sym_16, sl_sym_18, sl_sym_20, sl_sym_22, sl
 /* --------------------------------------------------------------- log */
 /* Breadcrumbs for field debugging. Each line is synced to the card, so the
  * last lines before a crash survive the reboot. The previous session's log
- * is kept as sloppy.prev.log. */
+ * is kept as sloppy.prev.log, the ones before as sloppy.prev2.log up to
+ * sloppy.prev8.log: a freeze needs a reset or two to get out of, and with
+ * only one kept its log was gone by the time the card reached a computer
+ * (a test R1, 4 Nov). */
 static int log_fd = -1;
 static bool log_started;            /* the previous log was rotated out this boot */
 #define DB_USB_NOTE "/tmp/sloppy-usb-was-on"   /* USB mode was on: update the library (sloppy_dbupdate.inc) */
@@ -309,6 +315,57 @@ static int log_linef(char *b, size_t cap, const char *fmt, ...)
     va_end(ap);
     return n;
 }
+#define LOG_DIR ROCKBOX_DIR "/sloppy/"
+#define LOG_KEEP 8                  /* earlier starts kept: sloppy.prev.log, sloppy.prev2.log ... */
+/* only with a log there to keep: the open is tried again until the card
+ * is up, and each try must not push the kept ones further back */
+static bool log_rotated;
+static void log_keep(void)
+{
+    char from[64], to[64];
+    int fd = open(LOG_DIR "sloppy.log", O_RDONLY);
+    if (fd < 0) return;
+    close(fd);
+    log_rotated = true;
+    snprintf(to, sizeof to, LOG_DIR "sloppy.prev%d.log", LOG_KEEP);
+    remove(to);
+    for (int k = LOG_KEEP - 1; k >= 1; k--)
+    {
+        if (k == 1) snprintf(from, sizeof from, LOG_DIR "sloppy.prev.log");
+        else snprintf(from, sizeof from, LOG_DIR "sloppy.prev%d.log", k);
+        snprintf(to, sizeof to, LOG_DIR "sloppy.prev%d.log", k + 1);
+        rename(from, to);
+    }
+    rename(LOG_DIR "sloppy.log", LOG_DIR "sloppy.prev.log");
+}
+/* The start before ended without its last words (no power off, no restart
+ * for an update): a freeze and a reset, a crash or a flat battery. Its last
+ * lines open this log, so they are found even after more resets. */
+static void log_last_end(void)
+{
+    static char tail[1536];
+    int fd = open(LOG_DIR "sloppy.prev.log", O_RDONLY);
+    if (fd < 0) return;
+    long size = lseek(fd, 0, SEEK_END);
+    long from = size > (long)sizeof tail - 1 ? size - ((long)sizeof tail - 1) : 0;
+    lseek(fd, from, SEEK_SET);
+    int n = read(fd, tail, sizeof tail - 1);
+    close(fd);
+    if (n <= 0) return;
+    tail[n] = '\0';
+    if (strstr(tail, "power: off") || strstr(tail, "restarting") || strstr(tail, "leaving for classic")) return;
+    char *at = tail + n;                 /* the last 12 lines, whole */
+    for (int lines = 0; at > tail && lines < 13; ) if (*--at == '\n') lines++;
+    if (at > tail || from > 0) at = strchr(at, '\n') ? strchr(at, '\n') + 1 : at;
+    static const char head[] = "[      0.00] last start: ended without a clean shutdown (a freeze and a reset, a crash or the battery); its last lines:\n";
+    write(log_fd, head, sizeof head - 1);
+    for (char *line = at, *e; *line; line = e + 1)
+    {
+        if (!(e = strchr(line, '\n'))) break;
+        write(log_fd, "    | ", 6);
+        write(log_fd, line, (size_t)(e - line + 1));
+    }
+}
 /* the line onto the card, or into log_away while it is held; log_lock held */
 static void log_put(const char *b, int n)
 {
@@ -327,11 +384,11 @@ static void log_put(const char *b, int n)
         if (!log_started)
         {
             mkdir(ROCKBOX_DIR "/sloppy");
-            remove(ROCKBOX_DIR "/sloppy/sloppy.prev.log");
-            rename(ROCKBOX_DIR "/sloppy/sloppy.log", ROCKBOX_DIR "/sloppy/sloppy.prev.log");
+            log_keep();
         }
         log_fd = open(ROCKBOX_DIR "/sloppy/sloppy.log", O_WRONLY | O_CREAT | how, 0666);
         if (log_fd < 0) return;
+        if (!log_started && log_rotated) log_last_end();
         log_started = true;
     }
     /* A crash keeps written lines (they are in the kernel's cache); only a
@@ -859,6 +916,7 @@ static long sl_flip_key(long btn)
     if (ud == BUTTON_UP || ud == BUTTON_DOWN) btn ^= BUTTON_UP | BUTTON_DOWN;
     return btn;
 }
+static uint32_t touch_down_since;     /* when the finger went down, 0: up (sl_hold_watch) */
 static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     int pos = 0;
@@ -881,6 +939,8 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
      * the moment a lock-screen swipe flickered, and came back on a stale
      * queued position (swipes logged as going down, stuck halfway) */
     if (down) last_touch_ms = sl_ms();
+    if (down && !touch_down_since) touch_down_since = sl_ms() | 1;
+    else if (!down) touch_down_since = 0;
 
     if (sl_power_filter_touch(down, x, y))
     {
@@ -1605,6 +1665,12 @@ static void notify_ex(int src, int kind, unsigned flags, int action, const char 
 #define toast_warn(m)    notify_src_file(__FILE__, 1, 0, (m))
 #define toast_private(m) notify_src_file(__FILE__, 0, 1, (m))
 
+/* bug reports and Record lag (sloppy_report.inc) */
+static void sl_doing_is(const char *what, const char *detail);
+static bool sl_report_write(char *path, size_t n);
+static void report_make_cb(lv_event_t *e);
+static void lag_set(int on);
+static long lag_until;
 /* ------------------------------------------------------------ playback */
 #include "sloppy_queue.h"
 /* Starting something the user just picked cuts the old song cleanly. The
@@ -1660,6 +1726,7 @@ static unsigned sl_shuffle_seed(void)
 static void sl_set_shuffle(bool on)
 {
     global_settings.playlist_shuffle = on;
+    sl_doing_is(on ? "shuffle on" : "shuffle off", NULL);
     bool playing = (audio_status() & AUDIO_STATUS_PLAY) != 0;
     if (playing && q_keep()) q_drop();
     if (on) playlist_randomise(NULL, current_tick, true);
@@ -1674,6 +1741,8 @@ static bool play_list(const int *tracks, int n, int start, bool shuffle)
         if (tracks[i] < 0 || tracks[i] >= sl_lib.n_tracks) return false;
     char path[MAX_PATH];
     sl_log("play %d tracks from %d%s: %s", n, start, shuffle ? " shuffled" : "", sl_track_path(tracks[start], path, sizeof path));
+    snprintf(path, sizeof path, "%d songs", n);
+    sl_doing_is(shuffle ? "starting a shuffle" : "starting music", path);
     if (sl_new_list(NULL) < 0)
     {
         toast_warn("Could not create playlist");
@@ -1872,6 +1941,9 @@ static void ui_reveal_page(lv_obj_t *p)
 static struct { lv_obj_t *img[2], *page, *below; lv_draw_buf_t *buf[2]; } ps;
 static void ps_gone_cb(lv_event_t *e);
 static long sl_mem_available_kb(void);
+static bool sl_mem_room(long need_kb, const char *why);
+#define SL_MEM_SWAP_KB 4096   /* free memory the R1 swapped under (its logs: 3.7-4.3 MB): nothing optional below it */
+static long sl_mem_floor_kb(void);
 /* The pictures borrow 1.5 MB for a moment. With the player short of memory
  * that borrowing pushed out the code and the song being read, and every
  * page then took seconds (the R1 log, 5 MB free with Bluetooth on): only
@@ -2099,6 +2171,7 @@ static void page_pop_from(int x)
     if (npages < 2)
         return;
     ps_end();
+    sl_doing_is("back from a page", npages == 2 ? "home" : NULL);
     lv_obj_t *p = pages[--npages];
     lv_obj_t *below = pages[npages - 1];
     statusbar_retheme();                 /* back on the wallpaper, or the page under it */
@@ -2210,6 +2283,7 @@ static void cf_close(void);
  * built there, freed with it, and left dangling in pages[]. */
 static lv_obj_t *page_new(const char *title, lv_obj_t **page_out)
 {
+    sl_doing_is("a page", title);
     if (cf_is_open()) cf_close();
     lv_obj_t *p = box(lv_screen_active());
     lv_obj_add_flag(p, LV_OBJ_FLAG_USER_2);
@@ -2480,6 +2554,7 @@ static void np_show(void)
     if (!(audio_status() & AUDIO_STATUS_PLAY))
         return;
     np_open = true;
+    sl_doing_is("Now Playing", NULL);
     if (vnl_on() && !vnl) vnl_apply(np, false);   /* built on first use: it costs 0.5 MB */
     vnl_wake();
     np_update(true);
@@ -2498,6 +2573,7 @@ static void np_show_auto(void)
 static void np_hide(int from)
 {
     np_open = false;
+    sl_doing_is("back from Now Playing", NULL);
     statusbar_retheme();                 /* the page's ink again, not the cover's white */
     nps_release();
     np_anim_y(from, H, 380, np_hidden_cb);
@@ -7699,6 +7775,16 @@ static void handle_button(long btn)
             sl_ota_hold(true);            /* an update being checked or sent stops; nothing half-staged stays */
             SL_USB_TRACE("ui: our files let go after %u ms: answering, the USB screen is up",
                          (unsigned)(sl_ms() - usb_from));
+            /* The USB screen goes dark after our sleep time, as the stock
+             * OS's does, and a key lights it again: left on for as long as
+             * a computer was attached it would wear the panel. The user's
+             * own timeouts can be "always on" (and are while plugged in by
+             * default), so they are not what it gets. sl_power_resume()
+             * takes them back to ours after. */
+            backlight_set_timeout(sl_power_sleep_ms() / 1000);
+#if CONFIG_CHARGING
+            backlight_set_timeout_plugged(sl_power_sleep_ms() / 1000);
+#endif
         }
         default_event_handler(btn);
         if (usb)
@@ -8405,8 +8491,14 @@ static void periodic_ui(void)
 /* 64 MB of RAM is shared with the stock system services, Rockbox's audio
  * buffer and the decoders. The UI keeps some big buffers for speed; when
  * the kernel reports little left, give back what can be rebuilt. */
-#define SL_MEM_LOW_KB 6144
-#define SL_MEM_BT_EXTRA_KB 4096
+/* From the R1 logs: with Bluetooth on the player stalled at 4.3-5.0 MB
+ * free and swapped on every Your taste swipe at 3.7 MB, while Cover Flow
+ * and the glass ran smoothly at 7-9 MB, where an R1 with its library up
+ * and Bluetooth on usually sits. A floor of 10 MB over Bluetooth (4 Nov)
+ * turned Cover Flow away and left Now Playing's reflection black at 7-9:
+ * 6 MB over Bluetooth, 5 on the jack, keeps a MB over the worst seen. */
+#define SL_MEM_LOW_KB 5120
+#define SL_MEM_BT_EXTRA_KB 1024
 static void sl_mem_release(const char *why, bool images)
 {
     size_t freed = 0;
@@ -8436,14 +8528,53 @@ static void sl_mem_release(const char *why, bool images)
         lyr_bd_free();
         sl_log("memory: released Now Playing's backdrops (%s)", why);
     }
+    xe_free();                               /* colour emoji: read again as words need them */
     if (images) lv_image_cache_drop(NULL);   /* decoded art reloads from the thumbnails */
+    /* Cover Flow's covers, shut: kept 10 minutes for a quick return, but
+     * short of memory they go now (5 Nov: 3.7 MB of them sat through a
+     * shuffle that left 2.5 MB free, and it froze) */
+    if (images && !cf.active && cf_covers_held())
+    {
+        int n = cf_covers_held();
+        cf.closed_at = 0;
+        cf_art_flush();
+        sl_log("memory: released Cover Flow's %d covers, %d KiB (%s)", n, n * (CF_ART * CF_ART * 2 / 1024), why);
+    }
     cf_art_trim();
     if (freed || images)
         sl_log("memory: released %lu KiB of glass%s (%s)",
                (unsigned long)(freed * W * H * 2 / 1024), images ? " and the image cache" : "", why);
 }
+static long sl_mem_test_kb;               /* the harness: free memory as the R1 would have it, 0 the real one */
+#if !(defined(HIBY_R1) && !defined(SIMULATOR))
+static long sl_mem_test_unfilled_kb;      /* the harness: the music buffer not yet filled */
+#endif
+/* The music buffer (7 MB, static) gets its pages only as playback first
+ * fills it, so until then the kernel counts it free. A test R1 (5 Nov):
+ * Cover Flow took 40 covers at 18.7 MB "free" before anything played;
+ * the shuffle then filled the buffer and left 2.5 MB, and it froze. The
+ * budget counts what is still to come as taken. */
+static long sl_music_unfilled_kb(void)
+{
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+    extern unsigned char *audiobufend;
+    static unsigned char vec[(MEMORYSIZE - 1) * 1024 * 1024 / 4096 + 1];
+    long ps = sysconf(_SC_PAGESIZE);
+    if (ps < 4096) return 0;
+    uintptr_t end = (uintptr_t)audiobufend & ~(uintptr_t)(ps - 1);
+    uintptr_t start = ((uintptr_t)audiobufend - (MEMORYSIZE - 1) * 1024 * 1024 + ps - 1) & ~(uintptr_t)(ps - 1);
+    size_t pages = (end - start) / ps;
+    if (end <= start || pages > sizeof vec || mincore((void *)start, end - start, vec)) return 0;
+    size_t out = 0;
+    for (size_t i = 0; i < pages; i++) out += !(vec[i] & 1);
+    return (long)(out * (ps / 1024));
+#else
+    return sl_mem_test_unfilled_kb;
+#endif
+}
 static long sl_mem_available_kb(void)
 {
+    if (sl_mem_test_kb) return sl_mem_test_kb - sl_music_unfilled_kb();
     FILE *fp = fopen("/proc/meminfo", "r");
     if (!fp) return -1;
     char line[96];
@@ -8451,29 +8582,116 @@ static long sl_mem_available_kb(void)
     while (fgets(line, sizeof line, fp))
         if (sscanf(line, "MemAvailable: %ld", &kb) == 1) break;
     fclose(fp);
-    return kb;
+    return kb < 0 ? kb : kb - sl_music_unfilled_kb();
 }
+/* The floor: what stays free for the music, its decoder and, over
+ * Bluetooth, the encoder and its daemons. The UI never borrows into it. */
+static long sl_mem_floor_kb(void)
+{
+    return SL_MEM_LOW_KB + (sl_bt_streaming() ? SL_MEM_BT_EXTRA_KB : 0);
+}
+/* The budget: anything optional the UI would hold (a glass, a backdrop,
+ * a reflection, covers ahead) asks here first. Short, the UI gives back
+ * what it can rebuild and asks again; still short, the extra goes without
+ * and the music keeps its room. -1 (no /proc, the desk) is plenty. */
+static bool sl_mem_room(long need_kb, const char *why)
+{
+    long kb = sl_mem_available_kb();
+    if (kb < 0 || kb - need_kb >= sl_mem_floor_kb()) return true;
+    sl_mem_release(why, true);
+    kb = sl_mem_available_kb();
+    if (kb - need_kb >= sl_mem_floor_kb()) return true;
+    sl_log("memory: %s goes without, %ld KiB free, %ld wanted", why, kb, need_kb);
+    return false;
+}
+/* Who else holds the memory, once as it first runs low: the kernel's split
+ * and the biggest programs besides us (a test R1, 5 Nov: 4.7 MB available
+ * with the player at 18 MB, and nothing in the log said where the rest
+ * was). Raw syscalls for /proc's list: Rockbox's opendir maps paths onto
+ * the card. */
+#if defined(HIBY_LINUX) && !defined(SIMULATOR)
+#include <fcntl.h>
+static void sl_mem_who(void)
+{
+    char line[96], key[32], out[480];
+    size_t n = 0;
+    long v;
+    out[0] = '\0';
+    FILE *fp = fopen("/proc/meminfo", "r");
+    if (fp)
+    {
+        while (fgets(line, sizeof line, fp) && n < sizeof out)
+            if (sscanf(line, "%31[^:]: %ld", key, &v) == 2 &&
+                (!strcmp(key, "MemTotal") || !strcmp(key, "MemFree") || !strcmp(key, "Cached") ||
+                 !strcmp(key, "Shmem") || !strcmp(key, "AnonPages") || !strcmp(key, "Slab")))
+                n += snprintf(out + n, sizeof out - n, "%s %ld, ", key, v);
+        fclose(fp);
+    }
+    struct { char name[20]; long kb; } top[5];
+    memset(top, 0, sizeof top);
+    int dfd = syscall(SYS_openat, AT_FDCWD, "/proc", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    char buf[2048];
+    long r;
+    pid_t self = getpid();
+    while (dfd >= 0 && (r = syscall(SYS_getdents64, dfd, buf, sizeof buf)) > 0)
+        for (long off = 0; off < r; )
+        {
+            struct { uint64_t ino; int64_t off; unsigned short reclen; unsigned char type; char name[]; }
+                *d = (void *)(buf + off);
+            off += d->reclen;
+            long pid = strtol(d->name, NULL, 10);
+            if (pid <= 0 || pid == self) continue;
+            char path[40], name[20] = "?";
+            long kb = 0;
+            snprintf(path, sizeof path, "/proc/%ld/status", pid);
+            if (!(fp = fopen(path, "r"))) continue;
+            while (fgets(line, sizeof line, fp))
+                if (!strncmp(line, "Name:", 5)) sscanf(line + 5, "%19s", name);
+                else if (sscanf(line, "VmRSS: %ld", &kb) == 1) break;
+            fclose(fp);
+            for (int i = 0; i < 5; i++)
+                if (kb > top[i].kb)
+                {
+                    memmove(&top[i + 1], &top[i], (4 - i) * sizeof top[0]);
+                    strlcpy(top[i].name, name, sizeof top[i].name);
+                    top[i].kb = kb;
+                    break;
+                }
+        }
+    if (dfd >= 0) syscall(SYS_close, dfd);   /* Rockbox's close() is for its own files */
+    for (int i = 0; i < 5 && top[i].kb && n < sizeof out; i++)
+        n += snprintf(out + n, sizeof out - n, "%s%s %ld", i ? ", " : "biggest besides us (KiB): ", top[i].name, top[i].kb);
+    sl_log("memory: %s", out[0] ? out : "(no /proc)");
+}
+#else
+static void sl_mem_who(void) {}
+#endif
+/* The watcher: every 5 s, every second near the floor, so a fall is met
+ * before the kernel starts throwing out the code and the song being read
+ * (the freezes in the R1 logs). Low, it gives back again every 30 s. */
 static void sl_mem_watch(void)
 {
-    static uint32_t next_ms;
+    static uint32_t next_ms, released_ms;
     static bool low;
     uint32_t now = sl_ms();
     if ((int32_t)(now - next_ms) < 0) return;
-    next_ms = now + 5000;
     long kb = sl_mem_available_kb();
-    if (kb < 0) return;
+    if (kb < 0) { next_ms = now + 5000; return; }
+    long floor_kb = sl_mem_floor_kb();
+    next_ms = now + (kb < floor_kb + 4096 ? 1000 : 5000);
     bool was_low = low;
-    /* over Bluetooth the encoder needs its room: give the glass back sooner */
-    low = kb < SL_MEM_LOW_KB + (sl_bt_streaming() ? SL_MEM_BT_EXTRA_KB : 0);
-    if (low && !was_low)
+    low = kb < floor_kb;
+    if (low && (!was_low || (int32_t)(now - released_ms) >= 30000))
     {
         /* ours or the system's: the player's own size says which */
         unsigned long peak, rss = sl_perf_rss_kb(&peak);
         sl_log("memory: only %ld KiB available, the player %lu KiB (peak %lu)", kb, rss, peak);
+        if (!was_low) sl_mem_who();
         sl_mem_release("low memory", true);
+        released_ms = now;
     }
     /* the reflection, given back or never made: again once there is room */
-    if (np_open && np_glass() && !np_glow_buf && kb >= NG_MIN_FREE_KB) np_glow_soon();
+    if (!wallpaper_screen_dark && np_open && np_glass() && !np_glow_buf && kb >= NG_MIN_FREE_KB) np_glow_soon();
 }
 /* The panel went dark: the glass would be stale by the next pull anyway. */
 static void sl_mem_on_dark(void)
@@ -8481,12 +8699,27 @@ static void sl_mem_on_dark(void)
     sl_mem_release("screen off", false);
 }
 
+#include "sloppy_report.inc"
 /* Underruns are heard as clicks or gaps: note them on the card at most
  * once a minute, with the output and rate they happened on. */
-#if defined(HIBY_LINUX) && !defined(SIMULATOR)
-unsigned int pcm_alsa_get_rate(void);
-unsigned int pcm_alsa_get_xruns(void);
-#endif
+/* A finger held still for seconds: once a second, what was under it and
+ * what memory was left. A test R1 froze with a finger held on a song in
+ * Cover Flow's album, music going out over Bluetooth (4 Nov); its log was
+ * lost to the resets, so the next one says where it was. */
+static int cf_covers_held(void);
+static void sl_hold_watch(void)
+{
+    static uint32_t next_ms;
+    uint32_t now = sl_ms();
+    if (!touch_down_since || (int32_t)(now - touch_down_since) < 2000) { next_ms = 0; return; }
+    if (next_ms && (int32_t)(now - next_ms) < 0) return;
+    next_ms = now + 1000;
+    char a[32];
+    sl_log("hold: %u s, doing %s, gesture %d%s; %s, %ld KiB free", (unsigned)((now - touch_down_since) / 1000), sl_doing,
+           (int)g_state, g_dragged ? " (dragged)" : "", lag_audio_now(a, sizeof a), sl_mem_available_kb());
+    if (cf_is_open())
+        sl_log("hold: Cover Flow %d covers held of %d, album %s", cf_covers_held(), cf_cap, cf.panel ? "open" : "shut");
+}
 static void sl_audio_watch(void)
 {
 #if defined(HIBY_LINUX) && !defined(SIMULATOR)
@@ -8520,13 +8753,14 @@ static void periodic(lv_timer_t *t)
     if (!wallpaper_screen_dark)
     {
         periodic_ui();
-        sl_mem_watch();
     }
+    sl_mem_watch();                      /* dark too: the music plays on */
     q_poll();
     wv_poll();                           /* the waveform hears the song with the screen dark too */
     sl_paused_poll();
     sleep_end_poll(wallpaper_screen_dark ? 1000 : 250);
     sl_audio_watch();
+    sl_hold_watch();
     if (db_update_state != DBU_IDLE) db_update_poll();
     pet_tick();
     hist_poll();
@@ -8580,10 +8814,15 @@ static void touch_wake(long btn, intptr_t pos)
 
 /* Dark, LVGL's reader stays stopped: a tap on a dark R1 posts no button
  * event, but the driver still holds the contact. So the loop looks at it
- * itself, about 20 times a second (one call, no drawing), and a finger
- * down starts the reader with that tap, which wakes the lock screen.
- * Stopping the look altogether (to save power) let only a key wake it,
- * which is what Tap to wake off asks for. */
+ * itself, about 20 times a second (one call, no drawing). Two presses
+ * within 400 ms and 60 px start the reader with the second, which wakes
+ * the lock screen; one tap or a brush in a pocket does not. After the
+ * first the loop looks 50 times a second, so the lift between the two is
+ * seen. Stopping the look altogether (to save power) let only a key wake
+ * it, which is what Double tap to wake off asks for. */
+static bool dark_tap_armed, dark_tap_down;
+static uint32_t dark_tap_ms;
+static int dark_tap_x, dark_tap_y;
 static void touch_dark_poll(void)
 {
     int pos;
@@ -8591,10 +8830,32 @@ static void touch_dark_poll(void)
     {
         lv_timer_t *read = lv_indev_get_read_timer(touch);
         if (read) { lv_timer_pause(read); touch_paused = true; }
+        dark_tap_armed = false;
+        dark_tap_down = true;               /* a finger already down is no first tap */
     }
-    else if (global_settings.sloppy_tap_wake &&
-             (button_status_wdata(&pos) & BUTTON_TOUCHSCREEN))
-        touch_wake(BUTTON_TOUCHSCREEN, pos);
+    else if (global_settings.sloppy_tap_wake)
+    {
+        bool down = button_status_wdata(&pos) & BUTTON_TOUCHSCREEN;
+        uint32_t now = sl_ms();
+        int x = (pos >> 16) & 0xffff, y = pos & 0xffff;
+        if (dark_tap_armed && now - dark_tap_ms > 400) dark_tap_armed = false;
+        if (down && !dark_tap_down)
+        {
+            if (dark_tap_armed && abs(x - dark_tap_x) <= 60 && abs(y - dark_tap_y) <= 60)
+            {
+                dark_tap_armed = false;
+                touch_wake(BUTTON_TOUCHSCREEN, pos);
+            }
+            else
+            {
+                dark_tap_armed = true;
+                dark_tap_ms = now;
+                dark_tap_x = x;
+                dark_tap_y = y;
+            }
+        }
+        dark_tap_down = down;
+    }
 }
 
 /* Watchdog, while Cover Flow is measured: a raw thread that notes in the
@@ -8665,13 +8926,18 @@ static void *sl_watchdog(void *arg)
          * it (a database scan or the buffering, not always our UI) */
         struct thread_debug_info ti;
         if (thread_get_debug_info(thread_self(), &ti) <= 0) strcpy(ti.name, "?");
-        char b[256];
+        char b[384];
         /* and the clock's own thread: a stalled tick froze the R1 (3 Nov) */
         extern void (*volatile tick_task_now)(void);
         extern volatile unsigned int tick_skipped;
-        int n = snprintf(b, sizeof b, "[%7ld.%02ld] watchdog: main loop stuck for %u ms in '%s', thread '%s' running, tick task %p, %u ticks put off\n",
+        /* and what was on screen, with the memory: a freeze said 'lvgl'
+         * under a stale "Cover Flow" that had never opened (5 Nov) */
+        char doing[sizeof sl_doing];
+        memcpy(doing, sl_doing, sizeof doing);
+        doing[sizeof doing - 1] = '\0';
+        int n = snprintf(b, sizeof b, "[%7ld.%02ld] watchdog: main loop stuck for %u ms in '%s', thread '%s' running, tick task %p, %u ticks put off, doing %s, %ld KiB free\n",
                          current_tick / HZ, current_tick % HZ, (unsigned)(now - beat), sl_at_where, ti.name,
-                         (void *)tick_task_now, tick_skipped);
+                         (void *)tick_task_now, tick_skipped, doing, sl_mem_available_kb());
         if (n <= 0 || log_fd < 0) continue;
         syscall(SYS_write, log_fd, b, (size_t)(n < (int)sizeof b ? n : (int)sizeof b - 1));
         syscall(SYS_fsync, log_fd);
@@ -8763,7 +9029,7 @@ static void sloppy_run(void)
     }
 #endif
     static bool erase_checked;           /* first: an erase asked for happens before anything of ours is read */
-    if (!erase_checked) { erase_checked = true; er_boot(); sl_ota_boot(); sl_card_guards(); }   /* then a swap cut short is finished */
+    if (!erase_checked) { erase_checked = true; er_boot(); sl_ota_boot(); sl_card_guards(); lag_load(); }   /* then a swap cut short is finished */
     sl_log("GabagoolOS start, Rockbox up for %ld.%02lds", current_tick / HZ, current_tick % HZ);
 
     touchscreen_set_mode(TOUCHSCREEN_POINT);   /* we do our own gestures */
@@ -8980,14 +9246,18 @@ static void sloppy_run(void)
 #undef LAP
         if (cfm.on) cfm_add(&cfm.loop_other, lap_us[0] + lap_us[1] + lap_us[2]);
         SL_AT("waiting");
-        if (lap_at - lap_start >= 500000 && stall_lines < 30)
         {
             int worst = 0;
             for (int i = 1; i < 5; i++) if (lap_us[i] > lap_us[worst]) worst = i;
-            stall_lines++;
-            sl_log("stall: loop pass %u ms, mostly %s (%u ms)", (unsigned)((lap_at - lap_start) / 1000),
-                   lap_names[worst], (unsigned)(lap_us[worst] / 1000));
+            if (lap_at - lap_start >= 500000 && stall_lines < 30)
+            {
+                stall_lines++;
+                sl_log("stall: loop pass %u ms, mostly %s (%u ms)", (unsigned)((lap_at - lap_start) / 1000),
+                       lap_names[worst], (unsigned)(lap_us[worst] / 1000));
+            }
+            else lag_pass((uint32_t)((lap_at - lap_start) / 1000), lap_names[worst], lap_us[worst] / 1000);
         }
+        lag_audio();
         bool busy = lv_anim_count_running() > 0 || g_state != G_IDLE;
         /* Idle with the screen on and no finger down: stop reading the
          * touch panel 60 times a second. A touch posts a button event,
@@ -9000,11 +9270,11 @@ static void sloppy_run(void)
          * keep its frames on time rather than rounded up to whole ticks. */
         if (deep && wait != LV_NO_TIMER_READY && wait < 34) busy = true;
         long cap = deep ? HZ / 10 : HZ / 20;
-        if (wallpaper_screen_dark) cap = global_settings.sloppy_tap_wake ? HZ / 20 : HZ / 10;  /* nothing is drawn; the panel is looked at, unless Tap to wake is off */
+        if (wallpaper_screen_dark) cap = !global_settings.sloppy_tap_wake ? HZ / 10 : dark_tap_armed ? HZ / 50 : HZ / 20;  /* nothing is drawn; the panel is looked at, faster after a first tap, unless Double tap to wake is off */
         long ticks = wait == LV_NO_TIMER_READY ? cap :
                      busy ? (long)wait * HZ / 1000 : ((long)wait * HZ + 999) / 1000;
         if (ticks > cap) ticks = cap;
-        if (wallpaper_screen_dark && ticks < HZ / 20) ticks = HZ / 20;   /* never busier than before */
+        if (wallpaper_screen_dark && ticks < cap) ticks = cap;   /* never busier than before */
         if (ticks < 1)
             yield();
         else
@@ -9018,6 +9288,7 @@ static void sloppy_run(void)
                 sl_log("stall: asked to wait %ld ms, slept %u ms", ticks * 1000 / HZ,
                        (unsigned)(waited / 1000));
             }
+            else lag_wait((uint32_t)(ticks * 1000 / HZ), (uint32_t)(waited / 1000));
             if (btn != BUTTON_NONE) { touch_wake(btn, button_get_data()); handle_button(btn); }
         }
     }

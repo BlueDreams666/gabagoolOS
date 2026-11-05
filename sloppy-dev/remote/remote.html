@@ -160,7 +160,7 @@ border-radius:16px;height:64px;outline:none;font-variant-numeric:tabular-nums;di
  <div class="card list" id="res" hidden></div></section>
 <section><h2 data-t="Software update">Software update</h2><div class="card up"><p id="upl" dir="auto"></p><div class="ub" id="ubw" hidden><i id="ub"></i></div>
 <button class="ghost" id="upb" data-t="Send an update file">Send an update file</button><input type="file" id="upf" accept=".gbupdate" hidden></div></section>
-<section class="foot"><button class="ghost" id="shotb" data-t="Take screenshot">Take screenshot</button><a id="shotlink" download><img id="shot" alt=""></a></section>
+<section class="foot"><button class="ghost" id="shotb" data-t="Take screenshot">Take screenshot</button><button class="ghost" id="repb" data-t="Download bug report">Download bug report</button><a id="shotlink" download><img id="shot" alt=""></a></section>
 </main>
 <div id="toast" role="status"></div>
 <script>
@@ -242,6 +242,7 @@ function find(){var q=$("q").value.trim(),box=$("res");if(!q){box.hidden=true;bo
    var el=row(s.title,[s.artist,s.album].filter(Boolean).join(" · "),[ib("pn","Play next",function(){go("next","Playing next")}),ib("ad","Add to queue",function(){go("queue","Added to queue")})]);
    el.onclick=function(){go("now")};box.append(el)})}).catch(function(){})}
 $("shotb").onclick=function(){wantShot=1;cmd("shot")};
+$("repb").onclick=function(){location.href="/report.txt"};
 var standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
 try{if(!standalone&&!localStorage.getItem("hint"))$("hint").classList.add("on")}catch(e){}
 $("hintx").onclick=function(){$("hint").classList.remove("on");try{localStorage.setItem("hint","1")}catch(e){}};

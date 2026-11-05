@@ -2402,6 +2402,18 @@ T = [
 ('artist', 'artista', 'artiste', 'Künstler', 'אמן'),
 ('Japanese (Romaji)', 'Japonés (romaji)', 'Japonais (romaji)', 'Japanisch (Romaji)', "יפנית (רומאג'י)"),
 ('Your SD card needs a quick check. Connect it to a computer and run First Aid (Mac) or chkdsk (Windows): see "Look after your card" in the guide.', 'Tu tarjeta SD necesita una revisión rápida. Conéctala a un ordenador y ejecuta Primera ayuda (Mac) o chkdsk (Windows): consulta "Look after your card" en la guía.', "Votre carte SD a besoin d'une vérification rapide. Branchez-la à un ordinateur et lancez S.O.S. (Mac) ou chkdsk (Windows) : voir « Look after your card » dans le guide.", 'SD-Karte kurz prüfen: an einen Computer anschließen und Erste Hilfe (Mac) oder chkdsk (Windows) ausführen. Siehe „Look after your card“ in der Anleitung.', 'כרטיס ה-SD צריך בדיקה קצרה. חברו אותו למחשב והריצו עזרה ראשונה (Mac) או chkdsk (Windows): ראו "Look after your card" במדריך.'),
+('TROUBLESHOOTING', 'SOLUCIÓN DE PROBLEMAS', 'DÉPANNAGE', 'FEHLERBEHEBUNG', 'פתרון בעיות'),
+('Make a bug report', 'Crear un informe de error', 'Créer un rapport de bug', 'Fehlerbericht erstellen', 'יצירת דוח באג'),
+('A file on the card for a GitHub issue', 'Un archivo en la tarjeta para una incidencia en GitHub', 'Un fichier sur la carte pour un ticket GitHub', 'Eine Datei auf der Karte für ein GitHub-Issue', 'קובץ בכרטיס עבור דיווח ב-GitHub'),
+('Record lag', 'Registrar retrasos', 'Enregistrer les ralentissements', 'Ruckler aufzeichnen', 'תיעוד האטות'),
+('For a day, every slow moment and audio dropout goes in the log', 'Durante un día, cada momento lento y cada corte de audio se anotan en el registro', 'Pendant une journée, chaque ralentissement et chaque coupure du son sont notés dans le journal', 'Einen Tag lang kommt jeder langsame Moment und jeder Tonaussetzer ins Protokoll', 'במשך יום, כל רגע איטי וכל הפסקה בשמע נרשמים ביומן'),
+('Bug report saved on the card: %s', 'Informe de error guardado en la tarjeta: %s', 'Rapport de bug enregistré sur la carte : %s', 'Fehlerbericht auf der Karte gespeichert: %s', 'דוח הבאג נשמר בכרטיס: %s'),
+('The bug report could not be saved', 'No se pudo guardar el informe de error', "Le rapport de bug n'a pas pu être enregistré", 'Der Fehlerbericht konnte nicht gespeichert werden', 'לא ניתן היה לשמור את דוח הבאג'),
+('Download bug report', 'Descargar informe de error', 'Télécharger le rapport de bug', 'Fehlerbericht herunterladen', 'הורדת דוח באג'),
+('Cover Flow needs more memory than is free while music plays.', 'Cover Flow necesita más memoria de la que hay libre mientras suena la música.', "Cover Flow a besoin de plus de mémoire qu'il n'en reste pendant la lecture de musique.", 'Cover Flow braucht mehr Speicher, als frei ist, während Musik läuft.', 'Cover Flow צריך יותר זיכרון ממה שפנוי בזמן שמוזיקה מתנגנת.'),
+('Stop the music and open', 'Detener la música y abrir', 'Arrêter la musique et ouvrir', 'Musik stoppen und öffnen', 'לעצור את המוזיקה ולפתוח'),
+('Double tap to wake', 'Doble toque para activar', 'Toucher deux fois pour réveiller', 'Zum Aufwecken doppeltippen', 'הקשה כפולה להערה'),
+('Not answering · Tap to retry', 'No responde · Toca para reintentar', 'Ne répond pas · Touchez pour réessayer', 'Antwortet nicht · Tippen zum Wiederholen', 'לא מגיב · הקשה לניסיון חוזר'),
 ]
 
 

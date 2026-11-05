@@ -13,7 +13,7 @@
  * is made here, at random, for this run only; no key is kept anywhere. */
 #include <dlfcn.h>
 #define OT_LIB_MAC "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/libcrypto.1.1.dylib"
-#define OT_W "/tmp/sloppy-ota-work"
+#define OT_W SIM_TMP "/sloppy-ota-work"
 #define OT_TOOL "sloppyos/sloppy-dev/ota/make-update.py"
 static struct {
     void *(*priv)(int, void *, const unsigned char *, size_t);

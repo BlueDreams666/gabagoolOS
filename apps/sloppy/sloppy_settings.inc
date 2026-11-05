@@ -1166,6 +1166,10 @@ static void advanced_page(void)
     lv_obj_t *g = set_group(body, "OTHER SYSTEMS");
     set_row(g, LV_SYMBOL_HOME, 0x66738a, "Open Classic Rockbox", NULL, ACT_CLASSIC);
     set_row(g, LV_SYMBOL_POWER, 0x8b6fd6, "Dual boot screen", NULL, 0x20015);
+    /* for a bug report: nothing is sent, the user posts the file if they want to */
+    g = set_group(body, "TROUBLESHOOTING");
+    set_action(g, LV_SYMBOL_FILE, 0x2d7ff0, "Make a bug report", "A file on the card for a GitHub issue", report_make_cb, NULL);
+    set_switch(g, "Record lag", "For a day, every slow moment and audio dropout goes in the log", lag_until != 0, lag_set);
     /* what cannot be undone: last, in its own card, as on every page */
     g = set_group(body, NULL);
     set_danger(g, LV_SYMBOL_TRASH, "Reset all settings", reset_all_settings_open_cb, NULL);
@@ -1987,7 +1991,7 @@ static void buttons_page(void)
 
     c = opt_card(body, "Screen off", NULL);
     opt_switch(c, "Keys work with the screen off", global_settings.sloppy_keys_dark, btn_dark);
-    opt_switch(c, "Tap to wake", global_settings.sloppy_tap_wake, btn_tap_wake);
+    opt_switch(c, "Double tap to wake", global_settings.sloppy_tap_wake, btn_tap_wake);
 
     c = opt_card(body, "Orientation", "Turns the screen round for the keys on the other side. The volume keys swap, so the upper one is still louder.");
     opt_switch(c, "Upside down", global_settings.sloppy_flip == 1, btn_flip);

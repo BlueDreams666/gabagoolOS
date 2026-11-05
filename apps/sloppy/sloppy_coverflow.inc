@@ -784,6 +784,7 @@ static void cf_open_album(void)
 {
     int centre = cf_centre();
     if (cf.panel || centre < 0 || centre >= cf.n) return;
+    sl_doing_is("Cover Flow's album", sl_lib.albums[sl_lib.albums_by_title[centre]].title);
     lv_anim_delete(&cf, cf_set_pos);
     cf.pos = centre * CF_ONE;
     cf.open_at = centre;
@@ -878,15 +879,90 @@ static void cf_done_cb(lv_event_t *e) { (void)e; cf_close(); }
 
 /* -------------------------------------------------------- open, close */
 static int cf_start = -1;                 /* albums_by_title index to open on, once */
+/* Cover Flow's least: its frame and the fewest covers (on screen and one
+ * either side). Short of the music's floor it opens with those alone, as
+ * long as they leave the R1 above where it swaps; only under that is the
+ * user asked, never turned away with a toast (a test R1 over Bluetooth,
+ * 4 Nov: "Not enough memory for Cover Flow" at 7-9 MB free). */
+#define CF_MIN_COVERS 18
+#define CF_NEED_KB (W * H * 2 / 1024 + CF_MIN_COVERS * (CF_ART * CF_ART * 2 / 1024))
+static bool cf_forced;                    /* asked and answered: open with what there is */
+static long cf_stop_kb;
+static void cf_open(void);
+static void cf_after_stop(lv_timer_t *t)
+{
+    lv_timer_delete(t);
+    long kb = sl_mem_available_kb();
+    sl_log("cover flow: stopping the music freed %ld KiB (%ld -> %ld)", kb - cf_stop_kb, cf_stop_kb, kb);
+    cf_forced = true;
+    cf_open();
+    cf_forced = false;
+}
+static void cf_short_pick(int k)
+{
+    if (k != 0) return;                   /* Cancel */
+    cf_stop_kb = sl_mem_available_kb();
+    audio_stop();
+    lv_timer_create(cf_after_stop, 800, NULL);   /* what the stop gave back, a moment after */
+}
+static void cf_short_row_cb(lv_event_t *e)
+{
+    int k = (int)(intptr_t)lv_event_get_user_data(e);
+    acts_close();
+    cf_short_pick(k);
+}
+/* pick_sheet's look, its words wrapped: a sentence, and a long language */
+static void cf_short_ask(long kb)
+{
+    static const char *const opts[] = { "Stop the music and open", "Cancel" };
+    sl_log("cover flow: %ld KiB free, %d needed above %d: asked", kb, CF_NEED_KB, SL_MEM_SWAP_KB);
+    sl_doing_is("Cover Flow's memory question", NULL);
+    acts_begin();
+    lv_obj_t *hd = text(acts, "Cover Flow needs more memory than is free while music plays.", &ss_semibold_18, C_SUB);
+    lv_obj_set_width(hd, lv_pct(100));
+    lv_obj_set_style_pad_all(hd, 12, 0);
+    for (int k = 0; k < 2; k++)
+    {
+        lv_obj_t *r = box(acts);
+        lv_obj_set_size(r, lv_pct(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_min_height(r, 64, 0);
+        lv_obj_set_style_pad_hor(r, 16, 0);
+        lv_obj_set_style_pad_ver(r, 12, 0);
+        lv_obj_set_style_radius(r, SL_R_XL - SL_FLOAT, 0);
+        lv_obj_set_style_bg_color(r, lv_color_hex(C_TEXT), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(r, LV_OPA_10, LV_STATE_PRESSED);
+        char low[96];
+        lv_obj_t *l = text(r, sl_zune() ? sl_lower(sl_tr(opts[k]), low, sizeof low) : opts[k], &ss_semibold_23,
+                           k ? 0xffffff : sl_accent_on(C_SHEET, 45));
+        lv_obj_set_width(l, lv_pct(100));
+        lv_obj_set_style_text_align(l, sl_ui_rtl() ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
+        on_click(r, cf_short_row_cb, (void *)(intptr_t)k);
+        lv_obj_remove_flag(r, LV_OBJ_FLAG_EVENT_BUBBLE);
+    }
+    acts_show();
+}
 static void cf_open(void)
 {
     if (cf.active) return;
     if (!sl_lib.n_albums) { toast("No albums in your library yet"); return; }
+    sl_doing_is("Cover Flow", NULL);
+    if (!qp_glass_px && !sl_mem_room(W * H * 2 / 1024, "Cover Flow"))
+    {
+        long kb = sl_mem_available_kb();
+        if (kb >= 0 && kb < SL_MEM_SWAP_KB + CF_NEED_KB && !cf_forced && (audio_status() & AUDIO_STATUS_PLAY))
+        {
+            cf_short_ask(kb);
+            return;
+        }
+        sl_log("cover flow: lighter, %ld KiB free: the fewest covers", kb);
+    }
     if (!qp_glass_px) qp_glass_px = malloc((size_t)W * H * 2);
-    if (!qp_glass_px) { toast_warn("Not enough memory for Cover Flow"); return; }
-    /* covers as memory allows: 8 MB stays free for the music and the code */
+    if (!qp_glass_px) { cf_short_ask(sl_mem_available_kb()); return; }
+    /* covers as memory allows: the music's floor (more over Bluetooth)
+     * and 2 MB for the code stay free */
     long kb = sl_mem_available_kb();
-    cf_cap = kb < 0 ? CF_SLOTS : (int)((kb - 8 * 1024) / (CF_ART * CF_ART * 2 / 1024));
+    cf_cap = kb < 0 ? CF_SLOTS : (int)((kb - sl_mem_floor_kb() - 2048) / (CF_ART * CF_ART * 2 / 1024));
     if (cf_cap > CF_SLOTS) cf_cap = CF_SLOTS;
     if (cf_cap < 18) cf_cap = 18;        /* what is on screen and a little either side */
     sl_log("cover flow: %ld KiB free, up to %d covers held", kb, cf_cap);
@@ -1036,7 +1112,13 @@ static void cf_open(void)
     sl_log("cover flow: %d albums", cf.n);
 }
 
-static bool cf_is_open(void) { return cf.active || spa.active || vz.active; }   /* Spectrum and the visualizer too: their own screens */
+static bool cf_is_open(void) { return cf.active || spa.active || vz.active; }
+static int cf_covers_held(void)
+{
+    int n = 0;
+    for (int i = 0; i < CF_SLOTS; i++) n += cf.art[i].px != NULL;
+    return n;
+}   /* Spectrum and the visualizer too: their own screens */
 /* The screen GabagoolOS builds on. Cover Flow has one of its own, deleted
  * when it closes: the home built again under it (a pull to refresh that
  * finished as the player turned), Now Playing, the mini player, Up Next
@@ -1058,6 +1140,7 @@ static void cf_close(void)
     vz_close();
     if (!cf.active) return;
     cf.active = false;
+    sl_doing_is("back from Cover Flow", NULL);
     cf.closed_at = lv_tick_get();
     if (!cf.closed_at) cf.closed_at = 1;
     lv_anim_delete(&cf, NULL);

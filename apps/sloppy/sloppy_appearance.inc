@@ -1397,6 +1397,11 @@ static void accent_preview_update(void)
     snprintf(hex, sizeof hex, "#%06lX", (unsigned long)color);
     lv_label_set_text(accent_preview_label, sl_tr(same ? "CURRENT COLOR" : "USE THIS COLOR"));
     lv_label_set_text(accent_hex, hex);
+    /* under the label however tall the language and text size make it */
+    lv_obj_update_layout(accent_preview_label);
+    lv_obj_set_y(accent_hex, LV_MAX(48, lv_obj_get_y2(accent_preview_label) + 1));
+    lv_obj_update_layout(accent_hex);
+    lv_obj_set_height(accent_preview, LV_MAX(84, lv_obj_get_y2(accent_hex) + 14));   /* and the card around both */
     lv_obj_set_style_bg_color(accent_preview, lv_color_hex(color), 0);
     lv_obj_set_style_text_color(accent_preview_label, lv_color_hex(ink), 0);
     lv_obj_set_style_text_color(accent_hex, lv_color_hex(ink), 0);

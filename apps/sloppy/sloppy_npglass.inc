@@ -21,7 +21,7 @@
 /* free memory a reflection is made with (each is 630 KB): above the 6 MB
  * line where the low-memory release would take it straight back. The R1
  * usually runs with 6 to 8 MB free, so 16 MB meant no reflection at all. */
-#define NG_MIN_FREE_KB (8 * 1024)
+#define NG_MIN_FREE_KB (sl_mem_floor_kb() + 1024)   /* a backdrop with a MB to spare over the music's floor */
 #define NG_S      4
 #define NG_GW     (W / NG_S)
 #define NG_GH     ((NG_ROWS + NG_S - 1) / NG_S + 1)
@@ -44,6 +44,9 @@ static void lyr_bd_sync(bool force);
  * before. */
 static lv_obj_t *np_down, *vnl_btn, *vz_btn;
 static uint16_t *nc_bd_px;               /* centred: the screen's backdrop, W x H */
+static uint16_t nc_small[(W / 2) * (H / 2) * 3 / 2];   /* short of memory: the backdrop at half size, RGB565
+                                                        * then an opaque alpha plane (LVGL stretches only that) */
+static bool nc_small_on;
 static void ng_buttons(void)
 {
     static lv_obj_t *lens[3];
@@ -120,6 +123,9 @@ static void ng_blur(uint8_t *p, int n, int step, int r)
 /* The lake for one cover into out (W x NG_ROWS, RGB565 then the alpha
  * plane): the cover's own for Now Playing, or a neighbour's while a
  * swipe brings it in. */
+static uint8_t ng_small[NG_GW * NG_GH * 3];   /* the reflection at the grid's size: RGB565, then alpha */
+static bool ng_small_on;                      /* np_glow shows it */
+static bool ng_force_small;                   /* the harness: as if short of memory */
 static void ng_paint(uint8_t *out, const uint16_t *src, int w, int h, int stride, lv_color_t c)
 {
     static uint8_t g[3][NG_GW * NG_GH];
@@ -225,6 +231,26 @@ static void ng_paint(uint8_t *out, const uint16_t *src, int w, int h, int stride
                 g[ch][i] = (uint8_t)(c > 255 ? 255 : c);
             }
         }
+    }
+    /* short of memory: the grid itself, stretched over the same rows when
+     * it is drawn (a blur reads the same at a quarter of the size), never
+     * a black floor (a test R1 over Bluetooth, 4 Nov) */
+    if (!out)
+    {
+        uint16_t *rgb = (uint16_t *)ng_small;
+        uint8_t *alpha = ng_small + NG_GW * NG_GH * 2;
+        for (int gy = 0; gy < NG_GH; gy++)
+        {
+            int y = gy * NG_S, a = 255, from = NG_FADE - 48;
+            if (y < NG_FADE) { int t = y < from ? 0 : (y - from) * 256 / 48; a = t * t * (768 - 2 * t) >> 16; }
+            for (int gx = 0; gx < NG_GW; gx++)
+            {
+                int i = gy * NG_GW + gx;
+                rgb[i] = (uint16_t)((g[0][i] >> 3) << 11 | (g[1][i] >> 2) << 5 | g[2][i] >> 3);
+                alpha[i] = (uint8_t)(a > 255 ? 255 : a);
+            }
+        }
+        return;
     }
     /* grown back: bilinear between the grid's cell centres, dithered */
     static const uint8_t bayer[4][4] = { {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5} };
@@ -416,6 +442,7 @@ static uint32_t ng_key(void)
     return (uint32_t)c.red << 17 | (uint32_t)c.green << 9 | (uint32_t)c.blue << 1;   /* even */
 }
 /* buf shown by o as the lake's image */
+static void ng_unstretch(lv_obj_t *o);
 static void ng_show(lv_obj_t *o, lv_image_dsc_t *d, uint8_t *buf)
 {
     d->header.magic = LV_IMAGE_HEADER_MAGIC;
@@ -427,16 +454,56 @@ static void ng_show(lv_obj_t *o, lv_image_dsc_t *d, uint8_t *buf)
     d->data_size = (uint32_t)W * NG_ROWS * 3;
     lv_image_cache_drop(d);
     lv_image_set_src(o, d);
+    ng_unstretch(o);
+    if (o == np_glow) ng_small_on = false;
+    lv_obj_invalidate(o);
+}
+/* back to one to one: LVGL leaves a stretch's scale behind */
+static void ng_unstretch(lv_obj_t *o)
+{
+    lv_image_set_inner_align(o, LV_IMAGE_ALIGN_DEFAULT);
+    lv_image_set_scale_x(o, LV_SCALE_NONE);
+    lv_image_set_scale_y(o, LV_SCALE_NONE);
+    lv_obj_set_size(o, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+}
+/* LVGL works a stretch out from the object's size when the alignment is
+ * set, not when the size changes: the size first, laid out, then the
+ * stretch (set afresh, or an unchanged alignment is not looked at again) */
+static void ng_stretch(lv_obj_t *o)
+{
+    lv_obj_update_layout(o);
+    lv_image_set_inner_align(o, LV_IMAGE_ALIGN_DEFAULT);
+    lv_image_set_inner_align(o, LV_IMAGE_ALIGN_STRETCH);
+}
+/* the small one, stretched over the rows the full one covers */
+static void ng_show_small(lv_obj_t *o, lv_image_dsc_t *d)
+{
+    d->header.magic = LV_IMAGE_HEADER_MAGIC;
+    d->header.cf = LV_COLOR_FORMAT_RGB565A8;
+    d->header.w = NG_GW;
+    d->header.h = NG_GH;
+    d->header.stride = NG_GW * 2;
+    d->data = ng_small;
+    d->data_size = sizeof ng_small;
+    lv_image_cache_drop(d);
+    lv_image_set_src(o, d);
+    lv_obj_set_size(o, W, NG_ROWS + NG_S);   /* the grid's last row is a cell past the end */
+    ng_stretch(o);
+    ng_small_on = true;
     lv_obj_invalidate(o);
 }
 static void np_glow_build(const uint16_t *src, int w, int h, int stride, lv_color_t c)
 {
     if (!np_glow) return;
-    if (!np_glow_buf)
+    /* the full one with room for the music to spare (the memory watch
+     * tries again later); without, the small one */
+    if (!np_glow_buf && !ng_force_small && sl_mem_room((long)W * NG_ROWS * 3 / 1024, "Now Playing's reflection"))
+        np_glow_buf = malloc((size_t)W * NG_ROWS * 3);
+    if (!np_glow_buf || ng_force_small)
     {
-        long kb = sl_mem_available_kb();   /* short of memory: plain until there is room */
-        if (kb >= 0 && kb < NG_MIN_FREE_KB) return;   /* the memory watch tries again */
-        if (!(np_glow_buf = malloc((size_t)W * NG_ROWS * 3))) return;
+        ng_paint(NULL, src, w, h, stride, c);
+        ng_show_small(np_glow, &np_glow_img);
+        return;
     }
     ng_paint(np_glow_buf, src, w, h, stride, c);
     ng_show(np_glow, &np_glow_img, np_glow_buf);
@@ -525,19 +592,47 @@ static void nc_sync(bool force)
     uint32_t key = ng_key();
     if (force || key != nc_key || !nc_bd_px)
     {
-        if (!nc_bd_px)
-        {
-            long kb = sl_mem_available_kb();
-            if ((kb < 0 || kb >= NG_MIN_FREE_KB)) nc_bd_px = malloc((size_t)W * H * 2);
-        }
+        if (!nc_bd_px && sl_mem_room((long)W * H * 2 / 1024, "Centred's backdrop"))
+            nc_bd_px = malloc((size_t)W * H * 2);
         if (pic && !nc_cov_px) nc_cov_px = malloc((size_t)NC_S * NC_S * 2);
-        if (!nc_bd_px) return;           /* the memory watch tries again */
-        nc_key = key;
         if (!nc_bd)
         {
             nc_bd = lv_image_create(np);
             lv_obj_move_to_index(nc_bd, 0);
             lv_obj_add_flag(nc_bd, LV_OBJ_FLAG_EVENT_BUBBLE);
+        }
+        if (!nc_bd_px || ng_force_small)
+        {
+            /* short of memory: the same blur at half the size, stretched,
+             * not black (the memory watch brings the full one back) */
+            if (key == nc_key && nc_small_on) { lv_obj_remove_flag(nc_bd, LV_OBJ_FLAG_HIDDEN); return; }
+            nc_key = key;
+            if (pic)
+                nb_paint(nc_small, W / 2, H / 2, H / 2, (const uint16_t *)np_img.data, np_img.header.w, np_img.header.h,
+                         np_img.header.stride / 2, lv_color_black(), 84, NULL);
+            else
+                nb_paint(nc_small, W / 2, H / 2, H / 2, NULL, 0, 0, 0, lv_obj_get_style_bg_color(np_art, 0), 84, NULL);
+            memset((uint8_t *)nc_small + (size_t)(W / 2) * (H / 2) * 2, 255, (size_t)(W / 2) * (H / 2));
+            nc_bd_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+            nc_bd_dsc.header.cf = LV_COLOR_FORMAT_RGB565A8;
+            nc_bd_dsc.header.w = W / 2;
+            nc_bd_dsc.header.h = H / 2;
+            nc_bd_dsc.header.stride = W;     /* the RGB565 plane's rows: W / 2 pixels */
+            nc_bd_dsc.data = (const uint8_t *)nc_small;
+            nc_bd_dsc.data_size = (uint32_t)(W / 2) * (H / 2) * 3;
+            lv_image_cache_drop(&nc_bd_dsc);
+            lv_image_set_src(nc_bd, &nc_bd_dsc);
+            lv_obj_set_size(nc_bd, W, H);
+            ng_stretch(nc_bd);
+            nc_small_on = true;
+            lv_obj_remove_flag(nc_bd, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+        nc_key = key;
+        if (nc_small_on)
+        {
+            ng_unstretch(nc_bd);
+            nc_small_on = false;
         }
         if (pic)
             nb_paint(nc_bd_px, W, H, H, (const uint16_t *)np_img.data, np_img.header.w, np_img.header.h,

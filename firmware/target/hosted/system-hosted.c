@@ -25,6 +25,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <sys/reboot.h>
+#include <sys/wait.h>
 
 #include "system.h"
 #include "mv.h"
@@ -194,6 +195,25 @@ static void kernel_reboot_fallback(int cmd)
 }
 #endif
 
+/* /sbin/poweroff or /sbin/reboot, which signal init to shut down. system()
+ * forks, and fork has to reserve a copy of the whole player: on the R1 that
+ * fails with ENOMEM, so neither ever ran and the fallback cut the power
+ * five seconds later without init's shutdown (Bluetooth left up, 5 Nov).
+ * vfork borrows our memory until the child execs. init's SIGTERM then ends
+ * us quietly, not on the crash screen. */
+static void run_halt(const char *path)
+{
+    signal(SIGTERM, SIG_DFL);
+    pid_t pid = vfork();
+    if (pid == 0)
+    {
+        execl(path, path, (char *)NULL);
+        _exit(127);
+    }
+    if (pid > 0)
+        waitpid(pid, NULL, 0);
+}
+
 void power_off(void)
 {
 #ifdef HAVE_SHUTDOWN_WATCHDOG
@@ -203,7 +223,7 @@ void power_off(void)
     button_close_device();
     sync();
     card_park();
-    system("/sbin/poweroff");
+    run_halt("/sbin/poweroff");
 #ifdef HAVE_SHUTDOWN_WATCHDOG
     kernel_reboot_fallback(RB_POWER_OFF);
 #endif
@@ -248,7 +268,7 @@ void system_reboot(void)
     backlight_hw_off();
     sync();
     card_park();
-    system("/sbin/reboot");
+    run_halt("/sbin/reboot");
 #ifdef HAVE_SHUTDOWN_WATCHDOG
     kernel_reboot_fallback(RB_AUTOBOOT);
 #endif

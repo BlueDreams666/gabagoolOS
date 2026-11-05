@@ -2265,6 +2265,7 @@ static void taste_page(bool first)
         int st = audio_status();
         td_resume = (st & AUDIO_STATUS_PLAY) && !(st & AUDIO_STATUS_PAUSE);
         if (td_resume) audio_pause();   /* the first clip keeps the queue and where it was */
+        sl_doing_is("Your taste", NULL);
         sl_mem_release("Your taste", true);   /* the glass and the image cache, before the deck's pictures */
     }
     /* the last deck still sliding away (Done, Back, then here again at

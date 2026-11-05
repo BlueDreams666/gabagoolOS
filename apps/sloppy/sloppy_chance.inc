@@ -1358,6 +1358,7 @@ static void magic_tick(lv_timer_t *timer)
  * still turned live. */
 #define MAGIC_TILT 5
 static lv_draw_buf_t *magic_tilt[2 * MAGIC_TILT + 1];
+static bool magic_tilt_short;            /* the budget said no: no more asking until the page opens again */
 static lv_timer_t *magic_warm_timer;
 
 /* the still ball, as it looks while thinking */
@@ -1379,6 +1380,11 @@ static lv_draw_buf_t *magic_tilt_get(int sway)
     if (sway < -MAGIC_TILT || sway > MAGIC_TILT || !magic_shot565) return NULL;
     lv_draw_buf_t **t = &magic_tilt[sway + MAGIC_TILT];
     if (*t) return *t;
+    /* each kept turn is ~0.4 MB, all ten about 4 MB: only with room for the
+     * music to spare (the snapshot borrows a third more while it is made);
+     * without one the ball is turned as it is drawn */
+    long kb = (long)magic_shot565->header.w * magic_shot565->header.h * 7 / 1024;
+    if (magic_tilt_short || !sl_mem_room(kb, "the 8-ball's shake")) { magic_tilt_short = true; return NULL; }
     /* turn the still picture on the shake's own image and keep the result */
     bool hidden = lv_obj_has_flag(magic_shot, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(magic_shot, LV_OBJ_FLAG_HIDDEN);
@@ -1463,6 +1469,7 @@ static void magic_deleted(lv_event_t *e)
     if (magic_timer) { lv_timer_delete(magic_timer); magic_timer = NULL; }
     magic_page_obj = magic_ball = magic_answer = magic_caption = magic_window = magic_sky = NULL;
     free(magic_sky_px); free(magic_sky_bg); free(magic_glow_a);
+    magic_tilt_short = false;
     magic_sky_px = magic_sky_bg = NULL;
     magic_glow_a = NULL;
     if (magic_ball_buf) { lv_draw_buf_destroy(magic_ball_buf); magic_ball_buf = NULL; }

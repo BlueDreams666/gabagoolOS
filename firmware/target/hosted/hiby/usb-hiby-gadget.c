@@ -58,6 +58,87 @@
 /* Configfs root of the gadget created by usb_init_device() */
 #define USB_GADGET_PATH   "/sys/kernel/config/usb_gadget/adb_demo"
 
+/* Commands start with vfork(), as sloppy_net.c's do. system() and popen()
+ * fork(), which has to reserve a copy of the whole player and on the R1
+ * fails with ENOMEM: every gadget command returned -1 and ran nothing, so
+ * configfs was never mounted and USB mode never reached the computer
+ * (a test R1, 5 Nov). The child only calls exec before it is gone. */
+#ifndef system   /* the probe test brings its own */
+#include <sys/wait.h>
+static pid_t gadget_vfork_sh(const char *cmd, int out_fd)
+{
+    pid_t pid = vfork();
+    if (pid == 0)
+    {
+        if (out_fd >= 0)
+        {
+            dup2(out_fd, 1);
+            dup2(out_fd, 2);
+        }
+        execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+        _exit(127);
+    }
+    return pid;
+}
+static int gadget_system(const char *cmd)
+{
+    pid_t pid = gadget_vfork_sh(cmd, -1);
+    int status;
+    if (pid < 0)
+        return -1;
+    while (waitpid(pid, &status, 0) < 0)
+        if (errno != EINTR)
+            return -1;
+    return status;
+}
+#define system gadget_system
+/* a command's output, up to cap-1 bytes; false when it could not start */
+static bool gadget_read_cmd(const char *cmd, char *out, size_t cap)
+{
+    int fd[2];
+    size_t n = 0;
+    out[0] = '\0';
+    if (pipe2(fd, O_CLOEXEC))
+        return false;
+    pid_t pid = gadget_vfork_sh(cmd, fd[1]);
+    close(fd[1]);
+    if (pid < 0)
+    {
+        close(fd[0]);
+        return false;
+    }
+    for (;;)
+    {
+        ssize_t r = read(fd[0], out + n, cap - 1 - n);
+        if (r < 0 && errno == EINTR)
+            continue;
+        if (r <= 0)
+            break;
+        n += r;
+        if (n + 1 >= cap)
+            break;
+    }
+    out[n] = '\0';
+    close(fd[0]);
+    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+        ;
+    return true;
+}
+#else
+static bool gadget_read_cmd(const char *cmd, char *out, size_t cap)
+{
+    FILE *f = popen(cmd, "r");
+    size_t n = 0;
+    out[0] = '\0';
+    if (!f)
+        return false;
+    n = fread(out, 1, cap - 1, f);
+    out[n] = '\0';
+    pclose(f);
+    return true;
+}
+#endif
+
 static int _usb_mode = -1;
 static bool _usb_init = false;
 static bool is_adb_running = false;
@@ -212,6 +293,8 @@ void hiby_set_usb_mode(int mode) {
 enum { PROBE_IDLE, PROBE_RUNNING, PROBE_HOST, PROBE_CHARGER };
 static int usb_probe = PROBE_IDLE;
 static const char *udc_state_now(void);
+static void typec_sink(const char *why);
+static void mass_storage_rebuild(const char *why);
 static long usb_probe_until;
 
 static void usb_probe_bind(bool on)
@@ -286,6 +369,7 @@ int usb_detect(void)
     switch (usb_probe)
     {
     case PROBE_IDLE:
+        mass_storage_rebuild("plugged in");
         if (access(USB_UDC_STATE, R_OK) != 0 ||
             access(USB_GADGET_PATH "/functions/mass_storage.0/lun.0/file", W_OK) != 0)
         {
@@ -522,6 +606,7 @@ static void udc_follow(void)
     {
         udc_rebound = true;
         usb_trace("host: not configured %ld ms after binding: binding the gadget again", ms);
+        typec_sink("not configured");
         udc_bind(false, "rebind");
         udc_bind(true, "rebind");
         udc_bound_at = current_tick;
@@ -701,6 +786,25 @@ static int card_let_go_dirs(void)
     return n;
 }
 
+/* At power off only: every file of ours still open on the card is closed,
+ * the player is ending and nothing more is written. Folders go to
+ * card_let_go_dirs; the card's own log closes itself first. */
+static int card_close_files(void)
+{
+    int n = 0;
+    for (int fd = 3; fd < 1024; fd++)
+    {
+        struct stat st;
+        char path[PATH_MAX];
+        if (fstat(fd, &st) != 0 || S_ISDIR(st.st_mode) || !card_fd_path(fd, path, sizeof path) || !on_card(path))
+            continue;
+        fsync(fd);
+        if (close(fd) == 0)
+            n++;
+    }
+    return n;
+}
+
 /* A line in .rockbox/sloppy/usb-busy.txt, written while the card is still
  * the player's: the player restarts after USB mode, before the interface
  * could log anything. */
@@ -726,7 +830,8 @@ static int card_umount(void)
     if (!getcwd(cwd, sizeof cwd) || on_card(cwd))
     {
         logf("leaving the working directory for the handover");
-        if (chdir("/") != 0)
+        int away = card_away();          /* the folder made off the card, not a path Rockbox may map onto it */
+        if ((away < 0 || fchdir(away) != 0) && chdir("/") != 0)
             logf("chdir / failed: %d", errno);
     }
     if (card_let_go_dirs())
@@ -854,6 +959,50 @@ static void set_mass_storage_lun(void)
     usb_trace("LUN: set to %s, reads '%s'", card_dev, lun);
 }
 
+/* The R1's Type-C port is dual-role (a TCS1421). Against a computer's
+ * dual-role port either side may end up the power source, and as the
+ * source the R1 powers the computer and is never a disk to it: USB mode
+ * showed, the Mac saw nothing and drew a charge (a test R1, 4 Nov).
+ * GabagoolOS never powers anything over the cable, so the port asks for
+ * the sink side, as HiBy's own OS and Sonix do. A kernel without the
+ * Type-C class leaves the role to the hardware, and the trace says so. */
+#define TYPEC_PORT "/sys/class/typec/port%d/%s"
+static int typec_port = -2;              /* -2: not looked for yet, -1: none */
+static void typec_read(const char *what, char *v, int n)
+{
+    char p[64];
+    snprintf(p, sizeof p, TYPEC_PORT, typec_port, what);
+    if (!sysfs_get_string(p, v, n))
+        snprintf(v, n, "?");
+}
+static void typec_sink(const char *why)
+{
+    char p[64], type[48], power[48], data[48];
+    if (typec_port == -2)
+    {
+        typec_port = -1;
+        for (int i = 0; i < 4 && typec_port < 0; i++)
+        {
+            snprintf(p, sizeof p, TYPEC_PORT, i, "port_type");
+            if (access(p, F_OK) == 0)
+                typec_port = i;
+        }
+        if (typec_port < 0)
+            usb_trace("typec: no /sys/class/typec port: the role is the hardware's");
+    }
+    if (typec_port < 0)
+        return;
+    typec_read("port_type", type, sizeof type);
+    typec_read("power_role", power, sizeof power);
+    typec_read("data_role", data, sizeof data);
+    usb_trace("typec: %s: port %d type '%s', power '%s', data '%s'", why, typec_port, type, power, data);
+    if (strstr(type, "[sink]"))
+        return;
+    char sink[] = "sink";
+    snprintf(p, sizeof p, TYPEC_PORT, typec_port, "port_type");
+    usb_trace("typec: port_type <- sink: %s", sysfs_set_string(p, sink) ? "done" : "refused");
+}
+
 void usb_enable(bool on)
 {
     logf(">>>>>>>>>>>>>>>>> usb_enable(%d)\n", on);
@@ -871,7 +1020,11 @@ void usb_enable(bool on)
 
     // Re-arm the LUN on each connect, otherwise the disk is only exported the first time.
     if (on && _usb_mode == USB_MODE_MASS_STORAGE)
+    {
+        typec_sink("USB mode");
+        mass_storage_rebuild("USB mode");
         set_mass_storage_lun();
+    }
 
     bool bound = udc_bind(on, on ? "enable" : "disable");
     udc_bound_at = on && bound ? current_tick : 0;
@@ -955,10 +1108,25 @@ void usb_card_park(void)
     usb_trace_flush();                   /* the card's last line */
     card_leaving = true;                 /* nothing more onto it */
     crashlog_card_away(1);
-    if (card_umount() == 0)
-        return;
-    mount(card_dev, PIVOT_ROOT, card_fs, card_flags | MS_REMOUNT | MS_RDONLY,
-          card_opts[0] ? card_opts : NULL);
+    /* the player is ending: its files still open on the card are closed
+     * (a card switched off still mounted came back needing a repair) */
+    int closed = card_close_files();
+    int err = 0;
+    for (int tries = 0; tries < 3; tries++)
+    {
+        if ((err = card_umount()) == 0)
+            return;
+        sleep(HZ / 5);
+    }
+    /* still held: say by what, for the next start; then read-only, so no
+     * write is half done when the power goes, and at last detached, so the
+     * kernel finishes the unmount as the holders end */
+    char why[80];
+    card_busy_read();
+    snprintf(why, sizeof why, "power off: umount errno %d after closing %d files; still open: ", err, closed);
+    card_note(why, card_busy[0] ? card_busy : "nothing found");
+    if (mount(card_dev, PIVOT_ROOT, card_fs, card_flags | MS_REMOUNT | MS_RDONLY, card_opts[0] ? card_opts : NULL) != 0)
+        umount2(PIVOT_ROOT, MNT_DETACH);
 }
 
 int disk_unmount_all(void)
@@ -1153,6 +1321,88 @@ void disable_adb(void) {
     }
 }
 
+/* The mass-storage function as USB mode needs it. On a test R1 (4 Nov, after
+ * a freeze and hard resets) its LUN file was missing at every start: the
+ * gadget bound with no disk in it, the Mac saw nothing, and the shell's
+ * mkdir -p said nothing about why. Whatever is missing is made again here,
+ * each step with what the kernel answered, and the gadget as it then is
+ * goes into the trace. */
+#define GADGET_FUNC  USB_GADGET_PATH "/functions/mass_storage.0"
+#define GADGET_CFG   USB_GADGET_PATH "/configs/c.1"
+#define GADGET_LUN   GADGET_FUNC "/lun.0/file"
+static bool mass_storage_ready(void)
+{
+    return access(GADGET_LUN, W_OK) == 0;
+}
+static void gadget_mkdir(const char *path)
+{
+    if (access(path, F_OK) == 0)
+        return;
+    if (mkdirat(AT_FDCWD, path, 0755) == 0)   /* mkdirat: Rockbox's mkdir would put it on the card */
+        usb_trace("gadget: made %s", path + strlen(USB_GADGET_PATH));
+    else
+        usb_trace("gadget: %s not made, errno %d (%s)", path, errno, strerror(errno));
+}
+/* what the kernel has: the functions, the configuration, the UDC, the modules */
+static void gadget_snapshot(void)
+{
+    char all[600];
+    bool ran = gadget_read_cmd("ls " USB_GADGET_PATH "/functions " GADGET_CFG " 2>&1; cat " USB_GADGET_PATH "/UDC "
+                               USB_GADGET_PATH "/idVendor " USB_GADGET_PATH "/idProduct 2>&1; "
+                               "grep -E 'usb_f|mass|composite|configfs' /proc/modules 2>&1", all, sizeof all);
+    for (char *c = all; *c; c++)
+        if (*c == '\n')
+            *c = c[1] ? '|' : '\0';
+    if (!ran)
+        usb_trace("gadget: could not run ls, errno %d (%s)", errno, strerror(errno));
+    else
+        usb_trace("gadget: %s", all[0] ? all : "(nothing listed)");
+}
+static void mass_storage_rebuild(const char *why)
+{
+    if (mass_storage_ready())
+        return;
+    usb_trace("gadget: no LUN file (%s): making the mass-storage function again", why);
+    if (access("/sys/kernel/config/usb_gadget", F_OK) != 0)
+    {
+        int rc = system("mount -t configfs none /sys/kernel/config");
+        usb_trace("gadget: configfs mount %s (%d, errno %d)", rc == 0 ? "done" : "FAILED", rc, rc < 0 ? errno : 0);
+    }
+    char udc[64] = "";
+    if (sysfs_get_string(USB_GADGET_PATH "/UDC", udc, sizeof udc) && udc[0] && udc[0] != '\n')
+        sysfs_set_string(USB_GADGET_PATH "/UDC", "\n");   /* a bound gadget can't be changed */
+    gadget_mkdir(USB_GADGET_PATH);
+    char id[16] = "";
+    if (!sysfs_get_string(USB_GADGET_PATH "/idVendor", id, sizeof id) || !strtol(id, NULL, 16))
+    {
+        /* a gadget made from nothing has no IDs: the Linux Foundation's
+         * composite gadget, which every computer takes */
+        sysfs_set_string(USB_GADGET_PATH "/idVendor", "0x1d6b");
+        sysfs_set_string(USB_GADGET_PATH "/idProduct", "0x0104");
+        usb_trace("gadget: had no IDs (idVendor '%s'): set 1d6b:0104", id);
+    }
+    gadget_mkdir(USB_GADGET_PATH "/strings/0x409");
+    gadget_mkdir(GADGET_FUNC);
+    if (access(GADGET_FUNC, F_OK) != 0)
+    {
+        usb_trace("gadget: modprobe usb_f_mass_storage: %d", system("modprobe usb_f_mass_storage 2>/dev/null"));
+        gadget_mkdir(GADGET_FUNC);
+    }
+    gadget_mkdir(GADGET_CFG);
+    gadget_mkdir(GADGET_CFG "/strings/0x409");
+    if (access(GADGET_CFG "/mass_storage.0", F_OK) != 0)
+    {
+        if (symlinkat(GADGET_FUNC, AT_FDCWD, GADGET_CFG "/mass_storage.0") == 0)
+            usb_trace("gadget: function linked into c.1");
+        else
+            usb_trace("gadget: function not linked into c.1, errno %d (%s)", errno, strerror(errno));
+    }
+    sysfs_set_string(GADGET_CFG "/strings/0x409/configuration", is_adb_running ? "adb,storage" : "storage");
+    sysfs_set_int(GADGET_CFG "/MaxPower", 500);
+    usb_trace("gadget: LUN file %s", mass_storage_ready() ? "there now" : "STILL MISSING");
+    gadget_snapshot();
+}
+
 void enable_mass_storage(void) {
     logf(">>>>>>>>>>>>>>>>> set_mass_storage()\n");
 
@@ -1176,6 +1426,7 @@ void enable_mass_storage(void) {
 
     /* no medium yet: usb_enable(true) puts the card in once it is unmounted */
     sysfs_set_string(CARD_LUN_FILE, "\n");   /* a bare "" writes nothing: the medium would stay */
+    mass_storage_rebuild("USB setting applied");
 }
 
 void disable_mass_storage(void) {
@@ -1306,6 +1557,7 @@ void usb_init_device(void)
 
     if (!is_mounted && system("mount -t configfs none /sys/kernel/config")) {
         logf("mount configfs failed, can't do usb functionality! ErrNo: %d\n", errno);
+        usb_trace("init: configfs mount FAILED, errno %d (%s)", errno, strerror(errno));
         return;
     }
 
@@ -1338,5 +1590,6 @@ void usb_init_device(void)
     char udc[64] = "";
     sysfs_get_string(USB_GADGET_PATH "/UDC", udc, sizeof udc);
     usb_trace("start: the player is up; UDC %s, gadget bound to '%s', config '%s'", udc_state_now(), udc, functions);
+    typec_sink("start");
     usb_trace_flush();
 }

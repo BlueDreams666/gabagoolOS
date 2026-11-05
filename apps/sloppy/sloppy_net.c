@@ -3439,6 +3439,50 @@ void sl_net_remote_forget(void)
     rm_plock_until = net_ms();               /* a fresh start: whoever holds the player may pair at once */
     pthread_mutex_unlock(&rm_pair_lock);
 }
+/* A question for the UI thread (rm_tick answers it): false when it gave
+ * no answer within `secs`. */
+static bool rm_ask_ui(const char *path, const char *q, char *out, size_t n, int secs)
+{
+    bool ok = false;
+    pthread_mutex_lock(&rm_lock);
+    snprintf(rm_path, sizeof rm_path, "%s", path);
+    snprintf(rm_query, sizeof rm_query, "%s", q ? q : "");
+    rm_pending = true;
+    rm_taken = rm_done = false;
+    rm_seq++;
+    struct timespec until;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += secs;
+    while (!rm_done && rm_run)
+        if (pthread_cond_timedwait(&rm_cond, &rm_lock, &until)) break;
+    if (rm_done) { snprintf(out, n, "%s", rm_body); ok = true; }
+    rm_pending = false;
+    pthread_mutex_unlock(&rm_lock);
+    return ok;
+}
+/* "Download bug report": the player writes it to the card (the same file
+ * Settings > Advanced makes), and the phone gets that file to save */
+static void rm_report(int fd)
+{
+    static char answer[512];
+    char path[300] = "", disp[160];
+    const char *p = rm_ask_ui("/api/report", NULL, answer, sizeof answer, 10) ? strstr(answer, "\"path\":\"") : NULL;
+    if (p) { p += 8; snprintf(path, sizeof path, "%.*s", (int)strcspn(p, "\""), p); }
+    int in = path[0] ? open(path, O_RDONLY) : -1;
+    struct stat st;
+    char *body = in >= 0 && fstat(in, &st) == 0 && st.st_size > 0 && st.st_size < 1024 * 1024 ? malloc(st.st_size) : NULL;
+    ssize_t got = body ? read(in, body, st.st_size) : -1;
+    if (in >= 0) close(in);
+    if (got > 0)
+    {
+        const char *name = strrchr(path, '/');
+        snprintf(disp, sizeof disp, "Content-Disposition: attachment; filename=\"%s\"\r\n", name ? name + 1 : path);
+        rm_extra = disp;
+        rm_reply(fd, "200 OK", "text/plain; charset=utf-8", body, (size_t)got);
+    }
+    else rm_reply(fd, "503 Service Unavailable", "text/plain", "The report could not be made", 28);
+    free(body);
+}
 static void rm_client(int fd, char *req)
 {
     struct timeval tv = { 5, 0 };
@@ -3486,6 +3530,7 @@ static void rm_client(int fd, char *req)
         return;
     }
     if (!strcmp(path, "/cover")) { rm_cover(fd, q); return; }
+    if (!strcmp(path, "/report.txt")) { rm_report(fd); return; }
     if (!strcmp(path, "/shot.png"))
     {
         /* the last screenshot, as it went to the card (sloppy_png.c keeps it) */
@@ -3503,22 +3548,7 @@ static void rm_client(int fd, char *req)
         return;
     }
     static char out[sizeof rm_body];
-    bool ok = false;
-    pthread_mutex_lock(&rm_lock);
-    snprintf(rm_path, sizeof rm_path, "%s", path);
-    snprintf(rm_query, sizeof rm_query, "%s", q ? q : "");
-    rm_pending = true;
-    rm_taken = rm_done = false;
-    rm_seq++;
-    struct timespec until;
-    clock_gettime(CLOCK_REALTIME, &until);
-    until.tv_sec += 3;
-    while (!rm_done && rm_run)
-        if (pthread_cond_timedwait(&rm_cond, &rm_lock, &until)) break;
-    if (rm_done) { snprintf(out, sizeof out, "%s", rm_body); ok = true; }
-    rm_pending = false;
-    pthread_mutex_unlock(&rm_lock);
-    if (ok) rm_reply(fd, "200 OK", "application/json; charset=utf-8", out, strlen(out));
+    if (rm_ask_ui(path, q, out, sizeof out, 3)) rm_reply(fd, "200 OK", "application/json; charset=utf-8", out, strlen(out));
     else rm_reply(fd, "503 Service Unavailable", "application/json", "{\"error\":\"busy\"}", 16);
 }
 static void rm_drop(int i)

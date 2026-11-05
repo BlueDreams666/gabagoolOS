@@ -39,6 +39,10 @@ void usb_init_device(void);
 #endif
 #define mount fake_mount
 #define umount fake_umount
+#define umount2 fake_umount2
+#ifndef MNT_DETACH
+#define MNT_DETACH 2
+#endif
 #define sync fake_sync
 #define sleep fake_sleep
 /* The card is a real folder here (card_dir, standing in for PIVOT_ROOT), so
@@ -63,14 +67,34 @@ static int busy_for, umounts, slept;
 static bool mounted = true;
 int fake_umount(const char *t) { (void)t; umounts++; if (busy_for > 0 || (card_dir[0] && card_held())) { if (busy_for > 0) busy_for--; errno = EBUSY; return -1; } mounted = false; return 0; }
 static unsigned long mount_flags;       /* the last mount(2)'s flags */
-int fake_mount(const char *d, const char *t, const char *fs, unsigned long f, const void *o) { (void)d; (void)t; (void)fs; (void)o; mount_flags = f; mounted = true; return 0; }
+static int remount_fails, detaches;      /* a read-only remount refused (files open to write); lazy unmounts */
+int fake_mount(const char *d, const char *t, const char *fs, unsigned long f, const void *o) { (void)d; (void)t; (void)fs; (void)o; mount_flags = f; if ((f & MS_REMOUNT) && remount_fails > 0) { remount_fails--; errno = EBUSY; return -1; } mounted = true; return 0; }
+int fake_umount2(const char *t, int f) { (void)t; if (f & MNT_DETACH) { detaches++; mounted = false; } return 0; }
+/* configfs: the gadget's folders, made or refused as the kernel would */
+static bool lun_missing, link_missing, func_refused;
+static int gadget_mkdirs, gadget_links;
+static int fake_mkdirat(int at, const char *p, mode_t m)
+{
+    if (!strstr(p, "/sys/kernel/config")) return mkdirat(at, p, m);
+    gadget_mkdirs++;
+    if (strstr(p, "functions/mass_storage.0")) { if (func_refused) { errno = ENODEV; return -1; } lun_missing = false; }
+    return 0;
+}
+static int fake_symlinkat(const char *a, int at, const char *b) { (void)a; (void)at; (void)b; gadget_links++; link_missing = false; return 0; }
 void fake_sync(void) {}
 unsigned fake_sleep(unsigned ticks) { slept += ticks; return 0; }
 static char udc_state[32] = "not attached", lun[128] = "/dev/mmcblk0p1", udc_bound[64] = "";
 static bool power = false, state_readable = true;
 static int binds_refused, binds;         /* the kernel turning a bind down (EBUSY at close) */
+/* the Type-C port: dual-role, which against a Mac may end up the source */
+static char typec_type[48] = "[dual] source sink";
+static bool typec_present = true;
+static int typec_writes;
 bool fake_get(const char *p, char *v, int n)
 {
+    if (strstr(p, "typec/port0/port_type")) { snprintf(v, n, "%s", typec_type); return true; }
+    if (strstr(p, "typec/port0/power_role")) { snprintf(v, n, "%s", strstr(typec_type, "[sink]") ? "source [sink]" : "[source] sink"); return true; }
+    if (strstr(p, "typec/port0/data_role")) { snprintf(v, n, "%s", strstr(typec_type, "[sink]") ? "host [device]" : "[host] device"); return true; }
     if (strstr(p, "/state")) { if (!state_readable) return false; snprintf(v, n, "%s", udc_state); return true; }
     if (strstr(p, "/UDC")) { snprintf(v, n, "%s", udc_bound); return true; }
     if (strstr(p, "lun.0/file")) { snprintf(v, n, "%s", strcmp(lun, "\n") ? lun : ""); return true; }
@@ -78,6 +102,7 @@ bool fake_get(const char *p, char *v, int n)
 }
 bool fake_set(const char *p, char *v)
 {
+    if (strstr(p, "typec/port0/port_type")) { typec_writes++; if (!strcmp(v, "sink")) strcpy(typec_type, "dual source [sink]"); return true; }
     if (strstr(p, "lun.0/file")) snprintf(lun, sizeof lun, "%s", v);
     else if (strstr(p, "/UDC") && strcmp(v, "\n") && binds_refused > 0) binds_refused--;
     else if (strstr(p, "/UDC")) { snprintf(udc_bound, sizeof udc_bound, "%s", strcmp(v, "\n") ? v : ""); if (strcmp(v, "\n")) binds++; }
@@ -91,12 +116,24 @@ static char trace_ram[PATH_MAX], trace_off[PATH_MAX], trace_card[PATH_MAX], trac
 #define USB_TRACE_CARD_PREV trace_prev
 bool fake_set_int(const char *p, int v) { (void)p; (void)v; return true; }
 bool fake_get_int(const char *p, int *v) { (void)p; *v = 0; return true; }
-int fake_access(const char *p, int m) { (void)m; if (strstr(p, "/state")) return state_readable ? 0 : -1; return 0; }
+int fake_access(const char *p, int m)
+{
+    (void)m;
+    if (strstr(p, "c.1/mass_storage.0")) return link_missing ? -1 : 0;
+    if (strstr(p, "lun.0/file") || strstr(p, "functions/mass_storage.0")) return lun_missing ? -1 : 0;
+    if (strstr(p, "/state")) return state_readable ? 0 : -1;
+    if (strstr(p, "/typec/")) return typec_present && strstr(p, "/port0/") ? 0 : -1;
+    return 0;
+}
 int fake_system(const char *c) { (void)c; return 0; }
 /* where a crash would be logged: never onto the card while it is the computer's */
 static int crash_card_away;
 void crashlog_card_away(int away) { crash_card_away = away; }
+#define mkdirat fake_mkdirat
+#define symlinkat fake_symlinkat
 #include "hiby/usb-hiby-gadget.c"
+#undef mkdirat
+#undef symlinkat
 #undef realpath
 static char *fake_realpath(const char *p, char *out)
 {
@@ -171,6 +208,9 @@ int main(void)
     assert(disk_unmount_all() == 1 && !mounted && umounts == 4 && slept == 3 * (HZ * 4 / 10));
     assert(usb_card_handover_error() == 0 && !usb_card_retry() && crash_card_away);
     usb_enable(true); assert(strcmp(lun, "\n") && lun[0] && mounted == false);
+    /* the Type-C port asked for the sink side before the gadget binds: as
+     * the source, the R1 charged the Mac and was never a disk to it (4 Nov) */
+    assert(strstr(typec_type, "[sink]") && typec_writes == 1 && count_in(trace_ram, "port_type <- sink: done") == 1);
     assert(disk_mount_all() == 1 && mounted && !strcmp(lun, "\n") && rbhome_open == 1 && !crash_card_away);
     /* one that stays open: no medium, a few seconds of tries, then the USB
      * screen's retries; once it closes the card goes over and the gadget
@@ -294,13 +334,48 @@ int main(void)
     usb_card_park();
     assert(!mounted && umounts == 1 && card_leaving);
     usb_card_park(); assert(umounts == 1);                     /* once */
-    card_off = card_leaving = false; mounted = true; busy_for = 1; umounts = 0; mount_flags = 0;
+    card_off = card_leaving = false; mounted = true; busy_for = 1; umounts = 0;
+    usb_card_park(); assert(umounts == 2 && !mounted);                    /* held a moment: tried again */
+    card_off = card_leaving = false; mounted = true; busy_for = 100; umounts = 0; mount_flags = 0;
     usb_card_park();
-    assert(umounts == 1 && mounted && (mount_flags & MS_REMOUNT) && (mount_flags & MS_RDONLY));
+    assert(umounts == 3 && mounted && (mount_flags & MS_REMOUNT) && (mount_flags & MS_RDONLY) && !detaches);
+    /* not even read-only (a file open to write elsewhere): detached, the kernel finishes as the holders end */
+    card_off = card_leaving = false; mounted = true; busy_for = 100; umounts = 0; remount_fails = 1;
+    usb_card_park(); assert(umounts == 3 && detaches == 1 && !mounted);
+    busy_for = 0;
+    /* a file of ours still open on the card at power off: closed, and the card comes off
+     * (a test card was held so at power off and came back needing a repair, 4 Nov) */
+    card_off = card_leaving = false; mounted = true; umounts = 0;
+    strcpy(card_dir, file); *strrchr(card_dir, '/') = '\0';            /* the card folder again, where it was */
+    assert(mkdirat(AT_FDCWD, at, 0700) == 0 && mkdirat(AT_FDCWD, card_dir, 0700) == 0);
+    int held = openat(AT_FDCWD, file, O_RDWR | O_CREAT, 0600);
+    assert(held >= 0 && card_held());
+    usb_card_park(); assert(!mounted && umounts == 1 && fcntl(held, F_GETFD) == -1);
+    unlinkat(AT_FDCWD, file, 0); unlinkat(AT_FDCWD, card_dir, AT_REMOVEDIR); unlinkat(AT_FDCWD, at, AT_REMOVEDIR);
+    card_dir[0] = '\0';
     card_off = true; card_leaving = false; umounts = 0;
     usb_card_park(); assert(umounts == 0);                    /* the computer has it: left alone */
     card_off = false;
     printf("PASS: at power off the card is unmounted, or made read-only when a file holds it\n");
+    /* already the sink: read, never written again; no Type-C class: said once, nothing written */
+    typec_sink("again"); assert(typec_writes == 1);
+    typec_port = -2; typec_present = false; strcpy(typec_type, "[dual] source sink");
+    typec_sink("none"); typec_sink("none"); assert(typec_writes == 1 && typec_port == -1);
+    assert(count_in(trace_ram, "no /sys/class/typec port") + count_in(trace_card, "no /sys/class/typec port") == 1);
+    printf("PASS: USB mode asks the Type-C port for the sink side, so a computer is the source and sees the disk\n");
+    /* the mass-storage function gone (a test R1 after hard resets, 4 Nov): made again, step by step */
+    lun_missing = link_missing = true; gadget_mkdirs = gadget_links = 0;
+    mass_storage_rebuild("test");
+    assert(!lun_missing && gadget_mkdirs > 0 && gadget_links == 1);
+    assert(count_in(trace_ram, "making the mass-storage function again") + count_in(trace_card, "making the mass-storage function again") == 1);
+    assert(count_in(trace_ram, "LUN file there now") + count_in(trace_card, "LUN file there now") == 1);
+    mass_storage_rebuild("again"); assert(gadget_links == 1);             /* there: nothing done */
+    lun_missing = func_refused = true;
+    mass_storage_rebuild("refused");
+    assert(count_in(trace_ram, "modprobe usb_f_mass_storage") + count_in(trace_card, "modprobe usb_f_mass_storage") == 1);
+    assert(count_in(trace_ram, "STILL MISSING") + count_in(trace_card, "STILL MISSING") == 1);
+    lun_missing = func_refused = false;
+    printf("PASS: a missing mass-storage function is made again, and why it could not be is traced\n");
     unlink(trace_ram); unlink(trace_off); unlink(trace_card); unlink(trace_prev); unlinkat(AT_FDCWD, tdir, AT_REMOVEDIR);
     return 0;
 }

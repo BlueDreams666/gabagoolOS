@@ -4,7 +4,7 @@
  *   SLOPPY_H_TESTS=1                                the tests alone
  *   SLOPPY_H_SHOTS=<dir> SLOPPY_AUDIT_TAG=now      the screenshots (SLOPPY_AUDIT_ONLY=podcasts ...) */
 
-#define H_ROOT "/tmp/sloppy-ui-test-root"
+#define H_ROOT SIM_ROOT ""
 #define H_POD "/Card/Podcasts"               /* the episodes, inside the sandboxed card: the queue takes them */
 static uint64_t h_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000 + (uint64_t)t.tv_nsec / 1000000; }
 static void h_wait(bool (*done)(void), int ms)
