@@ -2155,10 +2155,10 @@ static void bt13_tests(void)
         assert(sl_bt_switch && lv_obj_has_state(sl_bt_switch, LV_STATE_DISABLED) && find_label(sl_bt_body, "Checking Bluetooth…"));
         lv_obj_send_event(sl_bt_switch, LV_EVENT_VALUE_CHANGED, NULL); frame(100);
         assert(sl_bt_busy && sl_bt_job == SL_BT_JOB_POWER);   /* busy: the switch is put back */
-        int s = 0; while (sl_bt_busy && s < 90) { frame(1000); s++; }
+        int s = 0; while (sl_bt_busy && s < 180) { frame(1000); s++; }
         assert(!sl_bt_busy && sl_bt_silent && bt_note_has("Bluetooth stopped answering"));
         int dead = 0, asked = 0;
-        for (int i = 0; i < 120; i++)
+        for (int i = 0; i < 25; i++)        /* before the first quiet look at 30 s */
         {
             frame(1000);
             dead += !sl_bt_switch || lv_obj_has_state(sl_bt_switch, LV_STATE_DISABLED);
@@ -2167,7 +2167,7 @@ static void bt13_tests(void)
         assert(!asked);
         assert(!dead);
         assert(find_label(sl_bt_body, "Not answering · Tap to retry"));
-        printf("stack gone after a reset: the power-on let go after %d s with one note; then the switch was live and nothing hung for 120 s\n", s);
+        printf("stack gone after a reset: the power-on let go after %d s with one note; then the switch was live, nothing asked\n", s);
         /* the stack is back: a tap on the switch tries the power-on again */
         sl_bt_demo_hang = false;
         lv_obj_add_state(sl_bt_switch, LV_STATE_CHECKED);
@@ -2176,6 +2176,47 @@ static void bt13_tests(void)
         s = 0; while ((sl_bt_busy || !sl_bt_known) && s < 60) { frame(1000); s++; }
         frame(4100); frame(100);
         assert(sl_bt_known && !sl_bt_silent && sl_bt_state.enabled && sl_bt_switch && !lv_obj_has_state(sl_bt_switch, LV_STATE_DISABLED));
+    }
+    {   /* silent, untouched: a quiet look after 30 s, then 60, 120, 240, at most every 5 minutes, one at a time and
+         * never over a let-go worker still running; when BlueZ answers by itself the headphones come back, no tap */
+        while (npages > 1) { page_pop(); frame(500); }
+        sl_bt_demo_hang = true; sl_bt_demo_on = true;
+        strlcpy(sl_bt_demo_last, sl_bt_demo_devices[0].mac, sizeof sl_bt_demo_last); sl_bt_demo_index = -1;
+        sl_bt_rc_disarm("test");
+        sl_bt_begin(SL_BT_JOB_REFRESH, "");
+        int s = 0; while (sl_bt_busy && s < 60) { frame(1000); s++; }
+        assert(!sl_bt_busy && sl_bt_silent && sl_bt_workers == 0);
+        int starts[12], n = 0, most = 0; bool was = false;
+        for (int t = 0; t < 1200; t++)
+        {
+            frame(1000);
+            if (sl_bt_busy && !was && n < 12) starts[n++] = t + 1;
+            was = sl_bt_busy;
+            if (sl_bt_workers > most) most = sl_bt_workers;
+            assert(!sl_bt_rc.armed || !sl_bt_busy || sl_bt_job == SL_BT_JOB_REFRESH);   /* no reconnect while silent */
+        }
+        printf("silent, BlueZ hung: quiet looks at");
+        for (int i = 0; i < n; i++) printf(" %d", starts[i]);
+        printf(" s, at most %d worker at a time\n", most);
+        assert(most == 1 && n >= 4 && starts[0] >= 29 && starts[0] <= 32);
+        static const int wait[] = { 60, 120, 240, 300, 300 };
+        for (int i = 1; i < n; i++)                    /* each look hangs 45 s, then the next wait */
+            assert(abs(starts[i] - starts[i - 1] - 45 - wait[i - 1 < 4 ? i - 1 : 4]) <= 2);
+        /* a look due while the let-go worker still runs waits for it */
+        while (sl_bt_busy) frame(1000);
+        sl_bt_silent_next = lv_tick_get(); sl_bt_workers++;
+        frame(1000); frame(1000); frame(1000);
+        assert(!sl_bt_busy);
+        sl_bt_workers--; frame(1000); frame(100);
+        assert(sl_bt_busy && sl_bt_job == SL_BT_JOB_REFRESH);
+        /* BlueZ answers again by itself: the next look finds it, and the headphones are reconnected */
+        sl_bt_demo_hang = false;
+        s = 0; while ((sl_bt_silent || !sl_bt_routed_mac()) && s < 400) { frame(1000); s++; }
+        assert(!sl_bt_silent && sl_bt_known && sl_bt_routed_mac() && !strcmp(sl_bt_routed_mac(), sl_bt_demo_devices[0].mac));
+        printf("silent, then BlueZ answering by itself: the headphones back after %d s, no tap\n", s);
+        sl_bt_rc_disarm("test"); sl_bt_demo_index = -1; frame(100);
+        sl_bt_page(); frame(500); frame(500);   /* the page, as the tests after this one expect it */
+        assert(sl_bt_page_obj == pages[npages - 1]);
     }
 
     /* AirPods: battery and noise control from AAP, a mode asked for */

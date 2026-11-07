@@ -53,6 +53,7 @@
 #include "bmp.h"
 #include "resize.h"
 #include "inflate.h"
+#include "kernel.h"
 #include "png_load.h"
 
 #define PNG_MAX_DIM 4096
@@ -461,6 +462,12 @@ static uint32_t png_writer(const void *block, uint32_t block_size, void *ctx)
         }
         p->fill = 0;
         p->src_y++;
+        /* covers decode on the music's threads, which take turns with the
+         * UI: a big one in one go held both for 100 ms and more on a test
+         * R1, one album after another as a shuffle buffered. JPEG yields
+         * per MCU row; this does the same every 16 rows. */
+        if (!(p->src_y & 15))
+            yield();
     }
 
     return block_size;

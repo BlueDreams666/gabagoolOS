@@ -18,7 +18,8 @@ PHONE=AA:BB:CC:DD:EE:01
 case "${1:-}" in
 show) if [ -f "$S/powered" ]; then printf '\tPowered: yes\n'; else printf '\tPowered: no\n'; fi
       printf '\tAlias: %s\n\tPairable: yes\n\tDiscoverable: no\n' "$(cat "$S/alias" 2>/dev/null || echo 'HiBy R1')" ;;
-power) if [ "$2" = on ]; then touch "$S/powered"; echo "Changing power on succeeded";
+power) if [ "$2" = on ] && { [ -f "$S/wedged" ] || [ -f "$S/asleep" ]; }; then echo "Failed to set power on: org.bluez.Error.Failed"; exit 1; fi
+       if [ "$2" = on ]; then touch "$S/powered"; echo "Changing power on succeeded";
        else rm -f "$S/powered"; echo "Changing power off succeeded"; fi ;;
 paired-devices|devices) echo "Device 00:1A:7D:DA:71:13 Studio headphones" ;;
 info) if [ "$2" = "$PHONE" ]; then printf "\tName: Sam's iPhone\n\tAlias: Sam's iPhone\n"
@@ -156,6 +157,7 @@ EOF
 cat > "$work/bin/pgrep" <<'EOF'
 #!/bin/sh
 case "$*" in
+*bluetoothd*|*brcm_patchram_plus*) [ -f "$BT_STATE/daemons" ] ;;
 *"-a -x bluealsa"*) [ -f "$BT_STATE/bluealsa" ] && echo "321 bluealsa $(cat "$BT_STATE/bluealsa")" ;;
 *"-x bluealsa"*) [ -f "$BT_STATE/bluealsa" ] ;;
 *) exit 1 ;;
@@ -177,11 +179,30 @@ case "$*" in
 *Properties.Set*) printf '%s\n' "$@" > "$S/dbus_set" ;;
 esac
 EOF
+# HiBy's pair (usr/bin on the R1): bt_suspend takes the stack down and the
+# chip off; bt_resume brings it up again. "asleep": the chip off under live
+# daemons (2.0's boot menu), which bt_resume alone wakes. "wedged": over a
+# live stack the chip is not reset (rfkill already on), so it stays wedged.
+cat > "$work/bin/bt_suspend" <<'EOF'
+#!/bin/sh
+S="$BT_STATE"
+echo suspend >> "$S/stack_runs"
+rm -f "$S/daemons" "$S/wedged" "$S/powered" "$S/bluealsa"
+EOF
+cat > "$work/bin/bt_resume" <<'EOF'
+#!/bin/sh
+S="$BT_STATE"
+echo resume >> "$S/stack_runs"
+rm -f "$S/asleep"
+[ -f "$S/daemons" ] && exit 0
+touch "$S/daemons"; rm -f "$S/wedged"   # from down: rfkill on resets the chip
+echo "-p a2dp-source --a2dp-volume" > "$S/bluealsa"
+EOF
 chmod +x "$work/bin/"*
 
 ${CC:-cc} -std=gnu99 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function \
     -Wno-deprecated-declarations -g -fsanitize=${SANITIZERS:-address,undefined} \
-    -DROCKBOX_DIR="\"$work\"" -DHIBY_SYS_SERVER_SOCKET="\"sys.sock\"" \
+    -DROCKBOX_DIR="\"$work\"" -DBT_SCRIPT_DIR="\"$work/bin/\"" -DHIBY_SYS_SERVER_SOCKET="\"sys.sock\"" \
     -I"$work/src" -I"$test_dir/bt_stubs" "$test_dir/bt_test.c" -o "$work/bt-test" -lpthread
 cd "$work"   # the socket path is relative: temp paths outgrow sun_path
 PATH="$work/bin:$PATH" BT_BIN="$work/bin" BT_STATE="$work/state" ASAN_OPTIONS=detect_leaks=0 "$work/bt-test" ||

@@ -101,6 +101,17 @@ static void state_int(const char *file, int v)
     FILE *f = fopen(p, "w"); assert(f); fprintf(f, "%d\n", v); fclose(f);
 }
 
+/* the backend's own log (the card's is not there on the desk: its fallback) */
+static bool bt_log_has(const char *needle)
+{
+    static char b[262144];
+    FILE *f = fopen(BT_FALLBACK_LOG_FILE, "r");
+    if (!f) return false;
+    size_t n = fread(b, 1, sizeof b - 1, f);
+    b[n] = '\0';
+    fclose(f);
+    return strstr(b, needle) != NULL;
+}
 static const struct hiby_bt_device phones = { "00:1A:7D:DA:71:13", "Studio headphones", true };
 
 /* ==== Receive from phone (hiby_btrx_*) ==== */
@@ -406,6 +417,31 @@ static void pair_tests(void)
     assert(hiby_bt_set_sbc_quality(2) && state_has("bluealsa", "--sbc-quality=xq+"));
     assert(hiby_bt_set_sbc_quality(0) && !state_has("bluealsa", "--sbc-quality"));
     printf("PASS: SBC quality: BlueALSA restarted with --sbc-quality=xq / xq+, and without.\n");
+
+    /* the ordinary off -> on: refused, the daemons up (2.0's boot menu leaves them), and the plain bt_resume
+     * is all it needs: never bt_suspend */
+    hiby_bt_disconnect(); hiby_bt_take_audio_pause(); bt_dropped_mac[0] = '\0';
+    state("connected", false); state("powered", false); state("stack_runs", false);
+    state("daemons", true); state("asleep", true);
+    assert(hiby_bt_power(true) && state_has("stack_runs", "resume\n") && !state_has("stack_runs", "suspend"));
+    /* still refused after it, with the old stack up (a power-off that hung, then a forced reset: a test R1,
+     * 5 Nov, still refused after the next boot): then HiBy's pair, bt_suspend and bt_resume, and it goes through */
+    hiby_bt_power(false); state("stack_runs", false); state("daemons", true); state("wedged", true);
+    assert(hiby_bt_power(true));
+    assert(state_has("stack_runs", "resume\nsuspend\nresume\n") && state_has("powered", "") && state_has("bluealsa", "a2dp-source"));
+    assert(bt_log_has("stack: controller not ready after resume") &&
+           bt_log_has("stack: still refused with the old stack up: bt_suspend, then bt_resume") && bt_log_has("[up "));
+    /* the stack down already (suspended at power-off): bt_resume alone */
+    hiby_bt_power(false); state("stack_runs", false); state("daemons", false); state("wedged", true);
+    assert(hiby_bt_power(true) && state_has("stack_runs", "resume\n") && !state_has("stack_runs", "suspend"));
+    /* the music on Bluetooth: the plain bt_resume as before, never stopped for a restart */
+    assert(hiby_bt_connect(&phones) && hiby_pcm_get_bt_mac());
+    state("powered", false); state("wedged", true); state("stack_runs", false);
+    assert(!bt_prepare_stack() && !state_has("stack_runs", "suspend") && hiby_pcm_get_bt_mac());
+    assert(bt_log_has("stack: still refused with the music on Bluetooth: not restarted"));
+    state("wedged", false); state("powered", true);
+    hiby_bt_disconnect(); hiby_bt_take_audio_pause(); bt_dropped_mac[0] = '\0';
+    printf("PASS: power-on: the plain bt_resume first (never bt_suspend when it works); still refused with the old stack up, bt_suspend then bt_resume as HiBy does; never with the music on Bluetooth; log lines stamped with the uptime.\n");
     hiby_bt_set_player_name("");                     /* the receiver's tests expect its own name */
 
     /* AirPods (AAP): LibrePods' sample packets, as the AirPods send them */

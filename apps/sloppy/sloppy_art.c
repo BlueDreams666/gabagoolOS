@@ -1459,12 +1459,22 @@ static bool art_over(void)
  * cover thread's to check: miss_known). -1: the step's time ran out
  * between sizes (after a library update each one is moved). */
 unsigned sl_art_made;
+/* A lookup slower than the step's share (a test R1: 100-485 ms each, the
+ * card busy and memory short) ran the time out after the first size, every
+ * step, and the same album was begun again and again, never got past. The
+ * sizes found are kept: the next step goes on from the one it stopped at.
+ * whole: every size whatever the time (Cover Flow's first neighbour). */
+static bool art_whole;
+static int needs_album = -1;
+static unsigned needs_size;
 static int needs_art(int album)
 {
     if (album < 0 || album >= sl_lib.n_albums || attempted[album]) return 0;
-    for (unsigned i = 0; i < sizeof sizes / sizeof sizes[0]; i++)
+    unsigned i = album == needs_album ? needs_size : 0;
+    needs_album = -1;
+    for (; i < sizeof sizes / sizeof sizes[0]; i++)
     {
-        if (i && art_over()) return -1;
+        if (i && !art_whole && art_over()) { needs_album = album; needs_size = i; return -1; }
         if (!sl_art_src(album, sizes[i])) return 1;
     }
     /* every size is on the card: never look again (three card lookups each
@@ -1488,20 +1498,199 @@ void sl_art_prefer(int album)
     n_prefer++;
 }
 
+/* The walk's card lookups, on a thread of their own. Each album's check is
+ * up to three lookups on the card; on a test R1 they held the UI loop
+ * 100-485 ms a step "in covers", and a whole walk that finds nothing to
+ * make is thousands of them. Rockbox's threads take turns on one OS thread,
+ * so the cover thread would only move the wait: this is a pthread, with
+ * plain POSIX on the card's real path, no LVGL and no library. The UI
+ * hands it a batch (the watched albums, then the walk's next), each as the
+ * key its thumbnails are named by, and later collects the first one with a
+ * size missing; that album alone goes through needs_art() as before (a
+ * cover moved from the last generation, the small one made from the big).
+ * A library reloaded meanwhile (another epoch or generation) gets nothing. */
+#define FIND_BATCH 64
+static struct find_job {
+    int state;                       /* 0 idle, 1 looking, 2 done */
+    bool cancel;
+    unsigned epoch;
+    uint32_t generation;
+    int n, found;                    /* found: the first with a size missing, n for none */
+    int album[FIND_BATCH], walk[FIND_BATCH];   /* walk: its place in the walk, -1 a watch */
+    unsigned key[FIND_BATCH];
+    char root[MAX_PATH];
+    pthread_t thread;
+} fj;
+/* No thread to be had (on the R1 memory is committed so tightly that
+ * fork() fails): the UI looks itself, as before, and the thread is tried
+ * again 30 s later. */
+#define FIND_RETRY_MS 30000
+static bool find_failed;
+static long find_failed_ms, find_logged_ms;
+static int find_pend = -1, find_pend_walk;
+static long find_now_ms(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (long)t.tv_sec * 1000L + t.tv_nsec / 1000000L;
+}
+static bool find_retry_due(void)
+{
+    if (find_failed && find_now_ms() - find_failed_ms >= FIND_RETRY_MS) find_failed = false;
+    return !find_failed;
+}
+static int fj_state(void) { return __atomic_load_n(&fj.state, __ATOMIC_ACQUIRE); }
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+static bool find_exists(const char *path)
+{
+    char real[MAX_PATH + 96];
+    snprintf(real, sizeof real, "%s%s", fj.root, path);
+    return access(real, F_OK) == 0;
+}
+static bool find_on_thread(void) { return find_retry_due(); }
+static int (*find_create)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *) = pthread_create;
+#else
+static bool (*art_find_exists)(const char *path);   /* the tests' card, off the UI; none: the UI looks */
+static bool find_exists(const char *path) { return art_find_exists(path); }
+static bool find_on_thread(void) { return art_find_exists && find_retry_due(); }
+static int (*find_create)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *) = pthread_create;   /* the tests make it fail */
+#endif
+static void *find_worker(void *arg)
+{
+    (void)arg;
+#ifdef __linux__
+    setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 15);   /* after audio and the UI */
+#endif
+    int i = 0;
+    for (; i < fj.n && !__atomic_load_n(&fj.cancel, __ATOMIC_ACQUIRE); i++)
+    {
+        bool all = true;
+        for (unsigned k = 0; k < sizeof sizes / sizeof sizes[0] && all; k++)
+        {
+            char path[72];
+            thumb_path_key(path, sizeof path, fj.generation, true, fj.key[i], sizes[k]);
+            all = find_exists(path);
+        }
+        if (!all) break;
+    }
+    fj.found = i;
+    __atomic_store_n(&fj.state, 2, __ATOMIC_RELEASE);
+    return NULL;
+}
+/* USB mode or a reload: a batch under way stops at its next lookup */
+static void find_settle(void)
+{
+    if (!fj_state()) return;
+    __atomic_store_n(&fj.cancel, true, __ATOMIC_RELEASE);
+    pthread_join(fj.thread, NULL);
+    fj.state = 0;
+}
+static int find_pick(void)
+{
+    if (fj_state() == 1) return -2;          /* still looking */
+    if (fj_state() == 2)
+    {
+        pthread_join(fj.thread, NULL);
+        fj.state = 0;
+        if (fj.epoch == art_epoch && fj.generation == thumb_generation && !fj.cancel)
+        {
+            for (int i = 0; i < fj.found; i++)
+            {
+                int a = fj.album[i];
+                if (a >= 0 && a < attempted_count && !attempted[a]) attempted[a] = 3;   /* all made: never again */
+                if (fj.walk[i] >= next_album) next_album = fj.walk[i] + 1;
+            }
+            if (fj.found < fj.n)
+            {
+                find_pend = fj.album[fj.found];
+                find_pend_walk = fj.walk[fj.found];
+                if (find_pend_walk >= 0) next_album = find_pend_walk;
+            }
+        }
+    }
+    /* the album found with a size missing: looked at here, over as many
+     * steps as its lookups take (a cover moved from the last generation, the
+     * small one made from the big) */
+    if (find_pend >= 0)
+    {
+        int a = find_pend;
+        int need = a < attempted_count ? needs_art(a) : 0;
+        if (need < 0) return -2;
+        find_pend = -1;
+        if (need) return a;
+        if (find_pend_walk >= 0 && find_pend_walk >= next_album) next_album = find_pend_walk + 1;   /* there after all */
+        return -2;
+    }
+    /* the next batch: albums on screen first, then the walk */
+    int n = 0;
+    for (int i = 0; i < n_watches && n < FIND_BATCH / 4; i++)
+    {
+        int a = watches[i].album, k = 0;
+        if (a < 0 || a >= attempted_count || attempted[a]) continue;
+        while (k < n && fj.album[k] != a) k++;
+        if (k < n) continue;
+        fj.album[n] = a; fj.walk[n] = -1; fj.key[n] = album_key(a); n++;
+    }
+    int w = next_album;
+    for (; w < sl_lib.n_albums && n < FIND_BATCH; w++)
+    {
+        int a = sl_lib.albums_by_title[w];
+        if (a < 0 || a >= attempted_count || attempted[a]) continue;
+        fj.album[n] = a; fj.walk[n] = w; fj.key[n] = album_key(a); n++;
+    }
+    if (!n) { next_album = sl_lib.n_albums; return -1; }
+    fj.n = n;
+    fj.found = n;
+    fj.epoch = art_epoch;
+    fj.generation = thumb_generation;
+    fj.cancel = false;
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+    strlcpy(fj.root, sl_net_card_root(), sizeof fj.root);
+#endif
+    __atomic_store_n(&fj.state, 1, __ATOMIC_RELEASE);
+    /* a small stack: the default reserves 8 MB (RLIMIT_STACK) of a memory
+     * so tight on the R1 that fork() fails. The worker's frame is a path or
+     * two (under 1 KiB) and access(). */
+    pthread_attr_t attr;
+    bool made = pthread_attr_init(&attr) == 0;
+    if (made)
+    {
+        pthread_attr_setstacksize(&attr, 64 * 1024);
+        made = find_create(&fj.thread, &attr, find_worker, NULL) == 0;
+        pthread_attr_destroy(&attr);
+    }
+    if (!made)
+    {
+        fj.state = 0;
+        find_failed = true;
+        find_failed_ms = find_now_ms();
+        if (!find_logged_ms || find_failed_ms - find_logged_ms >= 60000)
+        {
+            find_logged_ms = find_failed_ms;
+            sl_log("art: no thread for the walk: the UI looks itself, the thread tried again in 30 s");
+        }
+    }
+    return -2;
+}
+
 static int pick_album(void)
 {
     /* the step's time, as the walk below: on a full card under memory
      * pressure these lookups held the loop 1.3 s (the R1 log, 2026-10-13).
-     * The first of Cover Flow's is looked at whatever the time. */
+     * The first of Cover Flow's is looked at whatever the time, and whole:
+     * never shown as a placeholder. */
     for (bool first = true; n_prefer; first = false)
     {
         if (!first && art_over()) return -2;
         int a = prefer[0];
+        art_whole = first;
         int need = attempted_count == sl_lib.n_albums ? needs_art(a) : 0;
+        art_whole = false;
         if (need < 0) return -2;             /* still first next step */
         memmove(prefer, prefer + 1, (size_t)--n_prefer * sizeof prefer[0]);
         if (need) return a;
     }
+    if (find_on_thread()) return find_pick();
     for (int i = 0; i < n_watches; i++)
     {
         if (art_over()) return -2;
@@ -1665,6 +1854,7 @@ bool sl_art_busy(void)
  * made is let finish (the UI sleeping gives it the time), 5 s at most. */
 static void art_job_settle(void)
 {
+    find_settle();
     if (aj.state == AJ_QUEUED)
     {
         aj.state = AJ_IDLE;
@@ -1712,6 +1902,8 @@ static void art_made(int a, bool ok)
 
 void sl_art_reset(void)
 {
+    find_settle();                           /* its albums are the old library's */
+    find_pend = needs_album = -1;
     n_prefer = 0;
     art_epoch++;                             /* a decode in flight is for the old library */
     for (int i = 0; i < n_watches; i++)

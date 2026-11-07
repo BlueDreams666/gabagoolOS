@@ -407,6 +407,9 @@ struct sl_bt_result {
 };
 static struct sl_bt_result sl_bt_result;
 static bool sl_bt_job_done;
+/* workers still running, a let-go one included: it ends on its own
+ * deadlines, and a quiet look is never stacked on top of it */
+static volatile int sl_bt_workers;
 #if defined(HIBY_LINUX) && !defined(SIMULATOR)
 static pthread_mutex_t sl_bt_job_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
@@ -460,6 +463,7 @@ static void *sl_bt_worker(void *unused)
 #if defined(HIBY_LINUX) && !defined(SIMULATOR)
     pthread_mutex_unlock(&sl_bt_job_lock);
 #endif
+    __sync_fetch_and_sub(&sl_bt_workers, 1);
     return NULL;
 }
 
@@ -506,6 +510,7 @@ static void sl_bt_kick_audio(void)
 static void sl_bt_ask_poll(void);
 static void sl_bt_rc_result(const struct sl_bt_result *r, bool was_routed);
 static void sl_bt_rc_arm(const char *why);
+static void sl_bt_silent_arm(bool again);
 static void sl_bt_rc_disarm(const char *why);
 static const char *sl_bt_err_text(int err, const char *name);
 #if !(defined(HIBY_LINUX) && !defined(SIMULATOR))
@@ -515,7 +520,10 @@ static void sl_bt_demo_step(void);
  * with questions and two connect tries, a power-on with the AIC firmware */
 static uint32_t sl_bt_job_limit(int job)
 {
-    return job == SL_BT_JOB_CONNECT ? 180000 : job == SL_BT_JOB_POWER ? 75000 :
+    /* a power-on may run bt_resume, and if the controller still refuses,
+     * restart the whole stack as HiBy does (bt_suspend, then bt_resume):
+     * up to 40 + 15 + 20 + 40 + 15 s, about 50 when it works */
+    return job == SL_BT_JOB_CONNECT ? 180000 : job == SL_BT_JOB_POWER ? 150000 :
            job == SL_BT_JOB_SBC ? 60000 : 45000;
 }
 static void sl_bt_job_cb(lv_timer_t *timer)
@@ -547,7 +555,11 @@ static void sl_bt_job_cb(lv_timer_t *timer)
             sl_bt_job = SL_BT_JOB_NONE;
             sl_bt_busy = false;
             sl_bt_known = false;
+            sl_bt_silent_arm(sl_bt_silent);
             sl_bt_silent = true;
+#if !(defined(HIBY_LINUX) && !defined(SIMULATOR))
+            __sync_fetch_and_sub(&sl_bt_workers, 1);   /* the simulator's stuck stack ends with its let-go */
+#endif
             lv_timer_pause(timer);
             sl_bt_ask_poll();
             if (job != SL_BT_JOB_REFRESH && job != SL_BT_JOB_RECONNECT)
@@ -668,7 +680,13 @@ static void sl_bt_job_cb(lv_timer_t *timer)
     }
     if (result.job != SL_BT_JOB_SCAN)
     {
-        if (result.job != SL_BT_JOB_SCAN_FINISH) { sl_bt_state = result.state; sl_bt_known = true; sl_bt_silent = false; }
+        if (result.job != SL_BT_JOB_SCAN_FINISH)
+        {
+            /* answering again after a silence: the headphones are looked for as usual */
+            bool back = sl_bt_silent && result.state.enabled && !result.state.routed;
+            sl_bt_state = result.state; sl_bt_known = true; sl_bt_silent = false;
+            if (back) { sl_log("bluetooth: answering again"); sl_bt_rc_arm("Bluetooth answering again"); }
+        }
         sl_bt_count = result.count < 0 ? 0 : result.count;
         if (sl_bt_count > HIBY_BT_MAX_DEVICES) sl_bt_count = HIBY_BT_MAX_DEVICES;
         memcpy(sl_bt_found, result.devices, sl_bt_count * sizeof sl_bt_found[0]);
@@ -703,12 +721,14 @@ static void sl_bt_begin(int job, const char *message)
     sl_bt_job_gen++;
     if (sl_bt_busy_label && job != SL_BT_JOB_REFRESH && message[0]) lv_label_set_text(sl_bt_busy_label, message);
     if (sl_bt_switch) lv_obj_add_state(sl_bt_switch, LV_STATE_DISABLED);
+    __sync_fetch_and_add(&sl_bt_workers, 1);
 #if defined(HIBY_LINUX) && !defined(SIMULATOR)
     pthread_t thread;
     if (pthread_create(&thread, NULL, sl_bt_worker, NULL) == 0)
         pthread_detach(thread);
     else
     {
+        __sync_fetch_and_sub(&sl_bt_workers, 1);
         sl_bt_busy = false;
         sl_bt_job = SL_BT_JOB_NONE;
         toast_warn("Could not start Bluetooth task. Please retry.");
@@ -951,6 +971,30 @@ static void sl_bt_rc_arm(const char *why)
     if (!sl_bt_rc_timer) sl_bt_rc_timer = lv_timer_create(sl_bt_rc_tick, 1000, NULL);
     lv_timer_resume(sl_bt_rc_timer);
     if (sl_bt_page_obj) sl_bt_refresh_soon();
+}
+/* Silent, Bluetooth may still come back on its own (BlueZ busy for
+ * minutes, then answering): a quiet look after 30 s, then 60, 120 and
+ * 240, at most every 5 minutes; only with no job and no let-go worker
+ * still running, so looks never pile up on a hung stack. */
+#define SL_BT_SILENT_FIRST_MS 30000
+#define SL_BT_SILENT_MAX_MS 300000
+static lv_timer_t *sl_bt_silent_timer;
+static uint32_t sl_bt_silent_next, sl_bt_silent_wait;
+static void sl_bt_silent_tick(lv_timer_t *t)
+{
+    if (!sl_bt_silent) { lv_timer_pause(t); return; }
+    if (sl_bt_busy || sl_bt_scanning || sl_btrx_on || sl_bt_workers > 0) return;
+    if ((int32_t)(lv_tick_get() - sl_bt_silent_next) < 0) return;
+    sl_log("bluetooth: still not answering, looking again (every %lu s now)", (unsigned long)(sl_bt_silent_wait / 1000));
+    sl_bt_begin(SL_BT_JOB_REFRESH, "");
+}
+static void sl_bt_silent_arm(bool again)
+{
+    sl_bt_silent_wait = !again ? SL_BT_SILENT_FIRST_MS :
+                        sl_bt_silent_wait * 2 > SL_BT_SILENT_MAX_MS ? SL_BT_SILENT_MAX_MS : sl_bt_silent_wait * 2;
+    sl_bt_silent_next = lv_tick_get() + sl_bt_silent_wait;
+    if (!sl_bt_silent_timer) sl_bt_silent_timer = lv_timer_create(sl_bt_silent_tick, 1000, NULL);
+    lv_timer_resume(sl_bt_silent_timer);
 }
 static void sl_bt_rc_disarm(const char *why)
 {

@@ -1008,11 +1008,37 @@ static FORCE_INLINE void prepare_block(struct thread_entry *current,
  * INTERNAL: Intended for use by kernel and not programs.
  *---------------------------------------------------------------------------
  */
+#if defined(HAVE_SLOPPY_UI) && (CONFIG_PLATFORM & PLATFORM_HOSTED)
+#include <time.h>
+/* The longest any thread ran before giving the core back since the player
+ * last cleared it, and its name: a late wait in the player's log then says
+ * which of its threads held on, or that none did (the system, not us). */
+volatile unsigned long thread_longest_run_us;
+const char * volatile thread_longest_run_name;
+static unsigned long long thread_run_from_us;
+static unsigned long long thread_now_us(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1000000ULL + t.tv_nsec / 1000;
+}
+#endif
+
 void switch_thread(void)
 {
     const unsigned int core = CURRENT_CORE;
     struct core_entry *corep = __core_id_entry(core);
     struct thread_entry *thread = corep->running;
+#if defined(HAVE_SLOPPY_UI) && (CONFIG_PLATFORM & PLATFORM_HOSTED)
+    unsigned long long switch_us = thread_now_us();
+    bool idled = false;
+    if (thread && thread_run_from_us &&
+        switch_us - thread_run_from_us > thread_longest_run_us)
+    {
+        thread_longest_run_us = switch_us - thread_run_from_us;
+        thread_longest_run_name = thread->name;
+    }
+#endif
 
     if (thread)
     {
@@ -1047,6 +1073,9 @@ void switch_thread(void)
 
         /* Enter sleep mode to reduce power usage */
         RTR_UNLOCK(corep);
+#if defined(HAVE_SLOPPY_UI) && (CONFIG_PLATFORM & PLATFORM_HOSTED)
+        idled = true;
+#endif
         core_sleep(IF_COP(core));
 
         /* Awakened by interrupt or other CPU */
@@ -1101,6 +1130,9 @@ void switch_thread(void)
 
 #ifdef RB_PROFILE
     profile_thread_started(THREAD_ID_SLOT(thread->id));
+#endif
+#if defined(HAVE_SLOPPY_UI) && (CONFIG_PLATFORM & PLATFORM_HOSTED)
+    thread_run_from_us = idled ? thread_now_us() : switch_us;   /* time asleep is nobody's */
 #endif
 
     /* And finally, give control to the next thread. */

@@ -81,13 +81,42 @@ static void lag_pass(uint32_t ms, const char *step, uint32_t step_ms)
     sl_log("lag: %u ms pass, %u ms in %s, doing %s; %s, %ld KiB free", (unsigned)ms, (unsigned)step_ms, step,
            sl_doing, lag_audio_now(a, sizeof a), sl_mem_available_kb());
 }
+/* What held a wait up: the thread of ours that ran longest without giving
+ * the core back (the kernel keeps it), the player's own CPU time and the
+ * pages it had to read back in. A long wait with no long thread and little
+ * CPU of ours was the system: other programs, or memory being found. */
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+#include <sys/resource.h>
+extern volatile unsigned long thread_longest_run_us;
+extern const char * volatile thread_longest_run_name;
+static struct rusage lag_ru;
+static void lag_wait_begin(void)
+{
+    thread_longest_run_us = 0;
+    getrusage(RUSAGE_SELF, &lag_ru);
+}
+static void lag_wait_why(char *b, size_t n)
+{
+    struct rusage ru;
+    getrusage(RUSAGE_SELF, &ru);
+    long cpu_us = (ru.ru_utime.tv_sec - lag_ru.ru_utime.tv_sec + ru.ru_stime.tv_sec - lag_ru.ru_stime.tv_sec) * 1000000L
+                  + ru.ru_utime.tv_usec - lag_ru.ru_utime.tv_usec + ru.ru_stime.tv_usec - lag_ru.ru_stime.tv_usec;
+    const char *who = thread_longest_run_name;
+    snprintf(b, n, " (longest turn: '%s' %lu ms; the player's CPU %ld ms, %ld pages read back)",
+             who ? who : "?", thread_longest_run_us / 1000, cpu_us / 1000, ru.ru_majflt - lag_ru.ru_majflt);
+}
+#else
+static void lag_wait_begin(void) {}
+static void lag_wait_why(char *b, size_t n) { (void)n; b[0] = '\0'; }
+#endif
 /* a wait the player's other threads (the music, the database) overran */
 static void lag_wait(uint32_t asked_ms, uint32_t slept_ms)
 {
     if (slept_ms <= asked_ms + LAG_MS || !lag_on() || !lag_room()) return;
-    char a[32];
-    sl_log("lag: asked to wait %u ms, the music's threads held on for %u, doing %s; %s", (unsigned)asked_ms,
-           (unsigned)slept_ms, sl_doing, lag_audio_now(a, sizeof a));
+    char a[32], why[128];
+    lag_wait_why(why, sizeof why);
+    sl_log("lag: asked to wait %u ms, the music's threads held on for %u%s, doing %s; %s", (unsigned)asked_ms,
+           (unsigned)slept_ms, why, sl_doing, lag_audio_now(a, sizeof a));
 }
 #if defined(HIBY_LINUX) && !defined(SIMULATOR)
 unsigned int pcm_alsa_get_rate(void);

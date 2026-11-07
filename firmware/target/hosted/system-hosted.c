@@ -223,9 +223,15 @@ void power_off(void)
     button_close_device();
     sync();
     card_park();
-    run_halt("/sbin/poweroff");
 #ifdef HAVE_SHUTDOWN_WATCHDOG
-    kernel_reboot_fallback(RB_POWER_OFF);
+    /* Straight to the kernel, as before d989da7cbb: switched off through
+     * init's shutdown, the R1 no longer started when plugged into a
+     * computer (a tester, 7 Nov); switched off this way it does. Restart
+     * still goes through init. */
+    sync();
+    reboot(RB_POWER_OFF);
+#else
+    run_halt("/sbin/poweroff");
 #endif
     while (1) {
         // Make sure we're not throttling the cpu

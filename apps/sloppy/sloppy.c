@@ -9279,6 +9279,7 @@ static void sloppy_run(void)
             yield();
         else
         {
+            lag_wait_begin();
             uint64_t wait_from = sl_perf_now_us();
             long btn = sl_flip_key(button_get_w_tmo((int)ticks));
             uint64_t waited = sl_perf_now_us() - wait_from;

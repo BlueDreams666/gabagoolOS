@@ -27,6 +27,7 @@
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"   /* ucontext: still works on macOS */
 #include <time.h>
 #include <stdbool.h>
+#include <errno.h>
 /* the slow card's clock: the time its lookups take, counted, not slept,
  * so the step's 20 ms share is measured as the R1 would see it */
 static bool card_clock;
@@ -103,7 +104,14 @@ unsigned sleep(unsigned t) { (void)t; if (in_art) to_ui(); else ui_wait(); retur
 static char root[256];
 const char *sl_net_card_root(void) { return root; }   /* "Set as wallpaper" reads the card by its real path */
 static int open_fds, card_ms;
-static void card(void) { if (card_ms && !in_art) card_us += card_ms * 1000; }
+/* a busy card under memory pressure: now and then one lookup takes this long (a test R1: 100-485 ms "in covers") */
+static int spike_every, spike_ms, card_lookups;
+static void card(void)
+{
+    if (!card_ms || in_art) return;
+    card_lookups++;
+    card_us += (spike_every && card_lookups % spike_every == 0 ? spike_ms : card_ms) * 1000LL;
+}
 static const char *at(const char *p, char *b) { if (!strncmp(p, "/.rockbox", 9)) { snprintf(b, 512, "%s%s", root, p); return b; } return p; }
 int sim_open(const char *p, int f, ...) { char b[512]; card(); int fd = open(at(p,b), f, 0666); if (fd >= 0) open_fds++; return fd; }
 int sim_close(int fd) { open_fds--; return close(fd); }
@@ -286,6 +294,126 @@ static void big_library(void)
     card_ms = 0; card_clock = false;
 }
 
+/* The walk's lookups on a slow card: a boot with 1,724 covers all made (a
+ * test R1's library), every lookup 20 ms, then one in 50 of the UI's taking
+ * 400 ms. What the UI loop is held per pass, as the R1's lag lines count it:
+ * the walk's lookups are on the finder's thread (slept there for real, not
+ * counted), so only the UI's own are. */
+static int find_ms, find_lookups;
+static bool test_find(const char *p)
+{
+    char b[512]; struct stat st;
+    __sync_fetch_and_add(&find_lookups, 1);
+    if (find_ms) usleep((useconds_t)find_ms * 1000);
+    return !stat(at(p, b), &st);
+}
+static int creates;
+static int test_create_fails_once(pthread_t *t, const pthread_attr_t *a, void *(*f)(void *), void *arg)
+{
+    size_t st = 0;
+    assert(a && pthread_attr_getstacksize(a, &st) == 0 && st == 64 * 1024);   /* the small stack asked for */
+    if (++creates == 1) return EAGAIN;
+    return pthread_create(t, a, f, arg);
+}
+static void slow_card_walk(int lookup_ms, int every, int every_ms)
+{
+    N = 1724; rows = 4; scanner = false;
+    library();
+    fresh();
+    card_ms = 0;
+    big_run(400000);                       /* every cover made, on a quick card */
+    assert(made_all() == N);
+    sl_art_reset();
+    art_find_exists = test_find; find_ms = lookup_ms; find_lookups = 0;
+    card_ms = lookup_ms; spike_every = every; spike_ms = every_ms; card_lookups = 0; card_clock = true;
+    long long sum0 = card_us;
+    worst_step = 0;
+    long w0 = now_ms();
+    int passes = 0;
+    bool prefer_checked = false, reload_checked = false;
+    for (bool more = true; passes < 400000 && (more || sl_art_busy()); passes++)
+    {
+        long long t0 = card_us;
+        more = sl_art_step();
+        long ms = (long)((card_us - t0) / 1000);
+        if (ms > worst_step) worst_step = ms;
+        art_slice();
+        usleep(2000);                      /* the rest of a UI pass */
+        /* mid-walk, Cover Flow's neighbour with a cover gone: made at once, never a placeholder */
+        if (!prefer_checked && next_album > N / 3 && fj_state() == 1)
+        {
+            prefer_checked = true;
+            int x = N - 3;
+            char path[600]; card_ms = 0;
+            thumb_path(path, sizeof path, x, SL_ART_GRID);
+            char real[700]; snprintf(real, sizeof real, "%s%s", root, path); remove(real);
+            sl_art_again(x);
+            card_ms = lookup_ms;
+            sl_art_step();
+            assert(aj.album == x && aj.state != AJ_IDLE);
+            while (sl_art_busy()) { art_slice(); sl_art_step(); }
+            card_ms = 0; assert(sl_art_src(x, SL_ART_GRID)); card_ms = lookup_ms;
+        }
+    }
+    long long held = card_us - sum0;
+    printf("slow card walk: %d made covers, %d ms a lookup%s: %d passes, %d of %d albums walked, the UI loop held %ld ms at worst, %.2f ms a pass on average, %d lookups on the UI loop, %d on the finder's thread (walk %ld s)\n",
+           N, lookup_ms, every ? ", one in 50 at 400 ms" : "", passes, next_album, N, worst_step,
+           passes ? held / 1000.0 / passes : 0.0, card_lookups, find_lookups, (now_ms() - w0) / 1000);
+    assert(!sl_art_busy() && next_album == N && prefer_checked);
+    for (int a = 0; a < N; a++) assert(sl_art_state(a) == 1);   /* every album known made */
+    assert(worst_step <= STEP_MAX_MS);
+    /* a library reload with a batch under way: it stops, nothing of it lands on the new library */
+    if (every)
+    {
+        sl_art_reset();
+        sl_art_step();
+        assert(fj_state() == 1);
+        N = 10; library();
+        sl_art_invalidate_cache(); sl_art_reset();
+        assert(fj_state() == 0 && next_album == 0 && !attempted);
+        for (int i = 0; i < 2000 && (sl_art_step() || sl_art_busy()); i++) { art_slice(); usleep(2000); }
+        assert(next_album == N && attempted_count == N);
+        reload_checked = true;
+        printf("PASS: a library reload with the finder's batch under way: stopped, nothing stale kept\n");
+    }
+    (void)reload_checked;
+    /* no thread to be had once: the UI walks itself meanwhile, and 30 s on the thread is tried again and used */
+    if (every)
+    {
+        find_ms = 0;
+        N = 1724; sl_lib.n_tracks = N; sl_lib.n_albums = N;   /* back to the big library */
+        art_find_exists = NULL; card_ms = 0;                     /* its covers moved into the reload's generation */
+        sl_art_reset(); big_run(400000);
+        /* and without the finder, on the 20 ms card: one size a step, never the same one again */
+        sl_art_reset(); card_ms = 20; worst_step = 0;
+        int sync_passes = big_run(400000);
+        assert(next_album == N);
+        printf("PASS: without the finder, a 20 ms card: the UI walked all %d in %d passes, at most %ld ms each (it never got past the first before)\n",
+               N, sync_passes, worst_step);
+        assert(worst_step <= every_ms);   /* one lookup at most: a spike itself, never two */
+        art_find_exists = test_find; card_ms = 2;
+        sl_art_reset();
+        find_create = test_create_fails_once; creates = 0;
+        sl_art_step();
+        assert(creates == 1 && find_failed && fj_state() == 0);
+        int ui0 = card_lookups;
+        for (int i = 0; i < 20; i++) { sl_art_step(); art_slice(); }
+        assert(card_lookups > ui0 && creates == 1 && next_album > 0);   /* the UI looked itself, no new try yet */
+        card_us += 31000LL * 1000;                                       /* 30 s on */
+        int walked = next_album;
+        sl_art_step();
+        assert(creates == 2 && !find_failed && fj_state() != 0);        /* the thread again */
+        int ui1 = card_lookups;
+        for (int i = 0; i < 400000 && (sl_art_step() || sl_art_busy()); i++) { art_slice(); usleep(200); }
+        assert(next_album == N && walked < N && card_lookups - ui1 == 0);
+        printf("PASS: no thread for the walk once: the UI looked itself (%d albums), and 30 s later the thread walked the other %d with %d lookups on the UI\n",
+               walked, N - walked, card_lookups - ui1);
+        find_create = pthread_create;
+    }
+    art_find_exists = NULL; find_ms = 0;
+    card_ms = 0; spike_every = 0; card_clock = false;
+}
+
 int main(void)
 {
     snprintf(root, sizeof root, "/tmp/art-loop-%d", (int)getpid());
@@ -343,6 +471,8 @@ int main(void)
            "on the cover thread %d covers, the loop at most %ld ms apart\n", inline_ms, N, worst);
     printf("PASS: a library reload and USB mode mid-cover: nothing stale written, no file left open\n");
     big_library();
+    slow_card_walk(20, 0, 0);
+    slow_card_walk(20, 50, 400);
     snprintf(b, sizeof b, "rm -rf %s", root); system(b);
     return 0;
 }

@@ -80,6 +80,9 @@ static bool bt_is_enabled(void);
 #define BT_SYS_PATH "/sys/class/bluetooth"
 #define BT_DEBUG_LOG_FILE "/data/mnt/sd_0/rockbox-bt-debug.log"
 #define BT_FALLBACK_LOG_FILE ROCKBOX_DIR "/sloppy/bluetooth.log"
+#ifndef BT_SCRIPT_DIR
+#define BT_SCRIPT_DIR "/usr/bin/"   /* HiBy's bt_suspend and bt_resume (the tests' own fakes) */
+#endif
 
 const int BT_REMOTE_INPUT_IDX = 4;
 
@@ -148,12 +151,19 @@ void hiby_debug_log(const char *format, ...)
     int fd;
     int len;
 
+    /* the system's uptime, as usb-trace.txt has it: the lines of one
+     * boot can be told from the next, and matched with sloppy.log */
+    struct timespec up;
+    clock_gettime(CLOCK_MONOTONIC, &up);
+    int stamp = snprintf(line, sizeof(line), "[up %8ld.%03ld] ", (long)up.tv_sec, up.tv_nsec / 1000000);
+
     va_start(ap, format);
-    len = vsnprintf(line, sizeof(line) - 1, format, ap);
+    len = vsnprintf(line + stamp, sizeof(line) - 1 - stamp, format, ap);
     va_end(ap);
 
     if (len < 0)
         return;
+    len += stamp;
     if (len >= (int)sizeof(line) - 1)
         len = sizeof(line) - 2;
     line[len++] = '\n';
@@ -441,7 +451,7 @@ bool bt_is_routed_fast(void)
 
 static void bt_suspend(void)
 {
-    bt_system("/usr/bin/bt_suspend");
+    bt_system(BT_SCRIPT_DIR "bt_suspend");
 }
 
 static const char *bt_make_bt_playback_dev(const char *mac, const char *codec)
@@ -1370,6 +1380,35 @@ static void bt_stack_ready(void)
         bt_source_restart();
 }
 
+static void bt_resume_script(void)
+{
+    hiby_debug_log("stack: resuming controller");
+    /* about 13 s of its own sleeps and the firmware: a kill midway would
+     * take the daemons it started with it (they share its group) */
+    int resume_status = bt_system_for(BT_SCRIPT_DIR "bt_resume", 40000);
+    if (resume_status != 0)
+        hiby_debug_log("stack: bt_resume returned %d; checking controller", resume_status);
+}
+
+/* bt_resume starts the controller asynchronously. Wait for it instead of
+ * treating the first not-ready reply as a permanent failure. */
+static bool bt_wait_controller(void)
+{
+    for (int attempt = 0; attempt < 30; attempt++)   /* about 15 s: firmware load */
+    {
+        if (bt_enable())
+        {
+            hiby_debug_log("stack: controller ready after %d retries", attempt);
+            bt_remember_boot_on();
+            bt_stack_ready();
+            if (!bt_embedded_ui) splash(0, ID2P(LANG_BT_DONE));
+            return true;
+        }
+        bt_sleep(HZ / 2);
+    }
+    return false;
+}
+
 static bool bt_prepare_stack(void)
 {
     /* Powering on while bt_init still loads the chip's firmware fails, and
@@ -1392,27 +1431,40 @@ static bool bt_prepare_stack(void)
     if (bt_aic_gate())
         bt_aic_start();   /* synchronous: firmware download, UART attach, adapter on */
     else
-    {
-        hiby_debug_log("stack: resuming controller");
-        int resume_status = bt_system("/usr/bin/bt_resume");
-        if (resume_status != 0)
-            hiby_debug_log("stack: bt_resume returned %d; checking controller", resume_status);
-    }
-    /* bt_resume starts the controller asynchronously. Wait for it instead
-     * of treating the first not-ready reply as a permanent failure. */
-    for (int attempt = 0; attempt < 30; attempt++)   /* about 15 s: firmware load */
-    {
-        if (bt_enable())
-        {
-            hiby_debug_log("stack: controller ready after %d retries", attempt);
-            bt_remember_boot_on();
-            bt_stack_ready();
-            if (!bt_embedded_ui) splash(0, ID2P(LANG_BT_DONE));
-            return true;
-        }
-        bt_sleep(HZ / 2);
-    }
+        bt_resume_script();
+    if (bt_wait_controller())
+        return true;
     hiby_debug_log("stack: controller not ready after resume");
+    if (bt_aic_gate())
+        return false;
+
+    /* Still refused, with the old stack up (a power-off that hung, then a
+     * forced reset: a test R1, 5 Nov, still refused after the next boot).
+     * bt_resume over a live stack does not reset the chip: rfkill is on
+     * already, and a second brcm_patchram_plus fights the first for
+     * ttyS0. HiBy's own player only ever runs the two scripts as a pair:
+     * bt_suspend (adapter down, bluetoothd, patchram, bluealsa and D-Bus
+     * stopped, chip off through rfkill), then bt_resume (all of it up
+     * again, as bt_init does at boot). Only after the plain bt_resume
+     * failed: off at boot, 2.0's boot menu leaves the daemons up and the
+     * plain one is all it needs. bt_resume always follows, so nothing is
+     * left half down; never while the music goes out over Bluetooth, as
+     * bt_suspend stops bluealsa. */
+    if (bt_system("pgrep -x bluetoothd > /dev/null 2>&1 || "
+                  "pgrep -f '[b]rcm_patchram_plus' > /dev/null 2>&1") != 0)
+        return false;
+    if (hiby_pcm_get_bt_mac())
+    {
+        hiby_debug_log("stack: still refused with the music on Bluetooth: not restarted");
+        return false;
+    }
+    hiby_debug_log("stack: still refused with the old stack up: bt_suspend, then bt_resume");
+    bt_suspend();
+    bt_ready_done = false;               /* a new bluetoothd: names and BlueALSA again */
+    bt_resume_script();
+    if (bt_wait_controller())
+        return true;
+    hiby_debug_log("stack: controller not ready after bt_suspend and bt_resume");
     return false;
 }
 
