@@ -2406,7 +2406,7 @@ T = [
 ('Make a bug report', 'Crear un informe de error', 'Créer un rapport de bug', 'Fehlerbericht erstellen', 'יצירת דוח באג'),
 ('A file on the card for a GitHub issue', 'Un archivo en la tarjeta para una incidencia en GitHub', 'Un fichier sur la carte pour un ticket GitHub', 'Eine Datei auf der Karte für ein GitHub-Issue', 'קובץ בכרטיס עבור דיווח ב-GitHub'),
 ('Record lag', 'Registrar retrasos', 'Enregistrer les ralentissements', 'Ruckler aufzeichnen', 'תיעוד האטות'),
-('For a day, every slow moment and audio dropout goes in the log', 'Durante un día, cada momento lento y cada corte de audio se anotan en el registro', 'Pendant une journée, chaque ralentissement et chaque coupure du son sont notés dans le journal', 'Einen Tag lang kommt jeder langsame Moment und jeder Tonaussetzer ins Protokoll', 'במשך יום, כל רגע איטי וכל הפסקה בשמע נרשמים ביומן'),
+('Every slow moment and audio dropout goes in the log', 'Cada momento lento y cada corte de audio se anotan en el registro', 'Chaque ralentissement et chaque coupure du son sont notés dans le journal', 'Jeder langsame Moment und jeder Tonaussetzer kommt ins Protokoll', 'כל רגע איטי וכל הפסקה בשמע נרשמים ביומן'),
 ('Bug report saved on the card: %s', 'Informe de error guardado en la tarjeta: %s', 'Rapport de bug enregistré sur la carte : %s', 'Fehlerbericht auf der Karte gespeichert: %s', 'דוח הבאג נשמר בכרטיס: %s'),
 ('The bug report could not be saved', 'No se pudo guardar el informe de error', "Le rapport de bug n'a pas pu être enregistré", 'Der Fehlerbericht konnte nicht gespeichert werden', 'לא ניתן היה לשמור את דוח הבאג'),
 ('Download bug report', 'Descargar informe de error', 'Télécharger le rapport de bug', 'Fehlerbericht herunterladen', 'הורדת דוח באג'),
@@ -2414,6 +2414,9 @@ T = [
 ('Stop the music and open', 'Detener la música y abrir', 'Arrêter la musique et ouvrir', 'Musik stoppen und öffnen', 'לעצור את המוזיקה ולפתוח'),
 ('Double tap to wake', 'Doble toque para activar', 'Toucher deux fois pour réveiller', 'Zum Aufwecken doppeltippen', 'הקשה כפולה להערה'),
 ('Not answering · Tap to retry', 'No responde · Toca para reintentar', 'Ne répond pas · Touchez pour réessayer', 'Antwortet nicht · Tippen zum Wiederholen', 'לא מגיב · הקשה לניסיון חוזר'),
+('Not enough memory to open this right now.', 'No hay memoria suficiente para abrir esto ahora.', 'Mémoire insuffisante pour ouvrir ceci maintenant.', 'Nicht genug Speicher, um das jetzt zu öffnen.', 'אין מספיק זיכרון כדי לפתוח את זה כרגע.'),
+('Hold sideways', 'Sujetar de lado', "Tenir à l'horizontale", 'Quer halten', 'החזקה לרוחב'),
+('The volume keys are left and right. Play is A, Next is B.', 'Las teclas de volumen son izquierda y derecha. Reproducir es A, Siguiente es B.', 'Les touches de volume font gauche et droite. Lecture est A, Suivant est B.', 'Die Lautstärketasten sind links und rechts. Wiedergabe ist A, Weiter ist B.', 'מקשי עוצמת הקול הם שמאלה וימינה. הפעלה היא A, הבא הוא B.'),
 ]
 
 

@@ -620,6 +620,9 @@ static void NORETURN_ATTR usb_thread(void)
                 usb_slave_mode(false);
             USB_TRACE("usb thread: unplugged (%s, %d answers outstanding)",
                       usb_state == USB_INSERTED ? "in USB mode" : "USB mode never began", usb_num_acks_to_expect);
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+            usb_trace_flush();          /* on the card now: a hang after it left no trace (Nov 9, 10) */
+#endif
 
             usb_state = USB_EXTRACTED;
 #ifdef HAVE_USB_POWER

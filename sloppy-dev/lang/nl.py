@@ -2373,7 +2373,7 @@ NL = {
 'Make a bug report': 'Foutrapport maken',
 'A file on the card for a GitHub issue': 'Een bestand op de kaart voor een GitHub-issue',
 'Record lag': 'Haperingen vastleggen',
-'For a day, every slow moment and audio dropout goes in the log': 'Een dag lang komt elk traag moment en elke geluidsonderbreking in het logboek',
+'Every slow moment and audio dropout goes in the log': 'Elk traag moment en elke geluidsonderbreking komt in het logboek',
 'Bug report saved on the card: %s': 'Foutrapport op de kaart opgeslagen: %s',
 'The bug report could not be saved': 'Het foutrapport kon niet worden opgeslagen',
 'Download bug report': 'Foutrapport downloaden',
@@ -2381,4 +2381,7 @@ NL = {
 'Stop the music and open': 'Muziek stoppen en openen',
 'Double tap to wake': 'Dubbeltik om te activeren',
 'Not answering · Tap to retry': 'Reageert niet · Tik om opnieuw te proberen',
+'Hold sideways': 'Dwars vasthouden',
+'The volume keys are left and right. Play is A, Next is B.': 'De volumetoetsen zijn links en rechts. Afspelen is A, Volgende is B.',
+'Not enough memory to open this right now.': 'Niet genoeg geheugen om dit nu te openen.',
 }

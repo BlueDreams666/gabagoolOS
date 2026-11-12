@@ -29,6 +29,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/mount.h>
+#include <pthread.h>
 #include <string.h>
 #include <unistd.h>
 #include "config.h"
@@ -458,8 +459,59 @@ static bool card_retrying;               /* this connect's handover failed: usb_
 #define USB_TRACE_OFF       "/tmp/usb-trace.off"     /* how much of it is on the card already */
 #define USB_TRACE_CARD      PIVOT_ROOT "/.rockbox/sloppy/usb-trace.txt"
 #define USB_TRACE_CARD_PREV PIVOT_ROOT "/.rockbox/sloppy/usb-trace.prev.txt"
+#define USB_TRACE_FLASH     "/usr/data/gabagool-usb-trace.txt"
+#define USB_TRACE_CARD_FLASH PIVOT_ROOT "/.rockbox/sloppy/usb-trace-flash.txt"
 #endif
 #define USB_TRACE_MAX       (128 * 1024)              /* the card's copy, before it starts over */
+#define USB_TRACE_FLASH_MAX (16 * 1024)
+/* While the card is the computer's, each line also goes to the R1's own
+ * flash, synced at once: the RAM copy is lost when a hang ends in a
+ * reboot, and after a long USB session a test R1 hung where only RAM was
+ * left to say why (Nov 10). One session's worth, started over at each
+ * handover; copied onto the card at the next start. */
+static bool usb_trace_flash_on;
+static void usb_trace_to_flash(const char *b, int n)
+{
+#ifdef USB_TRACE_FLASH
+    if (!card_off)
+    {
+        usb_trace_flash_on = false;
+        return;
+    }
+    int flags = O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | (usb_trace_flash_on ? 0 : O_TRUNC);
+    usb_trace_flash_on = true;
+    int fd = openat(AT_FDCWD, USB_TRACE_FLASH, flags, 0644);
+    if (fd < 0)
+        return;
+    struct stat st;
+    if (fstat(fd, &st) == 0 && st.st_size < USB_TRACE_FLASH_MAX && write(fd, b, n) == n)
+        fdatasync(fd);
+    close(fd);
+#else
+    (void)b; (void)n;
+#endif
+}
+/* the last USB session's flash lines onto the card, once */
+static void usb_trace_flash_keep(void)
+{
+#ifdef USB_TRACE_FLASH
+    int in = openat(AT_FDCWD, USB_TRACE_FLASH, O_RDONLY | O_CLOEXEC);
+    if (in < 0)
+        return;
+    int out = openat(AT_FDCWD, USB_TRACE_CARD_FLASH, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+    char b[4096];
+    ssize_t got;
+    while (out >= 0 && (got = read(in, b, sizeof b)) > 0 && write(out, b, got) == got)
+        ;
+    close(in);
+    if (out >= 0)
+    {
+        close(out);
+        unlinkat(AT_FDCWD, USB_TRACE_FLASH, 0);
+    }
+#endif
+}
+
 static volatile bool usb_trace_dirty = true;          /* a run before this one may have left lines */
 
 void usb_trace(const char *fmt, ...)
@@ -480,6 +532,7 @@ void usb_trace(const char *fmt, ...)
     if (n > (int)sizeof b - 2)
         n = sizeof b - 2;
     b[n++] = '\n';
+    usb_trace_to_flash(b, n);
     int fd = openat(AT_FDCWD, USB_TRACE_RAM, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
     if (fd < 0)
         return;
@@ -839,7 +892,14 @@ static int card_umount(void)
         card_note("let go of folders still open on the card: ", card_let_go);
         usb_trace("handover: let go of folders on the card: %s", card_let_go);
     }
+    /* each on the card before it starts: a handover with music playing
+     * over Bluetooth stopped the player for good after "unmounting" (a
+     * test R1, 10 Nov), and nothing said which call held it */
+    usb_trace("handover: sync");
+    usb_trace_flush();
     sync();
+    usb_trace("handover: umount");
+    usb_trace_flush();
     return umount(PIVOT_ROOT) == 0 ? 0 : errno;
 }
 const char *usb_card_busy_files(void)
@@ -1034,6 +1094,39 @@ void usb_enable(bool on)
         usb_trace("enable: gadget %s (UDC %s)", bound ? "bound" : "NOT bound", udc_state_now());
 }
 
+/* Emptying the LUN takes the mass-storage driver's lock, which a command
+ * the computer left in flight when the cable came out can hold for good:
+ * after a long USB session a test R1 froze right here, every Rockbox
+ * thread with it (one OS thread), Nov 10. The write goes on a thread of
+ * its own; past 3 s the player stops waiting, and the mount says busy. */
+static volatile bool lun_let_go;
+static void *lun_release_thread(void *arg)
+{
+    (void)arg;
+    sysfs_set_string(CARD_LUN_FILE, "\n");   /* a bare "" writes nothing: the medium would stay */
+    lun_let_go = true;
+    return NULL;
+}
+static bool lun_release_bounded(void)
+{
+    lun_let_go = false;
+    pthread_t t;
+    pthread_attr_t a;
+    pthread_attr_init(&a);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&a, 64 * 1024);
+    int rc = pthread_create(&t, &a, lun_release_thread, NULL);
+    pthread_attr_destroy(&a);
+    if (rc)
+    {
+        sysfs_set_string(CARD_LUN_FILE, "\n");
+        return true;
+    }
+    for (int waited = 0; !lun_let_go && waited < 3 * HZ; waited += HZ / 20)
+        sleep(HZ / 20);
+    return lun_let_go;
+}
+
 /* This is called by usb thread after usb extract in order to return
  * regular FS access
  *
@@ -1058,10 +1151,21 @@ int disk_mount_all(void)
     {
         /* take the card back from the gadget first: a mount wants the
          * device to itself, and the host may still be letting go */
-        sysfs_set_string(CARD_LUN_FILE, "\n");   /* a bare "" writes nothing: the medium would stay */
+        usb_trace("remount: the gadget lets go of the card");
+        if (!lun_release_bounded())
+            usb_trace("remount: the gadget still holds the card after 3 s; going on");
+        usb_trace("remount: mounting");
         for (int tries = 0; tries < CARD_TRIES; tries++)
         {
+            /* each try timed, in the flash copy too: after a long session
+             * the remount never reported back (a test R1, Nov 11) */
+            struct timespec t0, t1;
+            clock_gettime(CLOCK_MONOTONIC, &t0);
             rc = card_mount();
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            long ms = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+            if (rc || ms > 500 || tries)
+                usb_trace("remount: try %d, errno %d after %ld ms", tries + 1, rc, ms);
             if (rc == 0)
                 break;
             sleep(HZ / 10);
@@ -1589,6 +1693,7 @@ void usb_init_device(void)
     sysfs_set_string("/sys/kernel/config/usb_gadget/adb_demo/strings/0x409/serialnumber", "0123456789ABCDEF");
     char udc[64] = "";
     sysfs_get_string(USB_GADGET_PATH "/UDC", udc, sizeof udc);
+    usb_trace_flash_keep();
     usb_trace("start: the player is up; UDC %s, gadget bound to '%s', config '%s'", udc_state_now(), udc, functions);
     typec_sink("start");
     usb_trace_flush();

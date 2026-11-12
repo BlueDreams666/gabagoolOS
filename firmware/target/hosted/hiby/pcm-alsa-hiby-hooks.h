@@ -95,6 +95,34 @@ static void hiby_pcm_finish(snd_pcm_t *pcm)
         snd_pcm_drain(pcm);
 }
 
+/* Closing a Bluetooth PCM asks BlueALSA, and with the headphones just gone
+ * the plugin can wait on them for good: a test R1 froze for 40 s and more
+ * in close_hwdev's snd_pcm_close as the route went back to the speaker
+ * (2026-11-10). Every Rockbox thread is this one OS thread, so the whole
+ * player stopped. A Bluetooth PCM is dropped and closed on its own thread;
+ * should that never return, one PCM is lost and the player plays on. */
+static void *hiby_pcm_close_thread(void *pcm)
+{
+    snd_pcm_drop(pcm);
+    snd_pcm_close(pcm);
+    return NULL;
+}
+static bool hiby_pcm_close_bt_async(snd_pcm_t *pcm)
+{
+    if (!pcm || !hiby_pcm_bt_active())
+        return false;
+    pthread_t t;
+    pthread_attr_t a;
+    pthread_attr_init(&a);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&a, 64 * 1024);
+    int rc = pthread_create(&t, &a, hiby_pcm_close_thread, pcm);
+    pthread_attr_destroy(&a);
+    if (rc)
+        hiby_debug_log("pcm: no thread to close the Bluetooth output (%d): closing here", rc);
+    return rc == 0;
+}
+
 /* ---------------------------------------- Bluetooth: never block, drop */
 /* A blocking write or start on a Bluetooth PCM waits on BlueALSA. The
  * start also runs on Rockbox threads (mixer_start_pcm from the codec), and
@@ -256,8 +284,9 @@ int pcm_alsa_switch_playback_device(const char *device)
     hiby_pcm_mutex_init_once();
     pthread_mutex_lock(&pcm_mtx);
     /* Leaving an output: what is still queued for it is not wanted there,
-     * and draining a Bluetooth PCM blocks for its whole buffer. */
-    if (!hiby_pcm_keep_hwdev(playback_dev, SND_PCM_STREAM_PLAYBACK))
+     * and draining a Bluetooth PCM blocks for its whole buffer. A Bluetooth
+     * one is dropped on its closing thread instead (close_hwdev). */
+    if (!hiby_pcm_keep_hwdev(playback_dev, SND_PCM_STREAM_PLAYBACK) && !hiby_pcm_bt_active())
         snd_pcm_drop(handle);
     open_hwdev(playback_dev, SND_PCM_STREAM_PLAYBACK);
     hiby_pcm_set_bt_output_lost(false);

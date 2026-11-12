@@ -14,16 +14,14 @@ static void sl_doing_is(const char *what, const char *detail)
     else snprintf(sl_doing, sizeof sl_doing, "%s", what);
 }
 
-/* Record lag: for a day, every main-loop pass over 50 ms, every wait the
- * music's threads overran and every audio underrun is logged with what
- * was happening, then it turns itself off. The end time is kept on the
- * card, so a restart (or a freeze and a reset) keeps it on. */
+/* Record lag: every main-loop pass over 50 ms, every wait the music's
+ * threads overran and every audio underrun is logged with what was
+ * happening. On through the beta, until it is switched off: off is a 0 in
+ * the file, kept across a restart. (It was a day at a time; a file left
+ * from then, an end time, reads as on.) */
 #define LAG_FILE ROCKBOX_DIR "/sloppy/lag-until"
 #define LAG_MS 50
-#define LAG_DAY (24 * 60 * 60)
-static long lag_until;                   /* seconds since 1970, 0: off */
-static long lag_test_now;                /* the harness: the clock, 0 the real one */
-static long lag_now(void) { return lag_test_now ? lag_test_now : (long)time(NULL); }
+static bool lag_rec = true;
 static void lag_load(void)
 {
     char b[24] = "";
@@ -31,26 +29,17 @@ static void lag_load(void)
     if (fd < 0) return;
     int n = read(fd, b, sizeof b - 1);
     close(fd);
-    if (n > 0) { b[n] = '\0'; lag_until = atol(b); }
+    if (n > 0) { b[n] = '\0'; lag_rec = atol(b) != 0; }
 }
 static void lag_set(int on)
 {
-    lag_until = on ? lag_now() + LAG_DAY : 0;
-    if (!on) { remove(LAG_FILE); sl_log("lag: recording off"); return; }
-    char b[24];
-    int n = snprintf(b, sizeof b, "%ld\n", lag_until);
+    lag_rec = on;
+    if (on) { remove(LAG_FILE); sl_log("lag: recording, every pass over %d ms and every underrun", LAG_MS); return; }
     int fd = open(LAG_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd >= 0) { write(fd, b, n); close(fd); }
-    sl_log("lag: recording for a day, every pass over %d ms and every underrun", LAG_MS);
+    if (fd >= 0) { write(fd, "0\n", 2); close(fd); }
+    sl_log("lag: recording off");
 }
-static bool lag_on(void)
-{
-    if (!lag_until) return false;
-    if (lag_now() < lag_until) return true;
-    sl_log("lag: a day is up");
-    lag_set(0);
-    return false;
-}
+static bool lag_on(void) { return lag_rec; }
 /* a few lines a second at most: a slow screen should not fill the card */
 static bool lag_room(void)
 {
@@ -140,6 +129,47 @@ static void lag_audio(void)
     sl_log("lag: %u audio underrun%s (%u in all), %u Hz, music buffer %s, doing %s; %s, %ld KiB free", d, d == 1 ? "" : "s",
            x, pcm_alsa_get_rate(), pcmbuf_is_lowdata() ? "low" : "not low", sl_doing, lag_audio_now(a, sizeof a),
            sl_mem_available_kb());
+}
+
+/* Tap to sound: from a play, a resume, a skip or a list started to the
+ * song's clock moving (it moves as the mixer plays), logged while lag is
+ * recorded. A skip waits for the new song, or a restart for the clock to
+ * go back; until then the old one is still playing. The time is an upper
+ * bound: a loop pass and 40 ms of sound late at most. */
+static struct { uint32_t at; unsigned long el, first_el; const char *what; bool skip, first; char path[MAX_PATH]; } heard;
+static void heard_ask(const char *what, bool skip)
+{
+    struct mp3entry *id3 = (audio_status() & AUDIO_STATUS_PLAY) ? audio_current_track() : NULL;
+    heard.at = sl_ms();
+    heard.what = what;
+    heard.skip = skip;
+    heard.first = false;
+    snprintf(heard.path, sizeof heard.path, "%s", id3 ? id3->path : "");
+    heard.el = id3 ? id3->elapsed : 0;
+}
+static void heard_poll(void)
+{
+    if (!heard.at) return;
+    uint32_t ms = sl_ms() - heard.at;
+    if (ms > 10000)
+    {
+        if (lag_on()) sl_log("play: no sound 10 s after %s", heard.what);
+        heard.at = 0;
+        return;
+    }
+    int st = audio_status();
+    struct mp3entry *id3 = audio_current_track();
+    if (!id3 || !(st & AUDIO_STATUS_PLAY) || (st & AUDIO_STATUS_PAUSE)) return;
+    if (heard.skip && !strcmp(id3->path, heard.path) && id3->elapsed + 1000 > heard.el) return;
+    if (!heard.first || id3->elapsed < heard.first_el)
+    {
+        heard.first = true;
+        heard.first_el = id3->elapsed;
+        return;
+    }
+    if (id3->elapsed < heard.first_el + 40) return;
+    if (lag_on()) sl_log("play: sound within %lu ms of %s", (unsigned long)ms, heard.what);
+    heard.at = 0;
 }
 
 /* ------------------------------------------------------- the scrubber */
@@ -309,7 +339,7 @@ static bool sl_report_write(char *path, size_t n)
              (unsigned long)(current_tick / HZ / 60),
              sl_mem_available_kb(), rss, peak, sl_mem_floor_kb(),
              lag_audio_now(a, sizeof a), pcm_alsa_get_rate(), pcm_alsa_get_xruns(),
-             lag_until ? "on" : "off", sl_doing);
+             lag_rec ? "on" : "off", sl_doing);
     sl_report_scrub(b, sizeof b);
     rp_put(fd, b);
     rp_file(fd, "crash.log (crashes and freezes, newest last)", ROCKBOX_DIR "/crash.log", 16 * 1024);

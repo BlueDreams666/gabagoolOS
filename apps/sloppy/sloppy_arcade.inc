@@ -17,6 +17,16 @@
  * and Next is B for jumping while the thumb holds the pad. Tap the
  * picture for the menu. Leaving, locking or a USB cable keeps the place.
  *
+ * Held sideways (the menu's switch) the four side keys are along the top,
+ * as a console's: the volume keys are left and right, Play and Next still
+ * A and B, so running and jumping take no finger off anything. The picture
+ * is turned a quarter, the same size in the middle, and the screen either
+ * side of it is up, down and Select on the left, A, B and Start on the
+ * right: Play and Next are the two ends of one rocker, which may not go
+ * down together, so B can be held on the screen while Next jumps. The
+ * menu stays upright, and with it open the volume keys are the volume's
+ * again.
+ *
  * Doom is still a classic Rockbox program; it runs outside this interface
  * and GabagoolOS comes back when it ends. */
 #include "gb/gb.h"
@@ -50,7 +60,7 @@ static struct arc_rom *arc_roms;
 static int arc_n;
 static lv_obj_t *arc_page_obj;
 static char arc_last[MAX_PATH];           /* the cartridge played last */
-static struct { int pal, fx, cc, sound; } arc_opt = { 0, 0, 1, 1 };
+static struct { int pal, fx, cc, sound, side; } arc_opt = { 0, 0, 1, 1, 0 };
 
 /* GabagoolOS's six, then the Game Boy Color's twelve (gb/palette-presets.h) */
 #define ARC_OWN_PALETTES 6
@@ -73,9 +83,10 @@ static void arc_cfg_load(void)
     close(fd);
     if (n <= 0) return;
     b[n] = 0;
-    int pal, fx, cc, sound;
-    if (sscanf(b, "ARCADE1 %d %d %d %d", &pal, &fx, &cc, &sound) == 4)
+    int pal, fx, cc, sound, side = 0;
+    if (sscanf(b, "ARCADE1 %d %d %d %d %d", &pal, &fx, &cc, &sound, &side) >= 4)   /* the fifth came with sideways */
     {
+        arc_opt.side = !!side;
         arc_opt.pal = pal >= 0 && pal < GB_PALETTES ? pal : 0;
         arc_opt.fx = fx >= 0 && fx < ARC_FX_N ? fx : 0;   /* 1 was the pixel grid's On before scanlines */
         arc_opt.cc = !!cc; arc_opt.sound = !!sound;
@@ -91,7 +102,7 @@ static void arc_cfg_load(void)
 static void arc_cfg_save(void)
 {
     char b[MAX_PATH + 96];
-    int n = snprintf(b, sizeof b, "ARCADE1 %d %d %d %d\n%s\n", arc_opt.pal, arc_opt.fx, arc_opt.cc, arc_opt.sound, arc_last);
+    int n = snprintf(b, sizeof b, "ARCADE1 %d %d %d %d %d\n%s\n", arc_opt.pal, arc_opt.fx, arc_opt.cc, arc_opt.sound, arc_opt.side, arc_last);
     mkdir(ROCKBOX_DIR "/sloppy");
     int fd = open(ARC_CFG ".tmp", O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd < 0) return;
@@ -421,6 +432,7 @@ static void arc_scan_cb(lv_event_t *e)
 enum { ARC_K_DPAD = 0x0f };
 static struct {
     lv_obj_t *page, *screen, *pad, *arm[4], *arrow[4], *hub, *btn_a, *btn_b, *btn_sel, *btn_start, *btn_menu, *note;
+    lv_obj_t *side, *side_btn[6];          /* sideways: the screen either side of the picture: up, down, Select; A, B, Start */
     uint16_t *px;                          /* the picture at three times */
     lv_timer_t *timer;
     int rom;
@@ -520,8 +532,48 @@ static void arc_sound_push(void)
 /* ---- the picture ---- */
 static inline uint16_t arc_dim(uint16_t c) { return (uint16_t)(((c >> 1) & 0x7bef) + ((c >> 2) & 0x39e7)); }   /* 3/4 */
 static inline uint16_t arc_half(uint16_t c) { return (uint16_t)((c >> 1) & 0x7bef); }
+/* Sideways the picture is turned a quarter in the same buffer, 432 wide
+ * and 480 tall on the upright panel. The player's right side (its keys)
+ * is the top: a Game Boy pixel (gx, gy) is at panel row 3 gx, column
+ * 431 - 3 gy; with the screen set upside down (Settings > Buttons) the
+ * keys are on the other side and it turns the other way. Each panel row
+ * is one Game Boy column, read down the picture. The screen's lines (the
+ * effects' third line of each pixel) are columns here. */
+static bool arc_side_cw(void) { return sl_flipped; }
+static void arc_blit_side(void)
+{
+    const uint16_t *pic = gb_picture();
+    bool cw = arc_side_cw();
+    int fx = arc_opt.fx;
+    for (int r = 0; r < GB_W; r++)
+    {
+        int gx = cw ? GB_W - 1 - r : r;
+        uint16_t *d = arc.px + r * ARC_SCALE * ARC_PIC_H;
+        const uint16_t *s = pic + gx + (cw ? 0 : (GB_H - 1) * GB_W);
+        int step = cw ? GB_W : -GB_W;
+        /* a pixel's third line across the turned picture: its first column
+         * here turned one way, its third the other */
+        int low = cw ? 2 : 0;
+        for (int k = 0; k < GB_H; k++, s += step)
+        {
+            uint16_t c = *s;
+            d[3 * k] = d[3 * k + 1] = d[3 * k + 2] = c;
+            if (fx == ARC_FX_SCAN) d[3 * k + low] = arc_half(c);
+            else if (fx == ARC_FX_GRID) d[3 * k + low] = arc_dim(c);
+        }
+        memcpy(d + ARC_PIC_H, d, ARC_PIC_H * 2);
+        memcpy(d + 2 * ARC_PIC_H, d, ARC_PIC_H * 2);
+        if (fx == ARC_FX_GRID)             /* and its third column: a whole row here */
+        {
+            uint16_t *g = d + (cw ? 0 : 2) * ARC_PIC_H;
+            for (int x = 0; x < ARC_PIC_H; x++) g[x] = arc_dim(d[ARC_PIC_H + x]);
+        }
+    }
+    lv_obj_invalidate(arc.screen);
+}
 static void arc_blit(void)
 {
+    if (arc_opt.side) { arc_blit_side(); return; }
     const uint16_t *pic = gb_picture();
     for (int y = 0; y < GB_H; y++)
     {
@@ -587,6 +639,7 @@ static void arc_keep_place(void)
 /* ---- keys: the panel under the finger, and the Play and Next keys ---- */
 static bool arc_on_top(void) { return arc.page && npages && pages[npages - 1] == arc.page; }
 static bool arc_playing(void) { return arc_on_top() && !arc.paused && gb_running(); }
+static bool arc_side_playing(void) { return arc_opt.side && arc_playing() && !overlay_visible(); }
 #define ARC_DPAD_X 116
 #define ARC_DPAD_Y (ARC_PAD_Y + 150)
 #define ARC_DPAD_R 86                       /* an arm's reach from the middle */
@@ -632,12 +685,37 @@ static unsigned arc_keys_at(int x, int y)
     }
     return 0;
 }
+/* Sideways: the long way of the screen is across, u from the left, and v
+ * down from the keys' edge. Left of the picture, from the top: up, down,
+ * Select; right of it: A, B, Start. */
+#define ARC_SIDE_BAR ((H - ARC_PIC_W) / 2)   /* 160: the screen either side of the picture */
+static const unsigned arc_side_key[6] = { GB_UP, GB_DOWN, GB_SELECT, GB_A, GB_B, GB_START };
+static void arc_side_uv(int x, int y, int *u, int *v)
+{
+    if (arc_side_cw()) { *u = H - 1 - y; *v = x; }
+    else { *u = y; *v = W - 1 - x; }
+}
+static unsigned arc_side_keys_at(int x, int y)
+{
+    int u, v;
+    arc_side_uv(x, y, &u, &v);
+    int slot = v < 180 ? 0 : v < 360 ? 1 : 2;
+    if (u < ARC_SIDE_BAR) return arc_side_key[slot];
+    if (u >= H - ARC_SIDE_BAR) return arc_side_key[3 + slot];
+    return 0;
+}
 static void arc_show_keys(void)
 {
     unsigned k = arc.touch | arc.keys;
     if (k == arc.shown) return;
     unsigned changed = k ^ arc.shown;
     arc.shown = k;
+    for (int i = 0; i < 6; i++)
+        if (arc.side_btn[i] && (changed & arc_side_key[i]))
+        {
+            if (k & arc_side_key[i]) lv_obj_add_state(arc.side_btn[i], LV_STATE_PRESSED);
+            else lv_obj_remove_state(arc.side_btn[i], LV_STATE_PRESSED);
+        }
     static const unsigned arm_key[4] = { GB_UP, GB_RIGHT, GB_DOWN, GB_LEFT };
     uint32_t acc = sl_zune() ? ZN_PINK : C_ACCENT_UI, ink = sl_theme() == 1 && !sl_zune() ? 0x43576a : 0xb3bfcb;
     for (int i = 0; i < 4; i++)
@@ -675,11 +753,29 @@ static void arc_pad_cb(lv_event_t *e)
     else arc.touch = 0;                    /* released, or the press was taken */
     arc_show_keys();
 }
-/* the R1's keys: Play is A, Next is B (their press and their release) */
+static void arc_side_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING)
+    {
+        lv_point_t pt;
+        lv_indev_get_point(lv_indev_active(), &pt);
+        arc.touch = arc_side_keys_at(pt.x, pt.y);
+    }
+    else arc.touch = 0;
+    arc_show_keys();
+}
+/* the R1's keys: Play is A, Next is B (their press and their release).
+ * Sideways the volume keys are left and right while the game runs: the
+ * upper one is the left one with the keys along the top (the right one
+ * with the screen set upside down, turned the other way). Paused, the
+ * menu open, they are the volume's. */
 static bool arcade_key(int b, bool rel)
 {
     if (!arc_on_top()) return false;
     unsigned k = b == BUTTON_LEFT ? GB_A : b == BUTTON_RIGHT ? GB_B : 0;
+    if (arc_opt.side && !arc.paused && (b == BUTTON_UP || b == BUTTON_DOWN))
+        k = (b == BUTTON_UP) != arc_side_cw() ? GB_LEFT : GB_RIGHT;
     if (!k) return b == BUTTON_PLAY || b == BUTTON_NEXT || b == BUTTON_PREV;   /* a headset's keys do nothing here */
     if (rel) arc.keys &= ~k; else arc.keys |= k;
     arc_show_keys();
@@ -925,6 +1021,15 @@ static void arc_sound_cb(lv_event_t *e)
     arc_opt_label(lv_event_get_current_target(e), "Game sound", arc_opt.sound ? "On" : "Off");
     arc_cfg_save();
 }
+static void arc_layout(void);
+static void arc_side_opt_cb(lv_event_t *e)
+{
+    arc_opt.side = !arc_opt.side;
+    arc_opt_label(lv_event_get_current_target(e), "Hold sideways", arc_opt.side ? "On" : "Off");
+    arc_cfg_save();
+    arc_layout();
+    if (arc_opt.side) toast("The volume keys are left and right. Play is A, Next is B.");
+}
 static void arc_menu_open(void)
 {
     if (!arc.page || arc.sheet) return;
@@ -959,6 +1064,8 @@ static void arc_menu_fill(void)
     arc_opt_label(lv_obj_get_child(acts, -1), "Screen effect", arc_fx_names[arc_opt.fx]);
     acts_row_cb(LV_SYMBOL_VOLUME_MAX, "Game sound", arc_sound_cb, 0);
     arc_opt_label(lv_obj_get_child(acts, -1), "Game sound", arc_opt.sound ? "On" : "Off");
+    acts_row_cb(LV_SYMBOL_LOOP, "Hold sideways", arc_side_opt_cb, 0);
+    arc_opt_label(lv_obj_get_child(acts, -1), "Hold sideways", arc_opt.side ? "On" : "Off");
     acts_row_cb(LV_SYMBOL_REFRESH, "Start over", arc_restart_cb, 0);
     acts_row_cb(LV_SYMBOL_CLOSE, "Quit game", arc_quit_cb, 0);
     acts_show();
@@ -991,6 +1098,72 @@ static lv_obj_t *arc_round(lv_obj_t *p, int cx, int cy, int w, int h, uint32_t b
     }
     return b;
 }
+/* upright or sideways: where the picture is, which controls show */
+static void arc_layout(void)
+{
+    if (!arc.page) return;
+    bool side = arc_opt.side;
+    memset(arc.px, 0, ARC_PIC_W * ARC_PIC_H * 2);
+    lv_canvas_set_buffer(arc.screen, arc.px, side ? ARC_PIC_H : ARC_PIC_W, side ? ARC_PIC_W : ARC_PIC_H, LV_COLOR_FORMAT_RGB565);
+    lv_obj_set_pos(arc.screen, side ? (W - ARC_PIC_H) / 2 : 0, side ? ARC_SIDE_BAR : ARC_PIC_Y);
+    lv_obj_set_style_bg_color(arc.page, lv_color_hex(side ? 0x000000 : arc_bg()), 0);
+    if (side) { lv_obj_add_flag(arc.pad, LV_OBJ_FLAG_HIDDEN); lv_obj_remove_flag(arc.side, LV_OBJ_FLAG_HIDDEN); }
+    else { lv_obj_remove_flag(arc.pad, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(arc.side, LV_OBJ_FLAG_HIDDEN); }
+    if (arc.note && side) lv_obj_add_flag(arc.note, LV_OBJ_FLAG_HIDDEN);   /* its words would lie on their side */
+    statusbar_show(!side);
+    arc.touch = arc.keys = 0;
+    arc_show_keys();
+    arc_blit();
+}
+/* Sideways' controls: six quiet tiles on the black either side of the
+ * picture, each lit while it is held. Their marks are turned to read
+ * with the keys along the top. */
+static void arc_side_build(lv_obj_t *pg)
+{
+    bool cw = arc_side_cw();
+    arc.side = box(pg);
+    lv_obj_set_size(arc.side, W, H);
+    lv_obj_set_pos(arc.side, 0, 0);
+    lv_obj_add_flag(arc.side, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_USER_1);
+    lv_obj_remove_flag(arc.side, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(arc.side, arc_side_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(arc.side, arc_side_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(arc.side, arc_side_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(arc.side, arc_side_cb, LV_EVENT_PRESS_LOST, NULL);
+    uint32_t acc = sl_zune() ? ZN_PINK : C_ACCENT_UI;
+    static const char *const mark[6] = { NULL, NULL, "SELECT", "A", "B", "START" };
+    static const int v_from[3] = { 20, 190, 370 }, v_to[3] = { 170, 350, 460 };
+    for (int i = 0; i < 6; i++)
+    {
+        /* across: the bar's middle 120; down: its slot of the height */
+        int u0 = (i < 3 ? 0 : H - ARC_SIDE_BAR) + 20, u1 = u0 + ARC_SIDE_BAR - 40;
+        int v0 = v_from[i % 3], v1 = v_to[i % 3];
+        lv_obj_t *t = box(arc.side);
+        arc.side_btn[i] = t;
+        lv_obj_set_size(t, v1 - v0, u1 - u0);
+        lv_obj_set_pos(t, cw ? v0 : W - v1, cw ? H - u1 : u0);
+        lv_obj_set_style_radius(t, sl_zune() ? 0 : SL_R_MD, 0);
+        lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(t, lv_color_hex(0x1c1c1e), 0);
+        lv_obj_set_style_bg_color(t, lv_color_hex(acc), LV_STATE_PRESSED);
+        lv_obj_remove_flag(t, LV_OBJ_FLAG_CLICKABLE);      /* the panel under them reads the finger */
+        lv_obj_t *l;
+        /* up is towards the keys: the arrow that points there on the upright panel */
+        if (i < 2) l = text(t, (i == 0) != cw ? LV_SYMBOL_RIGHT : LV_SYMBOL_LEFT, &sl_sym_18, 0xb3bfcb);
+        else
+        {
+            bool letter = i == 3 || i == 4;
+            l = text(t, mark[i], letter ? &ss_bold_28 : &ss_semibold_18, letter ? 0xfffffe : 0xb3bfcb);
+            if (!letter) lv_obj_set_style_text_letter_space(l, 1, 0);
+            lv_obj_update_layout(l);
+            lv_obj_set_style_transform_pivot_x(l, lv_obj_get_width(l) / 2, 0);
+            lv_obj_set_style_transform_pivot_y(l, lv_obj_get_height(l) / 2, 0);
+            lv_obj_set_style_transform_rotation(l, cw ? 2700 : 900, 0);
+        }
+        lv_obj_center(l);
+    }
+    lv_obj_add_flag(arc.side, LV_OBJ_FLAG_HIDDEN);
+}
 static void arc_rescan_async(void *ud) { (void)ud; arc_scan_cb(NULL); }
 static void arc_game_deleted(lv_event_t *e)
 {
@@ -1003,6 +1176,7 @@ static void arc_game_deleted(lv_event_t *e)
     free(arc.px);
     memset(&arc, 0, sizeof arc);
     arc.rom = -1;
+    statusbar_show(true);                  /* sideways hid it */
     statusbar_retheme();
     /* the list says where each was left, with its last picture */
     if (arc_page_obj) lv_async_call(arc_rescan_async, NULL);
@@ -1012,6 +1186,11 @@ static void arc_play(int k)
     if (k < 0 || k >= arc_n || arc.page) return;
     if (sl_btrx_on) { toast_warn("Stop receiving from your phone first"); return; }
     struct arc_rom *r = &arc_roms[k];
+    {   /* the cartridge is read whole, and the screen and state come with it */
+        struct stat st;
+        long rom_kb = stat(r->path, &st) == 0 ? (long)(st.st_size / 1024) : 0;
+        if (!sl_app_room(rom_kb + 600, "Arcade")) return;
+    }
     char base[MAX_PATH];
     arc_save_base(r->path, base, sizeof base);
     arc_cfg_load();
@@ -1117,14 +1296,18 @@ static void arc_play(int k)
     for (int i = 0; i < 2; i++)
         lv_obj_set_style_text_letter_space(lv_obj_get_child(i ? arc.btn_start : arc.btn_sel, 0), 1, 0);
 
+    arc_side_build(pg);
+    lv_obj_move_foreground(arc.screen);    /* over the sideways panel: a tap on the picture is still the menu */
+
     arc.timer = lv_timer_create(arc_tick, 8, NULL);
     arc.t0 = lv_tick_get();
     arc.stat_at = 0;
     gb_frame(0, true);
-    arc_blit();
+    if (arc_opt.side) arc_layout();
+    else arc_blit();
     page_push(pg);
     arc_sound_start();
-    if (resumed)
+    if (resumed && !arc_opt.side)       /* sideways its words would lie on their side */
     {
         /* said on the picture, where the eyes are, and gone in a moment: a
          * toast would sit over the controls */

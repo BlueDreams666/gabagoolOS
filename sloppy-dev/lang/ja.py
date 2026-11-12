@@ -2373,7 +2373,7 @@ JA = {
 'Make a bug report': 'バグレポートを作成',
 'A file on the card for a GitHub issue': 'GitHub の Issue 用にカードへ保存するファイル',
 'Record lag': 'カクつきを記録',
-'For a day, every slow moment and audio dropout goes in the log': '1日のあいだ、動作が遅れた瞬間や音切れをすべてログに記録します',
+'Every slow moment and audio dropout goes in the log': '動作が遅れた瞬間や音切れをすべてログに記録します',
 'Bug report saved on the card: %s': 'バグレポートをカードに保存しました：%s',
 'The bug report could not be saved': 'バグレポートを保存できませんでした',
 'Download bug report': 'バグレポートをダウンロード',
@@ -2381,4 +2381,7 @@ JA = {
 'Stop the music and open': '音楽を止めて開く',
 'Double tap to wake': 'ダブルタップでスリープ解除',
 'Not answering · Tap to retry': '応答なし · タップして再試行',
+'Hold sideways': '横向きで持つ',
+'The volume keys are left and right. Play is A, Next is B.': '音量キーが左右です。再生がA、次へがBです。',
+'Not enough memory to open this right now.': 'メモリが足りないため、今は開けません。',
 }

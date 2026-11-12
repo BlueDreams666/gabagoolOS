@@ -2373,7 +2373,7 @@ RU = {
 'Make a bug report': 'Создать отчёт об ошибке',
 'A file on the card for a GitHub issue': 'Файл на карте для обращения на GitHub',
 'Record lag': 'Записывать подвисания',
-'For a day, every slow moment and audio dropout goes in the log': 'В течение суток каждое подвисание и каждый провал звука попадают в журнал',
+'Every slow moment and audio dropout goes in the log': 'Каждое подвисание и каждый провал звука попадают в журнал',
 'Bug report saved on the card: %s': 'Отчёт об ошибке сохранён на карте: %s',
 'The bug report could not be saved': 'Не удалось сохранить отчёт об ошибке',
 'Download bug report': 'Скачать отчёт об ошибке',
@@ -2381,4 +2381,7 @@ RU = {
 'Stop the music and open': 'Остановить музыку и открыть',
 'Double tap to wake': 'Двойное касание для пробуждения',
 'Not answering · Tap to retry': 'Не отвечает · Нажмите для повтора',
+'Hold sideways': 'Держать горизонтально',
+'The volume keys are left and right. Play is A, Next is B.': 'Клавиши громкости — влево и вправо. Воспроизведение — A, Следующий — B.',
+'Not enough memory to open this right now.': 'Недостаточно памяти, чтобы открыть это сейчас.',
 }

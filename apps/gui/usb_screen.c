@@ -61,9 +61,17 @@ static bool usb_hid;
 
 #if defined(HIBY_R1) && !defined(SIMULATOR)
 #include "usb-hiby-gadget.h"
+#include "backlight.h"
 /* the card would not come off for the computer (a file still open): the
  * screen says so while usb_card_retry() keeps trying */
 static bool usb_card_waiting;
+/* Each step out of the USB screen, onto the card at once: after a long
+ * USB session a test R1 stayed on this screen once unplugged (the card
+ * came back, the screen never closed: Nov 7, 9 and 10), and nothing said
+ * which step held it. */
+#define USB_SCREEN_STEP(...) do { usb_trace(__VA_ARGS__); usb_trace_flush(); } while (0)
+#else
+#define USB_SCREEN_STEP(...) do { } while (0)
 #endif
 
 #ifndef SIMULATOR
@@ -101,6 +109,7 @@ static int handle_usb_events(void)
         switch(button)
         {
             case SYS_USB_DISCONNECTED:
+                USB_SCREEN_STEP("usb screen: unplugged, leaving");
                 return 1;
             case SYS_CHARGER_DISCONNECTED:
                 reset_runtime();
@@ -108,6 +117,29 @@ static int handle_usb_events(void)
             case SYS_TIMEOUT:
                 break;
         }
+#if defined(HIBY_R1) && (defined(HAVE_LCD_ENABLE) || defined(HAVE_LCD_SLEEP))
+        {   /* The picture is drawn once. Going dark clears the panel's memory,
+             * and lit again the screen stayed black (a test R1, Nov 11):
+             * drawn again whenever the LCD comes back on. */
+            static bool was_active = true;
+            bool active = lcd_active();
+            bool woke = active && !was_active;
+            was_active = active;
+            if (woke)
+                return 0;
+        }
+#endif
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+        {   /* still here, once a minute: kept in RAM, on the card once it is back */
+            static long next_alive;
+            if (TIME_AFTER(current_tick, next_alive))
+            {
+                if (next_alive)
+                    usb_trace("usb screen: still up, backlight %s", is_backlight_on(true) ? "on" : "off");
+                next_alive = current_tick + 60 * HZ;
+            }
+        }
+#endif
 #ifdef HIBY_R1
         static long next_card_try;
         if (TIME_AFTER(current_tick, next_card_try))
@@ -420,18 +452,23 @@ void gui_usb_screen_run(bool early_usb)
 
     if(!early_usb && dir_exists(ROCKBOX_DIR))
     {
+        USB_SCREEN_STEP("usb screen: fonts back");
         font_enable_all();
+        USB_SCREEN_STEP("usb screen: settings again");
         /* Not pretty, reload all settings so fonts are loaded again correctly */
         settings_apply(true);
+        USB_SCREEN_STEP("usb screen: playlist again");
         /* Reload playlist */
         playlist_resume();
     }
 
+    USB_SCREEN_STEP("usb screen: lighting the screen");
     FOR_NB_SCREENS(i)
     {
         screens[i].backlight_on();
         viewportmanager_theme_undo(i, false);
     }
+    USB_SCREEN_STEP("usb screen: closed");
 
     pop_current_activity();
 #ifdef SIMULATOR

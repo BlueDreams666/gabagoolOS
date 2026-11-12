@@ -59,11 +59,12 @@ bool hiby_pcm_is_bluealsa_device(const char *device)
 }
 
 /* Bluetooth's ring: four periods of 2048 frames (186 ms at 44.1 kHz).
- * It was eight (371 ms), started only when nearly full, and BlueALSA's
- * own FIFO and the speaker's buffer sit behind it: a second test R1 measured a
- * clip heard 1.7 s after it was asked for (2026-10-23). The ring only has
- * to ride out the poll thread's scheduling, which is a thread of its own;
- * UI stalls are covered by pcmbuf, seconds deep, ahead of the mixer. */
+ * It was eight of 2048 (371 ms), started only when nearly full, and
+ * BlueALSA's own FIFO and the speaker's buffer sit behind it: a second
+ * test R1 measured a clip heard 1.7 s after it was asked for (2026-10-23).
+ * Four of 1024 (93 ms) answered a skip ~90 ms sooner, but under a memory
+ * squeeze its poll thread fell behind: a test R1 dropped out twice in a
+ * minute (Nov 11), where 186 ms dropped once in a week. Smooth first. */
 void hiby_pcm_adjust_bt_buffering(snd_pcm_sframes_t *period_size,
                                   snd_pcm_sframes_t *buffer_size,
                                   bool bluealsa_active)
@@ -71,7 +72,6 @@ void hiby_pcm_adjust_bt_buffering(snd_pcm_sframes_t *period_size,
     if (!bluealsa_active || !period_size || !buffer_size)
         return;
 
-    *period_size *= 2;
     if (*period_size < 2048)
         *period_size = 2048;
     *buffer_size = *period_size * 4;

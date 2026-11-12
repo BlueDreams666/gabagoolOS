@@ -82,7 +82,8 @@ static int fake_mkdirat(int at, const char *p, mode_t m)
 }
 static int fake_symlinkat(const char *a, int at, const char *b) { (void)a; (void)at; (void)b; gadget_links++; link_missing = false; return 0; }
 void fake_sync(void) {}
-unsigned fake_sleep(unsigned ticks) { slept += ticks; return 0; }
+/* a moment of real time too: the LUN is emptied on a thread of its own */
+unsigned fake_sleep(unsigned ticks) { slept += ticks; usleep(200); return 0; }
 static char udc_state[32] = "not attached", lun[128] = "/dev/mmcblk0p1", udc_bound[64] = "";
 static bool power = false, state_readable = true;
 static int binds_refused, binds;         /* the kernel turning a bind down (EBUSY at close) */
@@ -100,8 +101,10 @@ bool fake_get(const char *p, char *v, int n)
     if (strstr(p, "lun.0/file")) { snprintf(v, n, "%s", strcmp(lun, "\n") ? lun : ""); return true; }
     return false;
 }
+static volatile bool lun_hangs;          /* emptying the LUN never returns: a command left in flight */
 bool fake_set(const char *p, char *v)
 {
+    if (lun_hangs && strstr(p, "lun.0/file") && !strcmp(v, "\n")) for (;;) usleep(1000000);
     if (strstr(p, "typec/port0/port_type")) { typec_writes++; if (!strcmp(v, "sink")) strcpy(typec_type, "dual source [sink]"); return true; }
     if (strstr(p, "lun.0/file")) snprintf(lun, sizeof lun, "%s", v);
     else if (strstr(p, "/UDC") && strcmp(v, "\n") && binds_refused > 0) binds_refused--;
@@ -231,6 +234,16 @@ int main(void)
     assert(disk_mount_all() == 0 || mounted);
     umounts = 0; assert(!usb_card_retry() && umounts == 0 && mounted && rbhome_open == 1);
     assert(!crash_card_away);
+    /* unplugged with the gadget stuck: emptying the LUN never returns
+     * (a test R1 froze there, Nov 10); the remount goes on after 3 s */
+    busy_for = 0;
+    assert(disk_unmount_all() == 1 && !mounted);
+    usb_enable(true);
+    lun_hangs = true;
+    assert(disk_mount_all() == 1 && mounted && rbhome_open == 1);
+    assert(count_in(trace_ram, "the gadget still holds the card after 3 s") == 1);
+    lun_hangs = false;
+    snprintf(lun, sizeof lun, "\n");
     printf("PASS: the card goes over once a file lets go, and the USB screen keeps trying (a crash meanwhile is logged off it)\n");
 
     /* 2026-10-23: the card would not come off with only folders open on it

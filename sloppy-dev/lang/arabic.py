@@ -2385,7 +2385,7 @@ AR = {
 'Make a bug report': 'إنشاء تقرير خطأ',
 'A file on the card for a GitHub issue': 'ملف على البطاقة لبلاغ على GitHub',
 'Record lag': 'تسجيل البطء',
-'For a day, every slow moment and audio dropout goes in the log': 'لمدة يوم، تُسجَّل كل لحظة بطء وكل انقطاع في الصوت',
+'Every slow moment and audio dropout goes in the log': 'تُسجَّل كل لحظة بطء وكل انقطاع في الصوت',
 'Bug report saved on the card: %s': 'حُفظ تقرير الخطأ على البطاقة: %s',
 'The bug report could not be saved': 'تعذّر حفظ تقرير الخطأ',
 'Download bug report': 'تنزيل تقرير الخطأ',
@@ -2393,4 +2393,7 @@ AR = {
 'Stop the music and open': 'إيقاف الموسيقى والفتح',
 'Double tap to wake': 'النقر مرتين للتنبيه',
 'Not answering · Tap to retry': 'لا يستجيب · انقر للمحاولة مجددًا',
+'Not enough memory to open this right now.': 'لا تكفي الذاكرة لفتح هذا الآن.',
+'Hold sideways': 'الإمساك بالعرض',
+'The volume keys are left and right. Play is A, Next is B.': 'مفتاحا مستوى الصوت لليسار واليمين. تشغيل هو A، والتالي هو B.',
 }

@@ -63,24 +63,76 @@ static void chess_dsc(lv_image_dsc_t *d, uint8_t *data, int s)
     d->data_size = (uint32_t)s * (uint32_t)s * 3;
 }
 
+/* The pieces are the same for a build, and drawing them is the slow part
+ * of opening Chess: 0.66 s on the R1 each time, as they are given back
+ * when it closes (a test R1's log, Nov 12). Drawn once, they are kept on
+ * the card and read back after: the build's name and a sum of the bytes
+ * head the file, and anything else in it (another build's, a file cut
+ * short, a bad byte) has them drawn and kept again. */
+#define CHESS_ART_FILE ROCKBOX_DIR "/sloppy/chess-art.bin"
+extern const char rbversion[];
+struct chess_art_head { char magic[8]; char build[40]; uint32_t sum; };
+static const struct { uint8_t *at; size_t n; } chess_art_parts[4] = {
+    { chess_spr[0], sizeof chess_spr }, { chess_small[0], sizeof chess_small },
+    { chess_mid[0], sizeof chess_mid }, { chess_big[0], sizeof chess_big } };
+static void chess_art_head_now(struct chess_art_head *h)
+{
+    memset(h, 0, sizeof *h);
+    memcpy(h->magic, "GCHESS1", 8);
+    snprintf(h->build, sizeof h->build, "%s", rbversion);
+    uint32_t sum = 2166136261u;
+    for (int k = 0; k < 4; k++)
+        for (size_t i = 0; i < chess_art_parts[k].n; i++) sum = (sum ^ chess_art_parts[k].at[i]) * 16777619u;
+    h->sum = sum;
+}
+static bool chess_art_load(void)
+{
+    int fd = open(CHESS_ART_FILE, O_RDONLY);
+    if (fd < 0) return false;
+    struct chess_art_head h, now;
+    bool ok = read(fd, &h, sizeof h) == (ssize_t)sizeof h;
+    for (int k = 0; ok && k < 4; k++) ok = read(fd, chess_art_parts[k].at, chess_art_parts[k].n) == (ssize_t)chess_art_parts[k].n;
+    char more;
+    ok = ok && read(fd, &more, 1) == 0;
+    close(fd);
+    if (!ok) return false;
+    chess_art_head_now(&now);
+    return !memcmp(&h, &now, sizeof h);
+}
+static void chess_art_save(void)
+{
+    struct chess_art_head h;
+    chess_art_head_now(&h);
+    mkdir(ROCKBOX_DIR "/sloppy");
+    int fd = open(CHESS_ART_FILE ".tmp", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return;
+    bool ok = write(fd, &h, sizeof h) == (ssize_t)sizeof h;
+    for (int k = 0; ok && k < 4; k++) ok = write(fd, chess_art_parts[k].at, chess_art_parts[k].n) == (ssize_t)chess_art_parts[k].n;
+    if (close(fd) < 0) ok = false;
+    if (!ok || rename(CHESS_ART_FILE ".tmp", CHESS_ART_FILE) < 0) remove(CHESS_ART_FILE ".tmp");
+}
 static void chess_art_init(void)
 {
     if (chess_art_ready) return;
     uint32_t t0 = sl_ms();
-    bool ok = true;
-    for (int t = 1; t <= 6; t++)
+    bool kept = chess_art_load(), ok = true;
+    if (!kept)
     {
-        ok &= sl_chess_art_render(t, CHESS_SQ, chess_spr[t - 1], chess_spr[t + 5]);
-        ok &= sl_chess_art_render(t, CHESS_SMALL, chess_small[t - 1], chess_small[t + 5]);
+        for (int t = 1; t <= 6; t++)
+        {
+            ok &= sl_chess_art_render(t, CHESS_SQ, chess_spr[t - 1], chess_spr[t + 5]);
+            ok &= sl_chess_art_render(t, CHESS_SMALL, chess_small[t - 1], chess_small[t + 5]);
+        }
+        ok &= sl_chess_art_render(CH_K, CHESS_MID, chess_mid[0], chess_mid[1]);
+        ok &= sl_chess_art_render(CH_K, CHESS_BIG, chess_big[0], chess_big[1]);
+        ok &= sl_chess_art_render_turned(CH_K, CHESS_BIG, chess_big[2], chess_big[3], 1.5708f);
+        if (ok) chess_art_save();
     }
-    ok &= sl_chess_art_render(CH_K, CHESS_MID, chess_mid[0], chess_mid[1]);
-    ok &= sl_chess_art_render(CH_K, CHESS_BIG, chess_big[0], chess_big[1]);
-    ok &= sl_chess_art_render_turned(CH_K, CHESS_BIG, chess_big[2], chess_big[3], 1.5708f);
     for (int i = 0; i < 12; i++) chess_dsc(&chess_spr_dsc[i], chess_spr[i], CHESS_SQ);
     for (int i = 0; i < 2; i++) chess_dsc(&chess_mid_dsc[i], chess_mid[i], CHESS_MID);
     for (int i = 0; i < 4; i++) chess_dsc(&chess_big_dsc[i], chess_big[i], CHESS_BIG);
     chess_art_ready = ok;
-    sl_log("chess: pieces drawn in %lu ms", (unsigned long)(sl_ms() - t0));
+    sl_log("chess: pieces %s in %lu ms", kept ? "read from the card" : "drawn", (unsigned long)(sl_ms() - t0));
 }
 
 /* -------------------------------------------------------------- board */
@@ -1457,6 +1509,15 @@ static void chess_deleted(lv_event_t *e)
     chess_strip_n = 0;
     chess_sheet_shown = false;
     sl_give_back(chess_buf, sizeof chess_buf);   /* 420 KB, redrawn on the next open */
+    /* the pieces (~0.3 MB) are drawn again on the next open (~0.3 s), and
+     * the computer's table of positions starts fresh, as at start-up; not
+     * while a search it was asked to drop is still writing to it */
+    sl_give_back(chess_spr, sizeof chess_spr);
+    sl_give_back(chess_small, sizeof chess_small);
+    sl_give_back(chess_mid, sizeof chess_mid);
+    sl_give_back(chess_big, sizeof chess_big);
+    chess_art_ready = false;
+    if (!chess_job.busy) sl_give_back(ch_tt, sizeof ch_tt);
     mini_update();
 }
 
@@ -1652,6 +1713,7 @@ static void chess_build_over(lv_obj_t *p)
 static void chess_page(void)
 {
     if (page_bring_back(chess_page_obj)) return;
+    if (!sl_app_room(1100, "Chess")) return;
     chess_load();
     chess_art_init();
     chess_palette();

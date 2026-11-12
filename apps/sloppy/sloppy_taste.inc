@@ -594,7 +594,18 @@ static int ts_pick_cmp(const void *a, const void *b)
     float x = ((const struct ts_pick *)a)->score, y = ((const struct ts_pick *)b)->score;
     return (x < y) - (x > y);
 }
+static void tm_let_go(void);
+static int ts_picks_work(int **out);
+/* Picks, a mix, a mixtape: the model is worked out for them once and let
+ * go after (167 KB kept for good, the harness's count), unless Your taste
+ * is open, which goes on using it */
 static int ts_picks(int **out)
+{
+    int n = ts_picks_work(out);
+    tm_let_go();
+    return n;
+}
+static int ts_picks_work(int **out)
 {
     *out = NULL;
     if (!tm_ready() || !tm.swipes) return 0;
@@ -818,6 +829,8 @@ static struct
     lv_timer_t *timer;
     unsigned rng;
 } td;
+static void tm_free(void);
+static void tm_let_go(void) { if (!td.page) tm_free(); }
 /* What was playing when the deck came up: it is paused while the deck is
  * open, so the cards' clips are the only audio, and plays on after (it
  * froze on a swipe over playing music, 3 Nov: with the music stopped, the
@@ -1724,6 +1737,14 @@ static void td_clip_fade(void)
     if (quiz_clip_active() && quiz.clip.audible && !quiz.clip.hushed) pcmbuf_fade(true, false);
 }
 
+/* The model (~150 KB on a 1700-album library), freed when Your taste
+ * closes: tm_ready() works it out again when it is next wanted. */
+static void tm_free(void)
+{
+    free(tm.f); free(tm.al); free(tm.by[0]); free(tm.by[1]);
+    tm.f = NULL; tm.al = NULL; tm.by[0] = tm.by[1] = NULL;
+    tm.ok = false;
+}
 /* Is the model up to date without being worked out again? */
 static bool tm_fresh(void)
 {
@@ -2087,6 +2108,7 @@ static void td_deleted(lv_event_t *e)
     if (ts.n_rated) ts.asked = true;     /* left half way: For you won't deal it again */
     if (ts.asked) { if (access(TS_TASTE, F_OK)) ts_save_file(TS_TASTE, true); else ts_flush(); }
     memset(&td, 0, sizeof td);
+    tm_free();
 }
 static void td_done_cb(lv_event_t *e)
 {
@@ -2261,6 +2283,7 @@ static void taste_page(bool first)
 {
     ts_load();
     if (page_bring_back(td.page)) return;
+    if (!sl_app_room(2000, "Your taste")) return;
     {
         int st = audio_status();
         td_resume = (st & AUDIO_STATUS_PLAY) && !(st & AUDIO_STATUS_PAUSE);

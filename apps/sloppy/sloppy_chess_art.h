@@ -220,80 +220,101 @@ static inline bool sl_chess_art_render_turned(int type, int s, uint8_t *white, u
     if (!grid) return false;
     float *uni = grid + (size_t)n * (size_t)nparts, *ink = uni + n;
     float inv = 1.0f / (float)s;
-    for (int y = 0; y < s; y++)
-        for (int x = 0; x < s; x++)
-        {
-            /* a little larger than the unit drawing: the pieces fill the square */
-            float u = 0.5f + ((x + 0.5f) * inv - 0.5f) / 1.07f, v = 0.506f + ((y + 0.5f) * inv - 0.5f) / 1.07f;
-            if (turn != 0)
+    /* A part is a small piece of the square, and a distance only falls by
+     * a pixel a pixel: from a pixel `d` away from a part, the next d - far
+     * along the row are still more than `far` from it, and are given that
+     * much (a floor under the real distance) without being worked out.
+     * Nothing below reads a distance past `far` for what it is: an edge
+     * and its bevel want half a pixel and the pixels beside it, the drop
+     * shadow `soft`. Worked out at every pixel, the set took 0.66 s on the
+     * R1 each time Chess opened (a test R1's log, Nov 12). */
+    float far = s * 0.05f + 0.5f + 2.5f;
+    for (int i = 0; i < n; i++) uni[i] = 1e9f;
+    for (int p = -1; p < nparts; p++)
+    {
+        float *out = p < 0 ? ink : grid + (size_t)p * n;
+        for (int y = 0; y < s; y++)
+            for (int x = 0; x < s; x++)
             {
-                /* lying down: about the middle of the piece, then settled onto the floor */
-                float du = u - 0.5f, dv = v - 0.5f - (fabsf(ts) * 0.2f);
-                u = 0.5f + du * tc + dv * ts; v = 0.5f - du * ts + dv * tc;
-            }
-            float all = 1e9f;
-            for (int p = 0; p < nparts; p++)
-            {
+                /* a little larger than the unit drawing: the pieces fill the square */
+                float u = 0.5f + ((x + 0.5f) * inv - 0.5f) / 1.07f, v = 0.506f + ((y + 0.5f) * inv - 0.5f) / 1.07f;
+                if (turn != 0)
+                {
+                    /* lying down: about the middle of the piece, then settled onto the floor */
+                    float du = u - 0.5f, dv = v - 0.5f - (fabsf(ts) * 0.2f);
+                    u = 0.5f + du * tc + dv * ts; v = 0.5f - du * ts + dv * tc;
+                }
                 float d = ca_shape(type, p, u, v) * (float)s;
-                grid[p * n + y * s + x] = d;
-                all = ca_min(all, d);
+                out[y * s + x] = d;
+                if (p >= 0 && d < uni[y * s + x]) uni[y * s + x] = d;
+                for (float left = d - 1; left > far && x + 1 < s; left -= 1)
+                {
+                    x++;
+                    out[y * s + x] = left;
+                    if (p >= 0 && left < uni[y * s + x]) uni[y * s + x] = left;
+                }
             }
-            uni[y * s + x] = all;
-            ink[y * s + x] = ca_shape(type, -1, u, v) * (float)s;
-        }
+    }
     float line = s * 0.032f;              /* outline width, px */
     if (line < 1.05f) line = 1.05f;
     float bevel = s * 0.1f;
     int so = (int)(s * 0.035f + 0.5f);     /* drop shadow offset */
     float soft = s * 0.05f + 0.5f;
+    /* The edge, the bevel and the light of a part are the same for both
+     * colours: worked out once a pixel, then inked twice. A pixel no part
+     * covers (most of the square) has only the shadow to take. */
     for (int y = 0; y < s; y++)
         for (int x = 0; x < s; x++)
         {
             int i = y * s + x;
             float v = (y + 0.5f) * inv;
-            for (int c = 0; c < 2; c++)
+            float r[2] = { 0, 0 }, g[2] = { 0, 0 }, b[2] = { 0, 0 }, a[2] = { 0, 0 };
+            for (int p = 0; p < nparts && uni[i] < 0.5f; p++)
             {
-                const struct ca_ink *k = &ca_inks[c];
-                float r = 0, g = 0, b = 0, a = 0;
-                for (int p = 0; p < nparts; p++)
+                const float *gp = grid + p * n;
+                float d = gp[i], cov = ca_clamp01(0.5f - d);
+                if (cov <= 0) continue;
+                float gx = gp[y * s + (x < s - 1 ? x + 1 : x)] - gp[y * s + (x ? x - 1 : x)];
+                float gy = gp[(y < s - 1 ? y + 1 : y) * s + x] - gp[(y ? y - 1 : y) * s + x];
+                float gl = ca_len(gx, gy);
+                float lit = gl > 0 ? (-0.55f * gx - 0.83f * gy) / gl : 0;
+                float depth = -(d + line);
+                float edge = depth > 0 ? 1 - ca_clamp01(depth / bevel) : 1;
+                edge *= edge;
+                float t = ca_clamp01((v - 0.15f) / 0.75f);
+                float in = ca_clamp01(0.5f - (d + line));
+                for (int c = 0; c < 2; c++)
                 {
-                    const float *gp = grid + p * n;
-                    float d = gp[i], cov = ca_clamp01(0.5f - d);
-                    if (cov <= 0) continue;
-                    float gx = gp[y * s + (x < s - 1 ? x + 1 : x)] - gp[y * s + (x ? x - 1 : x)];
-                    float gy = gp[(y < s - 1 ? y + 1 : y) * s + x] - gp[(y ? y - 1 : y) * s + x];
-                    float gl = ca_len(gx, gy);
-                    float lit = gl > 0 ? (-0.55f * gx - 0.83f * gy) / gl : 0;
-                    float depth = -(d + line);
-                    float edge = depth > 0 ? 1 - ca_clamp01(depth / bevel) : 1;
-                    edge *= edge;
-                    float t = ca_clamp01((v - 0.15f) / 0.75f);
+                    const struct ca_ink *k = &ca_inks[c];
                     float fr = k->fill_top[0] + (k->fill_bottom[0] - k->fill_top[0]) * t;
                     float fg = k->fill_top[1] + (k->fill_bottom[1] - k->fill_top[1]) * t;
                     float fb = k->fill_top[2] + (k->fill_bottom[2] - k->fill_top[2]) * t;
                     float shade = lit > 0 ? edge * lit * k->light : edge * lit * k->dark;
                     if (shade > 0) { fr += (1 - fr) * shade; fg += (1 - fg) * shade; fb += (1 - fb) * shade; }
                     else { fr *= 1 + shade; fg *= 1 + shade; fb *= 1 + shade; }
-                    float in = ca_clamp01(0.5f - (d + line));
                     float pr = k->line[0] + (fr - k->line[0]) * in;
                     float pg = k->line[1] + (fg - k->line[1]) * in;
                     float pb = k->line[2] + (fb - k->line[2]) * in;
-                    r = pr * cov + r * (1 - cov); g = pg * cov + g * (1 - cov);
-                    b = pb * cov + b * (1 - cov); a = cov + a * (1 - cov);
+                    r[c] = pr * cov + r[c] * (1 - cov); g[c] = pg * cov + g[c] * (1 - cov);
+                    b[c] = pb * cov + b[c] * (1 - cov); a[c] = cov + a[c] * (1 - cov);
                 }
-                float ic = ca_clamp01(0.5f - ink[i] + 0.25f) * a;
+            }
+            /* a soft shadow under the piece, down and to the right */
+            int sx = x - so / 2, sy = y - so;
+            float sd = sx >= 0 && sy >= 0 ? uni[sy * s + sx] : 1e3f;
+            for (int c = 0; c < 2; c++)
+            {
+                const struct ca_ink *k = &ca_inks[c];
+                float ic = ca_clamp01(0.5f - ink[i] + 0.25f) * a[c];
                 if (ic > 0)
                 {
-                    r += (k->detail[0] * a - r) * ic; g += (k->detail[1] * a - g) * ic;
-                    b += (k->detail[2] * a - b) * ic;
+                    r[c] += (k->detail[0] * a[c] - r[c]) * ic; g[c] += (k->detail[1] * a[c] - g[c]) * ic;
+                    b[c] += (k->detail[2] * a[c] - b[c]) * ic;
                 }
-                /* a soft shadow under the piece, down and to the right */
-                int sx = x - so / 2, sy = y - so;
-                float sd = sx >= 0 && sy >= 0 ? uni[sy * s + sx] : 1e3f;
-                float sh = ca_clamp01((soft - sd) / (2 * soft)) * 0.32f * (1 - a);
-                float ta = a + sh;
+                float sh = ca_clamp01((soft - sd) / (2 * soft)) * 0.32f * (1 - a[c]);
+                float ta = a[c] + sh;
                 uint8_t *out = c ? black : white;
-                uint16_t col = ta > 0 ? ca_565(r / ta, g / ta, b / ta) : 0;
+                uint16_t col = ta > 0 ? ca_565(r[c] / ta, g[c] / ta, b[c] / ta) : 0;
                 out[2 * i] = (uint8_t)(col & 255); out[2 * i + 1] = (uint8_t)(col >> 8);
                 out[2 * n + i] = (uint8_t)(ca_clamp01(ta) * 255 + 0.5f);
             }

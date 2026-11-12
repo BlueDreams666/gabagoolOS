@@ -2377,7 +2377,7 @@ ZH = {
 'Make a bug report': '生成错误报告',
 'A file on the card for a GitHub issue': '存到存储卡上的文件，可用于 GitHub 问题',
 'Record lag': '记录卡顿',
-'For a day, every slow moment and audio dropout goes in the log': '一天之内，每次卡顿和每次声音中断都会写入日志',
+'Every slow moment and audio dropout goes in the log': '每次卡顿和每次声音中断都会写入日志',
 'Bug report saved on the card: %s': '错误报告已存到存储卡：%s',
 'The bug report could not be saved': '无法保存错误报告',
 'Download bug report': '下载错误报告',
@@ -2385,4 +2385,7 @@ ZH = {
 'Stop the music and open': '停止音乐并打开',
 'Double tap to wake': '轻点两下唤醒',
 'Not answering · Tap to retry': '没有响应 · 轻点重试',
+'Hold sideways': '横向握持',
+'The volume keys are left and right. Play is A, Next is B.': '音量键是左和右。播放键是 A，下一首键是 B。',
+'Not enough memory to open this right now.': '内存不足，暂时无法打开。',
 }

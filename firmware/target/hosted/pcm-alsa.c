@@ -611,7 +611,9 @@ static void close_hwdev(void)
 
     if (handle) {
 #if defined(HIBY_LINUX)
-        hiby_pcm_finish(handle);
+        bool handed_off = hiby_pcm_close_bt_async(handle);
+        if (!handed_off)
+            hiby_pcm_finish(handle);
 #else
         snd_pcm_drain(handle);
 #endif
@@ -623,6 +625,9 @@ static void close_hwdev(void)
             snd_async_del_handler(ahandler);
             ahandler = NULL;
         }
+#endif
+#if defined(HIBY_LINUX)
+        if (!handed_off)
 #endif
         snd_pcm_close(handle);
 

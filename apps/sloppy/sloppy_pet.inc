@@ -473,6 +473,11 @@ static void pet_page_deleted(lv_event_t *e)
     pet_care_locked = false;
     pet_clear_pending();
     for (int i = 0; i < 5; i++) pet_values[i] = NULL;
+    /* 0.6 MB of pictures, each filled whole when drawn: back to the system
+     * until the pet is opened again (they stayed the player's for good) */
+    sl_give_back(pet_hab_buf, sizeof pet_hab_buf);
+    sl_give_back(pet_stat_buf, sizeof pet_stat_buf);
+    sl_give_back(pet_scene_buf, sizeof pet_scene_buf);
 }
 
 static void pet_game_menu(void);
@@ -570,10 +575,18 @@ static void pet_food_cb(lv_event_t *e)
 /* Every food on its own little LCD, drawn with the same pixel sprites the
  * pet eats in the meal scene. */
 #define PET_FOOD_ICON 30
+static uint16_t pet_food_icons[15][PET_FOOD_ICON * PET_FOOD_ICON * 4];
+/* drawn whole each time the menu opens: 108 KB back once it closes */
+static void pet_food_menu_deleted(lv_event_t *e)
+{
+    (void)e;
+    sl_give_back(pet_food_icons, sizeof pet_food_icons);
+}
 static void pet_food_menu(void)
 {
-    static uint16_t icons[15][PET_FOOD_ICON * PET_FOOD_ICON * 4];
+    uint16_t (*icons)[PET_FOOD_ICON * PET_FOOD_ICON * 4] = pet_food_icons;
     lv_obj_t *p, *body = page_new("Choose Food", &p);
+    lv_obj_add_event_cb(p, pet_food_menu_deleted, LV_EVENT_DELETE, NULL);
     pet_page_style(p);
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_pad_column(body, 10, 0);
@@ -1015,6 +1028,7 @@ static void pet_name_page(void)
 
 static void pet_page(void)
 {
+    if (!pet_page_obj && !sl_app_room(1000, "Pocket Pet")) return;
     pet_load();
     bool changed = sl_pet_advance(&pet, pet_clock());
     int joy, energy;

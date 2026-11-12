@@ -579,6 +579,7 @@ static void fl_scene_make(int night)
     static uint32_t art[FB_LW * FB_LH];
     fb_scene_build(art, night);
     fb_scene_blow_up(fl_bg[night], art);
+    sl_give_back(art, sizeof art);         /* scratch for the build: 166 KB not kept */
     fl_bg_made[night] = true;
 }
 static void fl_ink(void)
@@ -876,6 +877,7 @@ static lv_obj_t *fl_hit_box(lv_obj_t *p, int x, int y, int w, int h, lv_event_cb
 static void flappy_page(void)
 {
     if (page_bring_back(fl.page)) return;
+    if (!sl_app_room(2300, "Flappy Bird")) return;
     fl_load();
     fl_rng ^= lv_tick_get() * 2654435761u;
     if (!fl_rng) fl_rng = 1;

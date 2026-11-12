@@ -1169,7 +1169,7 @@ static void advanced_page(void)
     /* for a bug report: nothing is sent, the user posts the file if they want to */
     g = set_group(body, "TROUBLESHOOTING");
     set_action(g, LV_SYMBOL_FILE, 0x2d7ff0, "Make a bug report", "A file on the card for a GitHub issue", report_make_cb, NULL);
-    set_switch(g, "Record lag", "For a day, every slow moment and audio dropout goes in the log", lag_until != 0, lag_set);
+    set_switch(g, "Record lag", "Every slow moment and audio dropout goes in the log", lag_rec, lag_set);
     /* what cannot be undone: last, in its own card, as on every page */
     g = set_group(body, NULL);
     set_danger(g, LV_SYMBOL_TRASH, "Reset all settings", reset_all_settings_open_cb, NULL);

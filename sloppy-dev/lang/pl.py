@@ -2373,7 +2373,7 @@ PL = {
 'Make a bug report': 'Utwórz raport o błędzie',
 'A file on the card for a GitHub issue': 'Plik na karcie do zgłoszenia na GitHubie',
 'Record lag': 'Zapisuj przycięcia',
-'For a day, every slow moment and audio dropout goes in the log': 'Przez dzień każda chwila spowolnienia i każda przerwa w dźwięku trafia do dziennika',
+'Every slow moment and audio dropout goes in the log': 'Każda chwila spowolnienia i każda przerwa w dźwięku trafia do dziennika',
 'Bug report saved on the card: %s': 'Raport o błędzie zapisany na karcie: %s',
 'The bug report could not be saved': 'Nie udało się zapisać raportu o błędzie',
 'Download bug report': 'Pobierz raport o błędzie',
@@ -2381,4 +2381,7 @@ PL = {
 'Stop the music and open': 'Zatrzymaj muzykę i otwórz',
 'Double tap to wake': 'Dwukrotne stuknięcie, aby wybudzić',
 'Not answering · Tap to retry': 'Nie odpowiada · Stuknij, aby ponowić',
+'Hold sideways': 'Trzymaj poziomo',
+'The volume keys are left and right. Play is A, Next is B.': 'Klawisze głośności to lewo i prawo. Odtwarzanie to A, Następny to B.',
+'Not enough memory to open this right now.': 'Za mało pamięci, aby to teraz otworzyć.',
 }

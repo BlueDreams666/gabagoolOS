@@ -1,3 +1,4 @@
+#include <execinfo.h>
 /* Executes production LVGL screens with fake Rockbox services; does not emulate hardware. */
 #include <assert.h>
 #include <malloc/malloc.h>
@@ -197,9 +198,12 @@ int playlist_insert_track(struct playlist_info *p, const char *f, int pos, bool 
     /* Rockbox: PLAYLIST_INSERT goes after last_insert_pos, else after the
      * playing track; INSERT_FIRST after the playing track; the rest append */
     int lip = test_pl.last_insert_pos;
-    int index = pos == PLAYLIST_INSERT && lip >= 0 && lip < queued ? lip + 1 :
-                (pos == PLAYLIST_INSERT || pos == PLAYLIST_INSERT_FIRST) && started >= 0 ? started + 1 : queued;
-    if (index > queued) index = queued;   /* Rockbox's playing index is always in the list */
+    int index = pos >= 0 ? pos :
+                pos == PLAYLIST_INSERT && lip >= 0 && lip < queued ? lip + 1 :
+                (pos == PLAYLIST_INSERT_FIRST || pos == PLAYLIST_INSERT) && started >= 0 ? started + 1 : queued;
+    /* Rockbox doesn't check: past the end leaves an empty slot in the list,
+     * read as the playlist file "/" (Your taste's clip swap, 2026-11-08) */
+    if (index > queued) { fprintf(stderr, "FAIL: insert at %d past the end of a %d-song list (pos %d, started %d)\n", index, queued, pos, started); { void *bt[16]; backtrace_symbols_fd(bt, backtrace(bt, 16), 2); } exit(1); }
     test_pl.last_insert_pos = index;
     memmove(&queue_tracks[index+1], &queue_tracks[index], (queued-index)*sizeof(int));
     memmove(&queue_flags[index+1], &queue_flags[index], (queued-index)*sizeof(bool));
@@ -345,7 +349,8 @@ void playback_release_aa_slot(int slot) { (void)slot; test_aa_used--; }
 void lcd_set_sleep_after_backlight_off(int s) { test_lcd_sleep = s; }
 void backlight_set_dim_brightness(int v) { (void)v; }
 void backlight_set_fade_in(bool v) { (void)v; }
-void backlight_set_off_timeout(int v) { (void)v; }
+static int test_bl_off = -1, test_usb_bl_off = -1;
+void backlight_set_off_timeout(int v) { test_bl_off = v; }
 static int test_bl_tmo = -1, test_bl_tmo_plugged = -1, test_usb_bl_tmo = -1, test_usb_bl_tmo_plugged = -1;
 void backlight_set_timeout(int v) { test_bl_tmo = v; }
 void backlight_set_timeout_plugged(int v) { test_bl_tmo_plugged = v; }
@@ -363,7 +368,7 @@ static int test_usb_fds = -1, test_usb_screens;
 static int test_open_fds(void) { int n = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) n++; return n; }
 long default_event_handler(long event) {
     test_events++; if (event == SYS_PHONE_UNPLUGGED) audio_pause();
-    if (event == SYS_USB_CONNECTED) { test_usb_lib_frees = test_lib_frees; test_usb_dirs_open = fake_dirs_open; test_usb_fds = test_open_fds(); test_usb_screens++; test_usb_bl_tmo = test_bl_tmo; test_usb_bl_tmo_plugged = test_bl_tmo_plugged; }   /* what had let go when Rockbox took the card */
+    if (event == SYS_USB_CONNECTED) { test_usb_lib_frees = test_lib_frees; test_usb_dirs_open = fake_dirs_open; test_usb_fds = test_open_fds(); test_usb_screens++; test_usb_bl_tmo = test_bl_tmo; test_usb_bl_tmo_plugged = test_bl_tmo_plugged; test_usb_bl_off = test_bl_off; }   /* what had let go when Rockbox took the card */
     return event;
 }
 struct viewport *lcd_set_viewport(struct viewport *vp) { return vp; }
@@ -660,6 +665,203 @@ static void render(lv_display_t *d, const lv_area_t *area, uint8_t *map) {
     clock_gettime(CLOCK_THREAD_CPUTIME_ID,&f1); flush_ns+=(f1.tv_sec-f0.tv_sec)*1000000000ull+(f1.tv_nsec-f0.tv_nsec);
     lv_display_flush_ready(d);
 }
+/* The pieces as they were drawn before a row's far pixels were skipped (every part worked
+ * out at every pixel): what the renderer's sprites are held to, byte for byte */
+static inline bool ref_chess_art_render_turned(int type, int s, uint8_t *white, uint8_t *black, float turn)
+{
+    float tc = cosf(turn), ts = sinf(turn);
+    int nparts = ca_parts[type];
+    int n = s * s;
+    float *grid = malloc(sizeof(float) * (size_t)n * (size_t)(nparts + 2));
+    if (!grid) return false;
+    float *uni = grid + (size_t)n * (size_t)nparts, *ink = uni + n;
+    float inv = 1.0f / (float)s;
+    for (int y = 0; y < s; y++)
+        for (int x = 0; x < s; x++)
+        {
+            /* a little larger than the unit drawing: the pieces fill the square */
+            float u = 0.5f + ((x + 0.5f) * inv - 0.5f) / 1.07f, v = 0.506f + ((y + 0.5f) * inv - 0.5f) / 1.07f;
+            if (turn != 0)
+            {
+                /* lying down: about the middle of the piece, then settled onto the floor */
+                float du = u - 0.5f, dv = v - 0.5f - (fabsf(ts) * 0.2f);
+                u = 0.5f + du * tc + dv * ts; v = 0.5f - du * ts + dv * tc;
+            }
+            float all = 1e9f;
+            for (int p = 0; p < nparts; p++)
+            {
+                float d = ca_shape(type, p, u, v) * (float)s;
+                grid[p * n + y * s + x] = d;
+                all = ca_min(all, d);
+            }
+            uni[y * s + x] = all;
+            ink[y * s + x] = ca_shape(type, -1, u, v) * (float)s;
+        }
+    float line = s * 0.032f;              /* outline width, px */
+    if (line < 1.05f) line = 1.05f;
+    float bevel = s * 0.1f;
+    int so = (int)(s * 0.035f + 0.5f);     /* drop shadow offset */
+    float soft = s * 0.05f + 0.5f;
+    for (int y = 0; y < s; y++)
+        for (int x = 0; x < s; x++)
+        {
+            int i = y * s + x;
+            float v = (y + 0.5f) * inv;
+            for (int c = 0; c < 2; c++)
+            {
+                const struct ca_ink *k = &ca_inks[c];
+                float r = 0, g = 0, b = 0, a = 0;
+                for (int p = 0; p < nparts; p++)
+                {
+                    const float *gp = grid + p * n;
+                    float d = gp[i], cov = ca_clamp01(0.5f - d);
+                    if (cov <= 0) continue;
+                    float gx = gp[y * s + (x < s - 1 ? x + 1 : x)] - gp[y * s + (x ? x - 1 : x)];
+                    float gy = gp[(y < s - 1 ? y + 1 : y) * s + x] - gp[(y ? y - 1 : y) * s + x];
+                    float gl = ca_len(gx, gy);
+                    float lit = gl > 0 ? (-0.55f * gx - 0.83f * gy) / gl : 0;
+                    float depth = -(d + line);
+                    float edge = depth > 0 ? 1 - ca_clamp01(depth / bevel) : 1;
+                    edge *= edge;
+                    float t = ca_clamp01((v - 0.15f) / 0.75f);
+                    float fr = k->fill_top[0] + (k->fill_bottom[0] - k->fill_top[0]) * t;
+                    float fg = k->fill_top[1] + (k->fill_bottom[1] - k->fill_top[1]) * t;
+                    float fb = k->fill_top[2] + (k->fill_bottom[2] - k->fill_top[2]) * t;
+                    float shade = lit > 0 ? edge * lit * k->light : edge * lit * k->dark;
+                    if (shade > 0) { fr += (1 - fr) * shade; fg += (1 - fg) * shade; fb += (1 - fb) * shade; }
+                    else { fr *= 1 + shade; fg *= 1 + shade; fb *= 1 + shade; }
+                    float in = ca_clamp01(0.5f - (d + line));
+                    float pr = k->line[0] + (fr - k->line[0]) * in;
+                    float pg = k->line[1] + (fg - k->line[1]) * in;
+                    float pb = k->line[2] + (fb - k->line[2]) * in;
+                    r = pr * cov + r * (1 - cov); g = pg * cov + g * (1 - cov);
+                    b = pb * cov + b * (1 - cov); a = cov + a * (1 - cov);
+                }
+                float ic = ca_clamp01(0.5f - ink[i] + 0.25f) * a;
+                if (ic > 0)
+                {
+                    r += (k->detail[0] * a - r) * ic; g += (k->detail[1] * a - g) * ic;
+                    b += (k->detail[2] * a - b) * ic;
+                }
+                /* a soft shadow under the piece, down and to the right */
+                int sx = x - so / 2, sy = y - so;
+                float sd = sx >= 0 && sy >= 0 ? uni[sy * s + sx] : 1e3f;
+                float sh = ca_clamp01((soft - sd) / (2 * soft)) * 0.32f * (1 - a);
+                float ta = a + sh;
+                uint8_t *out = c ? black : white;
+                uint16_t col = ta > 0 ? ca_565(r / ta, g / ta, b / ta) : 0;
+                out[2 * i] = (uint8_t)(col & 255); out[2 * i + 1] = (uint8_t)(col >> 8);
+                out[2 * n + i] = (uint8_t)(ca_clamp01(ta) * 255 + 0.5f);
+            }
+        }
+    free(grid);
+    return true;
+}
+/* Snake's body as it was painted before the straight runs and turns got their short cuts (a
+ * pixel at a time, every neighbour measured): what the new painter's picture is held to */
+static float ref_radius(float s, float gulp_s, float gulp_amp)
+{
+    float r = SNAKE_R + 1.8f * fmaxf(0, 1 - s / 22);
+    float taper = fminf(snk_len_px * 0.6f, 74);
+    float into = s - (snk_len_px - taper);
+    if (into > 0) { float t = into / taper; r -= 5.4f * t * t; }
+    if (gulp_amp > 0)
+    {
+        float z = (s - gulp_s) / 8.5f;
+        if (z > -3 && z < 3) r += gulp_amp * exp(-z * z);
+    }
+    return r;
+}
+static bool ref_owner(int i, float px, float py, float d)
+{
+    for (int j = i - 2; j <= i + 2; j++)
+    {
+        if (j == i || j < 0 || j >= snk_nprim) continue;
+        float qx, qy, prm;
+        float dj = snk_prim_d(&snk_prim[j], px, py, &qx, &qy, &prm);
+        if (dj < d || (dj == d && j < i)) return false;
+    }
+    return true;
+}
+static void ref_draw_snake(uint32_t now)
+{
+    float gulp_s = 0, gulp_amp = 0;
+    if (snk_gulp_at)
+    {
+        float t = (now - snk_gulp_at) / (float)sl_snake_period(&snake_state);
+        gulp_s = 14 + t * SNAKE_CELL * 1.6f;
+        if (gulp_s > snk_len_px + 20) ;
+        else gulp_amp = 3.4f * snk_clamp01(t * 3) * (1 - snk_clamp01((gulp_s - snk_len_px * 0.7f) / (snk_len_px * 0.3f + 1)));
+    }
+    float dead = snake_state.alive || snake_state.won ? 0 : snk_clamp01((now - snk_die_at - 120) / 500.0f);
+    float shadow = SNK_LIGHT ? 0.17f : 0.45f;
+    /* shadows first, so no body pixel is ever darkened by a neighbour's */
+    for (int i = 0; i < snk_nprim; i++)
+    {
+        const struct snk_prim *g = &snk_prim[i];
+        int y0 = g->y0 + 3, y1 = g->y1 + 3;
+        if (y1 > SNAKE_BOARD) y1 = SNAKE_BOARD;
+        int x0, x1, yy0, yy1;
+        if (!snk_box(g->x0, y0, g->x1 - 1, y1 - 1, &x0, &yy0, &x1, &yy1, true)) continue;
+        for (int y = yy0; y < yy1; y++)
+            for (int x = x0; x < x1; x++)
+            {
+                float px = x + 0.5f, py = y + 0.5f - 4, qx, qy, prm;
+                float d = snk_prim_d(g, px, py, &qx, &qy, &prm);
+                if (d > SNAKE_RMAX + 3) continue;
+                float r = ref_radius((prm - snk_ph) * SNAKE_CELL, gulp_s, gulp_amp);
+                float a = snk_smooth((r + 3 - d) / 7) * shadow;
+                if (a <= 0 || !ref_owner(i, px, py, d)) continue;
+                snk_blend(snake_px, x, y, 0, 0, 0, a);
+            }
+    }
+    for (int i = 0; i < snk_nprim; i++)
+    {
+        const struct snk_prim *g = &snk_prim[i];
+        int x0, y0, x1, y1;
+        if (!snk_box(g->x0, g->y0, g->x1 - 1, g->y1 - 1, &x0, &y0, &x1, &y1, true)) continue;
+        for (int y = y0; y < y1; y++)
+            for (int x = x0; x < x1; x++)
+            {
+                float px = x + 0.5f, py = y + 0.5f, qx, qy, prm;
+                float d = snk_prim_d(g, px, py, &qx, &qy, &prm);
+                if (d > SNAKE_RMAX) continue;
+                float s = (prm - snk_ph) * SNAKE_CELL;
+                float r = ref_radius(s, gulp_s, gulp_amp);
+                float cov = snk_clamp01(r - d + 0.5f);
+                if (cov <= 0 || !ref_owner(i, px, py, d)) continue;
+                float nx = (px - qx) / r, ny = (py - qy) / r, n2 = nx * nx + ny * ny;
+                if (n2 > 1) { float l = sqrtf(n2); nx /= l; ny /= l; n2 = 1; }
+                float nz = sqrtf(1 - n2);
+                float lam = fmaxf(0, -0.40f * nx - 0.60f * ny + 0.69f * nz);
+                float ndh = fmaxf(0, -0.22f * nx - 0.33f * ny + 0.92f * nz);
+                float sp = ndh * ndh; sp *= sp; sp *= sp; sp *= sp; sp *= sp;
+                float cr, cg, cb;
+                snk_body_colour(snk_len_px > 1 ? s / snk_len_px : 0, &cr, &cg, &cb);
+                /* pale spots down the back, carried along with the body */
+                if (s > 20)
+                {
+                    float m = fmodf(s, SNAKE_CELL) - SNAKE_CELL / 2.0f;
+                    float spot = 3.4f * r / SNAKE_R - snk_len2(m, d);
+                    float k = snk_clamp01(spot + 0.5f) * 0.38f;
+                    cr += (236 - cr) * k; cg += (255 - cg) * k; cb += (214 - cb) * k;
+                }
+                float k = 0.46f + 0.66f * lam;
+                cr *= k; cg *= k; cb *= k;
+                cr += 255 * sp * 0.55f; cg += 255 * sp * 0.55f; cb += 255 * sp * 0.55f;
+                if (dead > 0)
+                {
+                    /* the colour drains from the head back to the tail */
+                    float tpos = snk_len_px > 1 ? s / snk_len_px : 0;
+                    float dk = snk_clamp01(dead * 1.9f - tpos * 0.9f);
+                    float grey = cr * 0.3f + cg * 0.59f + cb * 0.11f;
+                    grey = grey * 0.8f + 30;
+                    cr += (grey - cr) * dk * 0.75f; cg += (grey - cg) * dk * 0.75f; cb += (grey - cb) * dk * 0.75f;
+                }
+                snk_blend(snake_px, x, y, cr, cg, cb, cov);
+            }
+    }
+}
 static void frame(unsigned ms) {test_tick += ms;lv_timer_handler();lv_refr_now(disp);}
 static void shot_now(const char *name) {
     FILE *f=fopen(name,"wb");assert(f);fprintf(f,"P6\n%d %d\n255\n",W,H);
@@ -897,6 +1099,15 @@ static void fixture(void) {
 static int t_x, t_y; static bool t_down;
 void reset_poweroff_timer(void) {}
 int button_status_wdata(int *p) { *p = (t_x << 16) | t_y; return t_down ? BUTTON_TOUCHSCREEN : 0; }
+/* the driver's trail (button-devinput.c): every sample in order */
+static int t_trail_pos[64]; static bool t_trail_dn[64]; static unsigned t_trail_n;
+static void t_trail(int x, int y, bool down) { t_trail_pos[t_trail_n % 64] = (x << 16) | y; t_trail_dn[t_trail_n % 64] = down; t_trail_n++; }
+unsigned button_touch_trail_end(void) { return t_trail_n; }
+int button_touch_trail(unsigned *at, int *pos) {
+    if (t_trail_n - *at > 64) *at = t_trail_n - 64;
+    if (*at == t_trail_n) return -1;
+    unsigned i = (*at)++ % 64; *pos = t_trail_pos[i]; return t_trail_dn[i];
+}
 static intptr_t t_event_pos;
 intptr_t button_get_data(void) { return t_event_pos; }
 /* the first label under 'o' showing 's' */
@@ -905,7 +1116,7 @@ static lv_obj_t *find_label(lv_obj_t *o, const char *s) {
     for (uint32_t i=0;i<lv_obj_get_child_count(o);i++){lv_obj_t *f=find_label(lv_obj_get_child(o,i),s);if(f)return f;}
     return NULL;
 }
-static void touch_at(int x, int y, bool down) { t_x = x; t_y = y; t_down = down; frame(40); }
+static void touch_at(int x, int y, bool down) { if (down || t_down) t_trail(x, y, down); t_x = x; t_y = y; t_down = down; frame(40); }
 static void key_tap(lv_obj_t *k) { lv_area_t a;lv_obj_get_coords(k,&a);int x=(a.x1+a.x2)/2,y=(a.y1+a.y2)/2;touch_at(x,y,true);touch_at(x,y,false); }
 /* Cover Flow is landscape: a point (x, y) there is (y, 799 - x) on the panel */
 static void ltouch(int x, int y, bool down) { touch_at(y, H - 1 - x, down); }
@@ -1782,6 +1993,55 @@ static void b9_tests(void) {
             for(int i=0;i<10;i++)frame(17);assert(arc.frames==f0);
             arc_save_cb(NULL);frame(300);assert(arc_has_state(arc_roms[k].path,".state"));
             for(int i=0;i<4;i++)frame(17);assert(!arc.sheet && !arc.paused);
+            {   /* Held sideways: the picture turned a quarter in the middle, the four side keys along the top (the
+                 * volume keys left and right, Play and Next still A and B), up, down, Start and Select on the screen
+                 * either side; with the screen set upside down it turns the other way; paused, the volume keys are
+                 * the volume's again; upright again, everything is back */
+                static uint16_t up[ARC_PIC_W*ARC_PIC_H];
+                assert(!arc_opt.side && arc_opt.fx==ARC_FX_NONE);
+                arc_pause(true);arc_blit();memcpy(up,arc.px,sizeof up);
+                arc_opt.side=1;arc_layout();frame(50);
+                assert(lv_obj_has_flag(arc.pad,LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(arc.side,LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(sb,LV_OBJ_FLAG_HIDDEN));
+                assert(lv_obj_get_x(arc.screen)==24 && lv_obj_get_y(arc.screen)==160 && lv_obj_get_width(arc.screen)==ARC_PIC_H && lv_obj_get_height(arc.screen)==ARC_PIC_W);
+                for(int Y=0;Y<ARC_PIC_H;Y++)for(int X=0;X<ARC_PIC_W;X++)assert(arc.px[X*ARC_PIC_H+(ARC_PIC_H-1-Y)]==up[Y*ARC_PIC_W+X]);
+                shot("arcade-sideways.ppm");
+                /* the keys' edge is the top: left of the picture up, down, Select from there; right of it A, B, Start */
+                assert(arc_side_keys_at(400,80)==GB_UP && arc_side_keys_at(200,80)==GB_DOWN && arc_side_keys_at(60,80)==GB_SELECT &&
+                       arc_side_keys_at(400,700)==GB_A && arc_side_keys_at(200,700)==GB_B && arc_side_keys_at(60,700)==GB_START &&
+                       arc_side_keys_at(240,400)==0);
+                /* a thumb sliding down from the top edge is the game's, not a pull on the Control Center */
+                arc_pause(false);touch_at(400,10,true);touch_at(400,50,true);touch_at(400,110,true);
+                assert(g_state==G_LVGL && arc.touch==GB_UP && !overlay_visible());touch_at(400,110,false);assert(!arc.touch);arc_pause(true);
+                arc_opt.side=0;arc_blit();memcpy(up,arc.px,sizeof up);arc_opt.side=1;arc_blit();   /* the game ran on: the picture to hold the turns to, again */
+                /* one rocker's two ends may not go down together: B held on the screen, A on its key */
+                arc_pause(false);arc.touch=arc_side_keys_at(200,700);assert(arcade_key(BUTTON_LEFT,false) && (arc.touch|arc.keys)==(GB_A|GB_B));
+                arcade_key(BUTTON_LEFT,true);arc.touch=0;arc_pause(true);
+                assert(!arcade_key(BUTTON_UP,false) && !arc.keys);            /* paused: the volume's */
+                arc_pause(false);
+                assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_LEFT && arcade_key(BUTTON_LEFT,false) && arc.keys==(GB_LEFT|GB_A));   /* running and jumping */
+                assert(arcade_key(BUTTON_UP,true) && arcade_key(BUTTON_DOWN,false) && arcade_key(BUTTON_RIGHT,false) && arc.keys==(GB_RIGHT|GB_A|GB_B));
+                arcade_key(BUTTON_DOWN,true);arcade_key(BUTTON_LEFT,true);arcade_key(BUTTON_RIGHT,true);assert(!arc.keys);
+                arc.touch=GB_UP;arc_show_keys();assert(lv_obj_has_state(arc.side_btn[0],LV_STATE_PRESSED));arc.touch=0;arc_show_keys();
+                assert(!lv_obj_has_state(arc.side_btn[0],LV_STATE_PRESSED));
+                arc_pause(true);
+                sl_flipped=true;arc_blit();
+                for(int Y=0;Y<ARC_PIC_H;Y++)for(int X=0;X<ARC_PIC_W;X++)assert(arc.px[(ARC_PIC_W-1-X)*ARC_PIC_H+Y]==up[Y*ARC_PIC_W+X]);
+                assert(arc_side_keys_at(80,720)==GB_UP && arc_side_keys_at(280,720)==GB_DOWN && arc_side_keys_at(420,720)==GB_SELECT &&
+                       arc_side_keys_at(80,100)==GB_A && arc_side_keys_at(420,100)==GB_START);
+                arc_pause(false);assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_RIGHT);arcade_key(BUTTON_UP,true);arc_pause(true);
+                sl_flipped=false;
+                arc_cfg_save();{char want[40];snprintf(want,sizeof want,"ARCADE1 %d %d %d %d 1\n",arc_opt.pal,arc_opt.fx,arc_opt.cc,arc_opt.sound);assert(fake_has(ARC_CFG,want));}
+                arc_opt.side=0;arc_layout();frame(50);
+                assert(!lv_obj_has_flag(arc.pad,LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(arc.side,LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(sb,LV_OBJ_FLAG_HIDDEN));
+                assert(lv_obj_get_x(arc.screen)==0 && lv_obj_get_y(arc.screen)==ARC_PIC_Y && !memcmp(up,arc.px,sizeof up));
+                arc_cfg_save();arc_pause(false);
+                static const char *const words[]={"Hold sideways","The volume keys are left and right. Play is A, Next is B.","Not enough memory to open this right now."};
+                int l0=global_settings.sloppy_language;
+                for(int l=1;l<=SL_LANG_LAST;l++){global_settings.sloppy_language=l;
+                    for(unsigned q=0;q<ARRAYLEN(words);q++)assert(strcmp(sl_tr(words[q]),words[q])!=0);}
+                global_settings.sloppy_language=l0;
+                printf("PASS: Arcade held sideways: the picture a quarter turn, the side keys left, right, A and B, the screen's six, both ways up.\n");
+            }
             /* leaving keeps the place, the picture and the battery save (Up held as it goes) */
             arc.touch=GB_UP;for(int i=0;i<4;i++)frame(17);
             page_pop();frame(400);
@@ -1794,6 +2054,11 @@ static void b9_tests(void) {
             shot("arcade-continue.ppm");
             arc_play(1);frame(100);assert(arc.page && arc.note && find_label(arc.page,"Back where you left off"));
             page_pop();frame(400);
+            /* started sideways: no upright note on the turned picture, and the status bar is back on leaving */
+            arc_opt.side=1;arc_play(1);frame(100);assert(arc.page && !arc.note && lv_obj_has_flag(sb,LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(arc.side,LV_OBJ_FLAG_HIDDEN));
+            for(int i=0;i<6;i++)frame(17);
+            page_pop();frame(400);assert(!arc.page && !lv_obj_has_flag(sb,LV_OBJ_FLAG_HIDDEN));
+            arc_opt.side=0;arc_cfg_save();
             {   /* a place cut short by a power cut: refused whole, the game starts
                  * afresh; saves go through a .new, none left beside them */
                 char rp[MAX_PATH],np[MAX_PATH+4];arc_state_path(FAKE_CARD "/Games/GB/Test Cart (World) (Rev 1).gb",".resume",rp,sizeof rp);
@@ -2363,6 +2628,13 @@ static void dt_probe(void)
         printf("DTAP done: %d taps, %d pages opened twice\n",taps,found);
 }
 
+/* sl_give_back's pages: the whole ones inside the buffer read as 0 */
+static bool given_back(const void *p, size_t n)
+{
+    uintptr_t a = ((uintptr_t)p + 4095) & ~(uintptr_t)4095, e = ((uintptr_t)p + n) & ~(uintptr_t)4095;
+    for (const unsigned char *b = (const unsigned char *)a; b < (const unsigned char *)e; b++) if (*b) return false;
+    return e > a;
+}
 int main(void) {
     if (system("mkdir -p '" SIM_ROOT "' '" SIM_TMP "'")) return 1;
     if (getenv("SLOPPY_LOG_DUMP")) atexit(log_dump_atexit);
@@ -3712,6 +3984,38 @@ int main(void) {
         coin_warm(warm);                                          /* done: the timer deletes itself */
         printf("coin faces: %d idle slices, worst %u ms\n",slices,worst);
     }
+    {   /* Back slides two pictures with the memory an R1 has (12-18 MB free in its
+         * Nov logs): a 24 MB bar left it the live slide, 60-80 ms a frame. Near
+         * the floor it still slides live, borrowing nothing. */
+        assert(npages==1 && !ps.page);
+        sl_mem_test_kb=16384;
+        sl_library_page();for(int i=0;i<30;i++)frame(16);
+        page_pop();assert(ps.page && ps.img[0] && ps.img[1]);
+        for(int i=0;i<30;i++)frame(16);assert(npages==1 && !ps.page);
+        sl_mem_test_kb=9000;
+        sl_library_page();for(int i=0;i<30;i++)frame(16);assert(!ps.page);   /* the push too */
+        page_pop();assert(!ps.page);
+        for(int i=0;i<30;i++)frame(16);assert(npages==1);
+        sl_mem_test_kb=0;
+        printf("PASS: back slides pictures at 16 MB free, live at 9 MB.\n");
+    }
+    {   /* opened before the warm-up is through, the faces are read from the card once painted (the same bytes);
+         * a bad or another build's file has them painted and kept again */
+        static lv_color32_t was[2][COIN_TEX*COIN_TEX];static uint8_t file[sizeof(struct coin_art_head)+sizeof coin_tex];
+        assert(coin_art_ready);memcpy(was,coin_tex,sizeof was);
+        sim_remove(COIN_ART_FILE);memset(coin_tex,0,sizeof coin_tex);coin_rows=0;coin_art_ready=false;
+        coin_art_now();assert(coin_art_ready && !memcmp(was,coin_tex,sizeof was) && fake_size(COIN_ART_FILE)==(long)sizeof file && lbf_log_has("coin: faces painted in"));
+        {int fd=open(COIN_ART_FILE,O_RDONLY);assert(fd>=0 && read(fd,file,sizeof file)==(ssize_t)sizeof file);sim_close(fd);}
+        memset(coin_tex,0,sizeof coin_tex);memset(coin_rim_col,0,sizeof coin_rim_col);coin_rows=0;coin_art_ready=false;
+        coin_art_now();assert(coin_art_ready && coin_rows==2*COIN_TEX && !memcmp(was,coin_tex,sizeof was) && coin_rim_col[COIN_CW/2] && lbf_log_has("coin: faces read from the card in"));
+        for(int bad=0;bad<2;bad++){
+            static uint8_t f2[sizeof file];memcpy(f2,file,sizeof file);f2[bad?9:sizeof(struct coin_art_head)+70000]^=0x20;fake_put(COIN_ART_FILE,f2,sizeof f2);
+            memset(coin_tex,0,sizeof coin_tex);coin_rows=0;coin_art_ready=false;assert(!coin_art_load());
+            coin_art_now();assert(coin_art_ready && !memcmp(was,coin_tex,sizeof was));
+            {static uint8_t f3[sizeof file];int fd=open(COIN_ART_FILE,O_RDONLY);assert(fd>=0 && read(fd,f3,sizeof f3)==(ssize_t)sizeof f3);sim_close(fd);assert(!memcmp(f3,file,sizeof file));}
+        }
+        printf("PASS: the coin's faces are kept on the card and read back; a bad or other build's file is painted again.\n");
+    }
     coin_page();frame(500);shot("coin-ready.ppm");assert(coin_page_obj && coin_timer && coin_state==COIN_IDLE);
     /* swipe up through the real touch path: the coin rides the finger and winds back */
     touch_at(240,500,true);touch_at(240,480,true);touch_at(240,420,true);
@@ -3827,6 +4131,41 @@ int main(void) {
     mkdir(".rockbox");mkdir(".rockbox/sloppy");remove(".rockbox/sloppy/chess.dat");
     chess_loaded=false;chess_page();frame(500);
     assert(chess_page_obj && chess_art_ready && chess_sheet_shown && chess_on_top());   /* nothing to continue: the sheet */
+    {   /* the pieces' sprites: a row's pixels far from a part are not worked out, and every sprite the game
+         * draws (and every piece at every size, standing and lying) is the one drawn before, byte for byte */
+        static const int sizes[]={CHESS_SQ,CHESS_SMALL,CHESS_MID,CHESS_BIG};
+        static uint8_t w0[CHESS_BIG*CHESS_BIG*3],b0[CHESS_BIG*CHESS_BIG*3],w1[CHESS_BIG*CHESS_BIG*3],b1[CHESS_BIG*CHESS_BIG*3];
+        double t_ref=0,t_new=0;int sprites=0;
+        for(int t=1;t<=6;t++)for(unsigned z=0;z<ARRAYLEN(sizes);z++)for(int lying=0;lying<3;lying++){
+            int sz=sizes[z];float turn=lying==1?1.5708f:lying==2?-1.5708f:0;struct timespec a,b,c;
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID,&a);assert(ref_chess_art_render_turned(t,sz,w0,b0,turn));
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID,&b);assert(sl_chess_art_render_turned(t,sz,w1,b1,turn));
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID,&c);
+            t_ref+=(b.tv_sec-a.tv_sec)*1e3+(b.tv_nsec-a.tv_nsec)/1e6;t_new+=(c.tv_sec-b.tv_sec)*1e3+(c.tv_nsec-b.tv_nsec)/1e6;
+            assert(!memcmp(w0,w1,(size_t)sz*sz*3) && !memcmp(b0,b1,(size_t)sz*sz*3));sprites+=2;}
+        printf("chess pieces: %d sprites the same byte for byte, drawn in %.1f ms where they took %.1f (%.1fx)\n",sprites,t_new,t_ref,t_ref/t_new);
+        assert(t_new*5<t_ref*4);
+        /* drawn once, they are kept on the card and read back: the same bytes; another build's file, one cut
+         * short or one with a bad byte has them drawn and kept again */
+        static uint8_t ks[sizeof chess_spr],kb[sizeof chess_big],file[sizeof(struct chess_art_head)+sizeof chess_spr+sizeof chess_small+sizeof chess_mid+sizeof chess_big];
+        sim_remove(CHESS_ART_FILE);chess_art_ready=false;chess_art_init();
+        assert(chess_art_ready && fake_size(CHESS_ART_FILE)==(long)sizeof file && lbf_log_has("chess: pieces drawn in") && fake_find(CHESS_ART_FILE ".tmp")<0);
+        memcpy(ks,chess_spr,sizeof ks);memcpy(kb,chess_big,sizeof kb);
+        {int fd=open(CHESS_ART_FILE,O_RDONLY);assert(fd>=0 && read(fd,file,sizeof file)==(ssize_t)sizeof file);sim_close(fd);}
+        memset(chess_spr,0,sizeof chess_spr);memset(chess_big,0,sizeof chess_big);chess_art_ready=false;chess_art_init();
+        assert(chess_art_ready && !memcmp(ks,chess_spr,sizeof ks) && !memcmp(kb,chess_big,sizeof kb) && lbf_log_has("chess: pieces read from the card in"));
+        for(int bad=0;bad<3;bad++){
+            static uint8_t f2[sizeof file];memcpy(f2,file,sizeof file);
+            if(bad==0)f2[sizeof(struct chess_art_head)+5000]^=0x10;        /* a bad byte */
+            if(bad==1)f2[9]^=1;                                             /* another build's */
+            fake_put(CHESS_ART_FILE,f2,bad==2?sizeof file-100:sizeof file);  /* cut short */
+            memset(chess_spr,0,sizeof chess_spr);memset(chess_big,0,sizeof chess_big);chess_art_ready=false;
+            assert(!chess_art_load());chess_art_init();
+            assert(chess_art_ready && !memcmp(ks,chess_spr,sizeof ks) && !memcmp(kb,chess_big,sizeof kb));
+            {static uint8_t f3[sizeof file];int fd=open(CHESS_ART_FILE,O_RDONLY);assert(fd>=0 && read(fd,f3,sizeof f3)==(ssize_t)sizeof f3);sim_close(fd);assert(!memcmp(f3,file,sizeof file));}
+        }
+        printf("PASS: chess pieces are kept on the card and read back; a bad, short or other build's file is drawn again.\n");
+    }
     assert(lv_obj_has_flag(mini,LV_OBJ_FLAG_HIDDEN));    /* the toolbar sits where the mini player would */
     assert(lv_obj_has_flag(chess_sheet_close,LV_OBJ_FLAG_HIDDEN));
     shot("chess-sheet.ppm");
@@ -4037,6 +4376,64 @@ int main(void) {
     chess_loaded=false;remove(CHESS_FILE);chess_load();
     page_pop();frame(500);
     snake_page();frame(500);shot("snake.ppm");assert(objects(pages[npages-1])<55);
+    {   /* the body's owner check skips neighbours more than 4 px outside their box: on a long,
+         * winding snake it answers as the full check does for every pixel either pass draws */
+        struct sl_snake_state keep=snake_state;struct sl_snake_state *ss=&snake_state;int n=0;
+        for(int x=3;x>=0;x--){ss->x[n]=x;ss->y[n++]=0;}
+        for(int x=0;x<16;x++){ss->x[n]=x;ss->y[n++]=1;}
+        for(int x=15;x>=0;x--){ss->x[n]=x;ss->y[n++]=2;}
+        for(int x=0;x<4;x++){ss->x[n]=x;ss->y[n++]=3;}
+        ss->len=n;ss->dx=ss->next_dx=1;ss->dy=ss->next_dy=0;ss->alive=true;
+        long checked=0;
+        for(int f=0;f<6;f++){
+            snk_step_at=snk_now()-f*30;snake_draw(snk_now());
+            for(int i=0;i<snk_nprim;i++){const struct snk_prim *g=&snk_prim[i];
+                for(int pass=0;pass<2;pass++){   /* the pixels each drawing loop visits: the shadow's rows 3 lower, on the board */
+                    int ya=pass?g->y0+3:g->y0,yb=pass?g->y1+3:g->y1;if(ya<0)ya=0;if(yb>SNAKE_BOARD)yb=SNAKE_BOARD;
+                    for(int y=ya;y<yb;y++)for(int x=g->x0;x<g->x1;x++){
+                        float px=x+0.5f,py=y+0.5f-(pass?4:0),qx,qy,prm;
+                        float d=snk_prim_d(g,px,py,&qx,&qy,&prm);
+                        if(d>(pass?SNAKE_RMAX+3:SNAKE_RMAX+0.5f))continue;
+                        bool full=true;
+                        for(int j=i-2;j<=i+2;j++){if(j==i||j<0||j>=snk_nprim)continue;
+                            float dj=snk_prim_d(&snk_prim[j],px,py,&qx,&qy,&prm);if(dj<d||(dj==d&&j<i)){full=false;break;}}
+                        assert(snk_owner_at(i,px,py,d,false)==full);checked++;}}}}
+        assert(checked>100000);
+        /* Straight runs are painted from one worked-out cross-section and turns skip what they
+         * cannot reach: the same picture as the painter before (ref_draw_snake, kept above), along
+         * rows, down columns and up a staircase, with a swallowed apple going down the body too */
+        static uint16_t was[SNAKE_BOARD*SNAKE_BOARD];
+        long drawn=0,differ=0;uint32_t kg=snk_gulp_at;
+        for(int shape=0;shape<3;shape++){
+            n=0;
+            if(shape<2){
+            for(int a=3;a>=0;a--){ss->x[n]=shape?0:a;ss->y[n++]=shape?a:0;}
+            for(int a=0;a<16;a++){ss->x[n]=shape?1:a;ss->y[n++]=shape?a:1;}
+            for(int a=15;a>=0;a--){ss->x[n]=shape?2:a;ss->y[n++]=shape?a:2;}
+            for(int a=0;a<4;a++){ss->x[n]=shape?3:a;ss->y[n++]=shape?a:3;}
+            ss->len=n;ss->dx=ss->next_dx=shape?0:1;ss->dy=ss->next_dy=shape?1:0;ss->alive=true;
+            }else{   /* a turn in every cell, the head going right at the bottom */
+            for(int k=27;k>=0;k--){ss->x[n]=1+(k+1)/2;ss->y[n++]=k/2;}
+            ss->len=n;ss->dx=ss->next_dx=1;ss->dy=ss->next_dy=0;ss->alive=true;
+            }
+            for(int f=0;f<10;f++){
+                uint32_t t=snk_now();
+                ss->alive=f<8;snk_die_at=t-150-f*20;                     /* the last two poses: dying, its colour draining */
+                snk_step_at=t-f*14;snk_gulp_at=0;snake_draw(t);          /* the path and where the body is along it */
+                for(int way=0;way<2;way++){
+                    snk_gulp_at=f&1?t-f*60:0;                            /* an apple on its way down, every other pose */
+                    memcpy(snake_px,snake_bg_px,sizeof snake_px);
+                    if(way)snk_draw_snake(t);else{ref_draw_snake(t);memcpy(was,snake_px,sizeof was);}}
+                for(int k=0;k<SNAKE_BOARD*SNAKE_BOARD;k++){
+                    if(snake_px[k]!=snake_bg_px[k])drawn++;
+                    if(snake_px[k]!=was[k])differ++;}
+            }
+        }
+        snk_gulp_at=kg;snk_die_at=0;
+        printf("snake body: %ld pixels drawn, %ld not as the painter before drew them\n",drawn,differ);
+        assert(drawn>400000 && !differ);
+        snake_state=keep;snk_bg_dirty=true;frame(100);
+    }
     lv_obj_send_event(snake_mode_buttons[1],LV_EVENT_CLICKED,NULL);assert(snake_state.levels);
     snake_state.score=9;snake_state.food_x=9;snake_state.food_y=8;
     snake_started=true;snake_tick(NULL);
@@ -4353,7 +4750,8 @@ int main(void) {
             handle_button(SYS_USB_CONNECTED);unlink(DB_USB_NOTE);
             assert(test_usb_bl_tmo==(int)(sl_power_sleep_ms()/1000)&&test_usb_bl_tmo>=30);
             assert(test_usb_bl_tmo_plugged==test_usb_bl_tmo);
-            assert(test_bl_tmo==0&&test_bl_tmo_plugged==0);
+            assert(test_usb_bl_off==15);   /* that timeout dims; off 15 s on (it stayed dim for 13 min, Nov 10) */
+            assert(test_bl_tmo==0&&test_bl_tmo_plugged==0&&test_bl_off==0);
         }
         global_settings.sloppy_sleep=sl0;global_settings.backlight_timeout=bt0;global_settings.backlight_timeout_plugged=bp0;
         printf("PASS: the USB screen goes dark after the sleep time (30 s, 1 min, 2 min), never left lit; ours are back after\n");
@@ -4446,6 +4844,42 @@ int main(void) {
      touch_at(aa.x1+192,aa.y1+140,false);
      assert(snake_started && snake_state.next_dy==-1);
      assert(lv_obj_get_scroll_y(lv_obj_get_child(snake_page_obj,1))==0);}
+    {   /* a quick flick, down and up between two frames, still steers, and
+         * two flicks inside one frame are both kept, in order; a tap is no
+         * turn (swipes missed on a test R1, Nov 12) */
+        struct sl_snake_state *st=&snake_state;
+        snake_reset(false);
+        lv_area_t aa;lv_obj_get_coords(snake_board,&aa);int cx=aa.x1+192,cy=aa.y1+210;
+        t_trail(cx,cy,true);t_trail(cx,cy-30,true);t_trail(cx,cy-40,false);frame(40);
+        assert(snake_started && st->next_dy==-1);
+        snk_step_at=snk_now()-sl_snake_period(st)/2;
+        t_trail(cx,cy,true);t_trail(cx+2,cy+1,false);frame(40);
+        assert(st->next_dx==0 && st->next_dy==-1 && !st->has_queued_turn);
+        snk_step_at=snk_now()-sl_snake_period(st)/2;
+        t_trail(cx,cy,true);t_trail(cx+30,cy,true);t_trail(cx+40,cy,false);
+        t_trail(cx,cy,true);t_trail(cx,cy+30,true);t_trail(cx,cy+40,false);frame(40);
+        assert((st->next_dx==1&&st->has_queued_turn&&st->queued_dy==1) || (st->dx==1&&st->next_dy==1));
+        /* paused, the trail is dropped: nothing old steers after */
+        snake_paused=true;t_trail(cx,cy,true);t_trail(cx-40,cy,false);frame(40);snake_paused=false;
+        int ndx=st->next_dx,ndy=st->next_dy;frame(40);
+        assert(st->next_dx==ndx && st->next_dy==ndy);
+        printf("PASS: Snake: a flick inside one frame steers, two in one frame both kept, a tap is no turn.\n");
+        /* a tap that came and went between two reads still lands (the pause
+         * key); one the reader saw lands once, not twice */
+        snake_reset(false);snake_steer(0,-1);assert(snake_started && st->alive && !snake_paused);
+        {lv_obj_t *pb=lv_obj_get_parent(snake_pause_label);lv_area_t pa;lv_obj_get_coords(pb,&pa);
+         int px=(pa.x1+pa.x2)/2,py=(pa.y1+pa.y2)/2;
+         t_trail(px,py,true);t_trail(px+3,py-2,false);frame(40);frame(40);frame(40);
+         assert(snake_paused);
+         key_tap(pb);frame(40);frame(40);assert(!snake_paused);
+         key_tap(pb);frame(40);frame(40);assert(snake_paused);
+         key_tap(pb);frame(40);frame(40);assert(!snake_paused);}
+        printf("PASS: a whole tap between two touch reads is played back, a seen one lands once.\n");
+    }
+    snake_reset(false);
+    {lv_area_t aa;lv_obj_get_coords(snake_board,&aa);
+     touch_at(aa.x1+192,aa.y1+210,true);touch_at(aa.x1+192,aa.y1+150,true);touch_at(aa.x1+192,aa.y1+140,false);
+     assert(snake_started);}
     {   struct sl_snake_state *st=&snake_state;int period=sl_snake_period(st);
         /* one stroke, two turns: right then down, both kept (the second queued) */
         snk_step_at=snk_now()-period/2;
@@ -5234,9 +5668,18 @@ int main(void) {
         assert(audio_seeks==seeks+1 && labs((long)test_track.elapsed-(long)test_track.length*4/5)<(long)test_track.length/30);
         assert(np_open && lv_obj_get_y(np)==0);
         lv_area_t vk;lv_obj_get_coords(np_vol,&vk);int vy=(vk.y1+vk.y2)/2,vw=vk.x2-vk.x1,v0=global_status.volume;
+        /* a tap on the bar, even near its top end and with a little wobble, leaves the volume
+         * alone: a thumb going for Next hit it and played at full volume (Nov 10) */
+        global_status.volume=volume_from_pct(25);np_update(false);frame(100);
+        { int before=global_status.volume;
+          touch_at(vk.x2-6,vy,true);touch_at(vk.x2-3,vy+2,true);touch_at(vk.x2-3,vy+2,false);frame(200);
+          assert(global_status.volume==before && np_open);
+          touch_at(vk.x1+4,vy,true);touch_at(vk.x1+4,vy,false);frame(200);
+          assert(global_status.volume==before); }
+        /* a slide moves it by as far as the finger goes, from where it was */
         touch_at(vk.x1+vw/4,vy,true);for(int i=1;i<=4;i++)touch_at(vk.x1+vw/4+i*vw/8,vy,true);
         touch_at(vk.x1+vw*3/4,vy,false);frame(100);
-        assert(volume_pct()>=70 && volume_pct()<=80 && np_open && lv_obj_get_y(np)==0);
+        assert(volume_pct()>=65 && volume_pct()<=78 && np_open && lv_obj_get_y(np)==0);
         { int v=lv_slider_get_value(np_vol);for(int i=0;i<4;i++){np_update(false);frame(250);}assert(lv_slider_get_value(np_vol)==v); }   /* no snap back after a drag */
         global_status.volume=sound_min(SOUND_VOLUME);np_update(false);assert(lv_slider_get_value(np_vol)==0);
         global_status.volume=v0;np_update(false);
@@ -5655,6 +6098,11 @@ int main(void) {
             sl_power.mode=SL_POWER_DARK;sl_power_apply();frame(100);
             t_down=false;touch_dark_poll();assert(touch_paused);
             touch_dark_poll();assert(touch_paused);              /* no finger: still stopped */
+            /* the R1 does post a touch event while dark: it no longer starts the reader, whose
+             * one tap woke the screen (Double tap to wake felt like tap to wake, Nov 11) */
+            touch_wake_event(BUTTON_TOUCHSCREEN,(intptr_t)((W/2)<<16|400));assert(touch_paused);
+            touch_wake_event(BUTTON_TOUCHSCREEN|BUTTON_REL,(intptr_t)((W/2)<<16|400));assert(touch_paused);
+            frame(40);assert(sl_power.mode==SL_POWER_DARK);
             t_x=W/2;t_y=400;t_down=true;touch_dark_poll();assert(touch_paused&&dark_tap_armed);   /* one tap */
             touch_dark_poll();t_down=false;touch_dark_poll();assert(touch_paused);
             dark_tap_ms-=450;touch_dark_poll();assert(touch_paused&&!dark_tap_armed);
@@ -7182,25 +7630,43 @@ int main(void) {
             assert(fake_has(rp,"----- sloppy.prev.log") && fake_has(rp,"routed 1, xx:xx:xx:xx:xx:xx aac") && !fake_has(rp,"AA:BB:CC"));
             assert(fake_has(rp,"----- crash.log") && fake_has(rp,"----- end -----"));
             sim_remove(rp);sim_remove(ROCKBOX_DIR "/sloppy/sloppy.prev.log");
-            /* Record lag: on for a day, kept across a restart, then off by itself */
-            lag_test_now=1000000;lag_set(1);assert(lag_until==1000000+LAG_DAY && fake_find(LAG_FILE)>=0);
-            lag_until=0;lag_load();assert(lag_until==1000000+LAG_DAY && lag_on());
+            /* Record lag: on with no file (the beta's default), off kept across a restart,
+             * on again; a day's end time left from before reads as on */
+            assert(fake_find(LAG_FILE)<0);lag_load();assert(lag_on());
             unsigned x0=lag_xruns_seen;lag_test_xruns=x0+2;lag_audio();assert(lag_xruns_seen==x0+2);
-            lag_test_now+=LAG_DAY;assert(!lag_on() && !lag_until && fake_find(LAG_FILE)<0);
-            lag_test_now=0;
+            {   /* tap to sound: a skip counts from the new song, not the old one still playing */
+                struct mp3entry kt=test_track;int ks=test_status;
+                test_status=AUDIO_STATUS_PLAY;strlcpy(test_track.path,"/a.mp3",sizeof test_track.path);test_track.elapsed=5000;
+                heard_ask("next",true);heard_poll();test_track.elapsed=5100;heard_poll();heard_poll();assert(heard.at);
+                strlcpy(test_track.path,"/b.mp3",sizeof test_track.path);test_track.elapsed=0;heard_poll();assert(heard.at);
+                test_track.elapsed=30;heard_poll();assert(heard.at);
+                test_track.elapsed=60;heard_poll();assert(!heard.at && lbf_log_has("play: sound within") && lbf_log_has("ms of next"));
+                test_track.elapsed=8000;heard_ask("back to the start",true);test_track.elapsed=8040;heard_poll();heard_poll();assert(heard.at);
+                test_track.elapsed=0;heard_poll();test_track.elapsed=50;heard_poll();assert(!heard.at && lbf_log_has("ms of back to the start"));
+                test_status=AUDIO_STATUS_PLAY|AUDIO_STATUS_PAUSE;heard_ask("resume",false);heard_poll();heard_poll();assert(heard.at);
+                test_status=AUDIO_STATUS_PLAY;heard_poll();test_track.elapsed+=40;heard_poll();assert(!heard.at && lbf_log_has("ms of resume"));
+                test_status=0;heard_ask("play",false);heard_poll();assert(heard.at);
+                heard.at=sl_ms()-10001;heard_poll();assert(!heard.at && lbf_log_has("play: no sound 10 s after play"));
+                test_track=kt;test_status=ks;
+            }
+            lag_set(0);assert(!lag_on() && fake_find(LAG_FILE)>=0);
+            lag_rec=true;lag_load();assert(!lag_on());
+            lag_set(1);assert(lag_on() && fake_find(LAG_FILE)<0);
+            lag_rec=false;lag_load();assert(!lag_on());lag_rec=true;   /* no file: nothing read, the default stands */
+            fake_put(LAG_FILE,"1794000000\n",11);lag_rec=false;lag_load();assert(lag_on());sim_remove(LAG_FILE);
             /* both under Advanced, in every language, and the phone page's button */
             advanced_page();frame(400);
             assert(has_text(lv_screen_active(),"Make a bug report") && has_text(lv_screen_active(),"Record lag"));
             page_pop();frame(400);
             static const char *const words[] = { "TROUBLESHOOTING", "Make a bug report", "A file on the card for a GitHub issue", "Record lag",
-                "For a day, every slow moment and audio dropout goes in the log", "Bug report saved on the card: %s",
+                "Every slow moment and audio dropout goes in the log", "Bug report saved on the card: %s",
                 "The bug report could not be saved", "Download bug report" };
             int l0=global_settings.sloppy_language;
             for(int l=1;l<=SL_LANG_LAST;l++){global_settings.sloppy_language=l;
                 for(unsigned k=0;k<ARRAYLEN(words);k++)assert(strcmp(sl_tr(words[k]),words[k])!=0);}
             global_settings.sloppy_language=l0;
             assert(strstr(sl_remote_html,"/report.txt") && strstr(sl_remote_html,"Download bug report"));
-            printf("PASS: a bug report is one scrubbed file on the card (no addresses, names, accounts or keys); Record lag stops after a day\n");
+            printf("PASS: a bug report is one scrubbed file on the card (no addresses, names, accounts or keys); Record lag is on until switched off\n");
         }
         {   /* the log of a frozen start outlives a few resets: eight earlier starts are kept, and a start
              * that ended without a clean shutdown has its last lines copied to the top of the next log */
@@ -9151,7 +9617,7 @@ int main(void) {
             assert(lv_obj_get_style_image_opa(td.stamp[1],0)>150);shot_now("taste-swipe.ppm");
             for(int x=cx+90;x<=cx+180;x+=15)touch_at(x,cy,true);touch_at(cx+180,cy,false);frame(400);
             assert(td.at==1 && ts_rating(t0)==1 && !strcmp(quiz.clip.path,TP(t1)));
-            assert(queued==2);   /* one snippet in the queue at a time */
+            assert(queued==2 && quiz.clip.sample_index==1 && queue_tracks[1]==t1);   /* one snippet in the queue at a time, where the last one was */
             td_throw(false,0,0);frame(400);assert(td.at==2 && ts_rating(t1)==-1);
             /* a short drag springs back and rates nothing */
             lv_obj_get_coords(td_slot_of(td.at)->img,&a);cx=(a.x1+a.x2)/2;
@@ -10019,6 +10485,27 @@ int main(void) {
             while(npages>1){page_pop();for(int i=0;i<20;i++)pf_frame(16);}}
         pf_end();
         }
+        if(!only||!strcmp(only,"bt")){   /* the Bluetooth page, open and left alone (117 ms a slow pass on the R1, Nov) */
+        pf_begin("bt page");
+        for(int r=0;r<reps;r++){sl_bt_page();for(int i=0;i<120;i++)pf_frame(16);
+            while(npages>1){page_pop();for(int i=0;i<20;i++)pf_frame(16);}}
+        pf_end();
+        }
+        if(!only||!strcmp(only,"snake")){   /* a 40-long snake gliding along a clear row (it ran at 65-81 ms a frame on the R1, Nov 10) */
+        pf_begin("snake 40 long");
+        for(int r=0;r<reps;r++){snake_page();for(int i=0;i<10;i++)pf_frame(16);
+            snake_reset(false);struct sl_snake_state *ss=&snake_state;int n=0;
+            for(int x=3;x>=0;x--){ss->x[n]=x;ss->y[n++]=0;}
+            for(int x=0;x<16;x++){ss->x[n]=x;ss->y[n++]=1;}
+            for(int x=15;x>=0;x--){ss->x[n]=x;ss->y[n++]=2;}
+            for(int x=0;x<4;x++){ss->x[n]=x;ss->y[n++]=3;}
+            ss->len=n;ss->dx=ss->next_dx=1;ss->dy=ss->next_dy=0;ss->alive=true;ss->food_x=10;ss->food_y=10;
+            snake_started=true;snake_paused=false;snk_step_at=snk_now();snk_bg_dirty=true;
+            for(int i=0;i<120;i++)pf_frame(16);
+            if(!r){uint32_t h=2166136261u;for(int i=0;i<SNAKE_BOARD*SNAKE_BOARD;i++)h=(h^snake_px[i])*16777619u;printf("snake board hash %08x\n",h);}
+            page_pop();for(int i=0;i<20;i++)pf_frame(16);}
+        pf_end();
+        }
         if(!only||!strcmp(only,"quiz")){   /* the quiz menu, then a music game's first question */
         pf_begin("quiz open");
         for(int r=0;r<reps;r++){lib_state=SL_LIB_READY;quiz_page();for(int i=0;i<40;i++)pf_frame(16);
@@ -10030,6 +10517,17 @@ int main(void) {
         pf_begin("page open");
         for(int r=0;r<5*reps;r++){sl_library_page();for(int i=0;i<35;i++)pf_frame(16);page_pop();for(int i=0;i<20;i++)pf_frame(16);}
         pf_end();
+        }
+        if(!only||!strcmp(only,"back")){   /* back to home alone, with the R1's free memory (16 MB, Nov logs: 60-80 ms a frame) and with plenty */
+        for(int m=0;m<2;m++){
+            sl_mem_test_kb=m?0:16384;
+            for(int r=0;r<reps;r++){sl_library_page();for(int i=0;i<35;i++)frame(16);
+                if(r==0)pf_begin(m?"back home, plenty":"back home, 16 MB");
+                struct timespec a,b;clock_gettime(CLOCK_THREAD_CPUTIME_ID,&a);page_pop();clock_gettime(CLOCK_THREAD_CPUTIME_ID,&b);
+                for(int i=0;i<20;i++)pf_frame(16);
+                if(r==0){pf_end();printf("perf back home: the pop itself (snapshots, if taken) R1 est %.1f ms\n",((b.tv_sec-a.tv_sec)*1e9+(b.tv_nsec-a.tv_nsec))/1e6*PF_K);}}
+        }
+        sl_mem_test_kb=0;
         }
         if(!only||!strcmp(only,"np")){   /* Now Playing on a real cover: up, a song playing, the lyrics opened and shut, down */
         bool ra=test_real_art;test_real_art=true;
@@ -12214,6 +12712,68 @@ int main(void) {
     ab_tests();
     rm_tests();
     ot_tests();
+    if (getenv("SLOPPY_RETAIN")) {   /* what each app keeps allocated after it closes: open, close, twice */
+        #define RT(f) { #f, f }
+        struct { const char *name; void (*open)(void); } rt[] = {
+            RT(t48_page), RT(clicker_page), RT(flappy_page), RT(coin_page), RT(magic_page), RT(ragdoll_page),
+            RT(sudoku_page), RT(snake_page), RT(spoon_page), RT(chess_page), RT(pet_page), RT(arcade_page),
+            RT(quiz_page), RT(radio_page), RT(spacey_page), RT(metronome_page), RT(points_page), RT(grave_page),
+            RT(foryou_page), RT(loved_page), RT(wrapped_page), RT(music_page), RT(albums_page), RT(artists_page),
+            RT(songs_page), RT(sl_library_page), RT(search_page), RT(podcasts_page), RT(ebooks_page),
+            RT(sound_page), RT(eq_page), RT(sl_bt_page), RT(sl_wifi_page), RT(webradio_page), RT(subsonic_page),
+            RT(years_page), RT(genres_page), RT(picks_page), RT(mix_page), RT(appearance_page), RT(accent_page) };
+        while(npages>1){page_pop();frame(500);}
+        for (size_t i = 0; i < sizeof rt / sizeof rt[0]; i++) {
+            long cyc[2];
+            for (int c = 0; c < 2; c++) {
+                malloc_statistics_t a, b; malloc_zone_statistics(NULL, &a);
+                rt[i].open(); for (int k = 0; k < 6; k++) frame(100);
+                while (npages > 1) { page_pop(); frame(500); }
+                frame(500); malloc_zone_statistics(NULL, &b);
+                cyc[c] = (long)b.size_in_use - (long)a.size_in_use;
+            }
+            printf("retain %-18s first %6ld KB, again %6ld KB\n", rt[i].name, cyc[0] / 1024, cyc[1] / 1024);
+        }
+    }
+    {   /* An app's memory goes when it closes (its pictures, the coin's faces, Your taste's
+         * model), and opens again drawn whole; a heavy app does not open without room for it
+         * (test R1s froze at 1.5 to 2.5 MB free, Nov) */
+        #define GIVEN_BACK(b) given_back((b), sizeof (b))
+        while(npages>1){page_pop();frame(500);}
+        sl_mem_test_kb=0;
+        pet_page();frame(300);
+        if(pet_page_obj&&pet_hab_canvas){assert(!GIVEN_BACK(pet_hab_buf));
+            while(npages>1){page_pop();frame(500);}
+            assert(GIVEN_BACK(pet_hab_buf)&&GIVEN_BACK(pet_stat_buf)&&GIVEN_BACK(pet_scene_buf)&&!pet_page_obj);
+            pet_page();frame(300);assert(pet_page_obj&&!GIVEN_BACK(pet_hab_buf));   /* drawn whole again */
+            while(npages>1){page_pop();frame(500);}}
+        chess_page();frame(300);assert(chess_art_ready&&!GIVEN_BACK(chess_spr));
+        while(npages>1){page_pop();frame(500);}
+        assert(!chess_page_obj&&!chess_art_ready&&GIVEN_BACK(chess_spr)&&GIVEN_BACK(chess_big)&&GIVEN_BACK(chess_buf));
+        chess_page();frame(300);assert(chess_art_ready&&!GIVEN_BACK(chess_spr));
+        while(npages>1){page_pop();frame(500);}
+        accent_page();frame(300);assert(!GIVEN_BACK(accent_wheel_pixels));
+        while(npages>1){page_pop();frame(500);}
+        assert(GIVEN_BACK(accent_wheel_pixels));
+        coin_page();frame(300);assert(coin_art_ready);
+        while(npages>1){page_pop();frame(500);}
+        assert(!coin_page_obj&&!coin_art_ready&&coin_rows==0&&GIVEN_BACK(coin_tex));
+        coin_page();frame(300);assert(coin_art_ready&&!GIVEN_BACK(coin_tex));   /* short of a warm-up, the open paints them */
+        while(npages>1){page_pop();frame(500);}
+        sl_mem_release("test",false);assert(!coin_art_ready&&GIVEN_BACK(coin_tex));   /* short of memory they go too */
+        if(sl_lib.n_tracks>=20){taste_page(false);frame(400);assert(td.page);
+            while(npages>1){page_pop();frame(600);}
+            assert(!td.page&&!tm.f&&!tm.al&&!tm.ok);}
+        /* the check before opening: short, the caches go and it says so; with room it opens */
+        sl_mem_test_kb=SL_APP_MIN_KB+500;
+        int n0=npages;snake_page();frame(200);assert(npages==n0&&!snake_page_obj);
+        flappy_page();frame(200);assert(npages==n0&&!fl.page);
+        sl_mem_test_kb=SL_APP_MIN_KB+900;snake_page();frame(300);assert(snake_page_obj&&npages==n0+1);   /* room for it */
+        while(npages>1){page_pop();frame(500);}
+        sl_mem_test_kb=0;snake_page();frame(300);assert(snake_page_obj);
+        while(npages>1){page_pop();frame(500);}
+        printf("PASS: an app's pictures, the coin's faces and Your taste's model go when it closes and come back drawn whole; a heavy app does not open without room\n");
+    }
     {   /* the screen audit's gate: nothing overlaps, is cut off, hides under the chrome, is too small to tap or too faint */
         au_gate();
         if (AU_GATE_STRICT && !getenv("SLOPPY_AUDIT_REPORT")) assert(au_total == 0 && au_glyph_missing == 0 && au_sym_foreign == 0);

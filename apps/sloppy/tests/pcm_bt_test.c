@@ -26,6 +26,7 @@ unsigned long pcm_sampr = 44100;
 #define RATE 44100
 #define SERVER_FRAMES 22050             /* 500 ms behind the ring */
 #define QCAP (1 << 18)
+static volatile int closed_gone;      /* a gone PCM was asked to drop or close */
 struct fake_pcm {
     snd_pcm_state_t st;
     int nonblock;
@@ -34,6 +35,7 @@ struct fake_pcm {
     unsigned head;
     long last_us;
     double carry;
+    volatile int gone;                  /* the headphones went: Drop and Close never answer */
 };
 static pthread_mutex_t dev_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct fake_pcm *dev;
@@ -96,11 +98,16 @@ int snd_pcm_open(snd_pcm_t **pcm, const char *name, snd_pcm_stream_t s, int mode
     *pcm = p;
     return 0;
 }
-int snd_pcm_close(snd_pcm_t *pcm) { (void)pcm; return 0; }
+int snd_pcm_close(snd_pcm_t *pcm)
+{
+    if (pcm->gone) { closed_gone = 1; for (;;) sleep(1); }
+    return 0;
+}
 int snd_pcm_nonblock(snd_pcm_t *pcm, int nb) { pcm->nonblock = nb; return 0; }
 int snd_pcm_drain(snd_pcm_t *pcm) { (void)pcm; assert(!"a Bluetooth PCM is never drained"); return 0; }
 int snd_pcm_drop(snd_pcm_t *pcm)
 {
+    if (pcm->gone) { closed_gone = 1; for (;;) sleep(1); }
     pthread_mutex_lock(&dev_lock);
     advance(pcm);
     pcm->head += pcm->q; pcm->q = 0;     /* the plugin's Drop empties BlueALSA's FIFO too */
@@ -242,8 +249,8 @@ int main(void)
     assert(dev && dev->nonblock);
     printf("ring %ld frames (%ld ms), period %ld, start at %ld; %d frames (500 ms) behind it\n",
            dev->buf, dev->buf * 1000 / RATE, dev->period, dev->start_th, SERVER_FRAMES);
-    assert(dev->buf * 1000 / RATE <= 200);
-    printf("PASS: a Bluetooth PCM is non-blocking, its ring at most 200 ms.\n");
+    assert(dev->buf * 1000 / RATE >= 180 && dev->buf * 1000 / RATE <= 200);
+    printf("PASS: a Bluetooth PCM is non-blocking, its ring 186 ms (rides out a squeeze, a skip still quick).\n");
 
     /* the delay the visualizers and the progress bar wait out */
     /* sampled every 100 ms for 1.5 s, the median taken: it is read four
@@ -312,5 +319,20 @@ int main(void)
     hiby_pcm_set_bt_mac(NULL);
     assert(hiby_pcm_play_rate(96000) == 96000);
     printf("PASS: over Bluetooth the mixer keeps the link's rate between tracks.\n");
-    return 0;
+
+    /* the headphones gone: BlueALSA never answers the drop or the close,
+     * and the route back to the speaker must not wait for it (every
+     * Rockbox thread is one OS thread: a test R1 froze, 10 Nov) */
+    pcm_alsa_set_playback_device("bluealsa:DEV=AA:BB:CC:DD:EE:01,PROFILE=a2dp");
+    pcm_play_lock(); pcm_play_dma_start(first, 0); pcm_play_unlock();
+    struct fake_pcm *bt = dev;
+    bt->gone = 1;
+    long s0 = now_us();
+    pcm_alsa_switch_playback_device("hw:0,0");
+    long switch_ms = (now_us() - s0) / 1000;
+    for (int i = 0; i < 100 && !closed_gone; i++) wait_ms(5);
+    printf("route back to the speaker with the headphones gone: %ld ms, close asked %d\n", switch_ms, closed_gone);
+    assert(switch_ms < 500 && dev != bt && closed_gone);
+    printf("PASS: a Bluetooth output that never closes doesn't hold the player.\n");
+    _exit(0);                            /* its closing thread waits for good; the speaker's cleanup is no test */
 }

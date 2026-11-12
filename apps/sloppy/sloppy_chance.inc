@@ -383,13 +383,97 @@ static bool coin_paint(int ms)           /* 0: all that is left */
     coin_art_ready = coin_rows == 2 * COIN_TEX;
     return coin_art_ready;
 }
+/* The faces (392 KB) are given back when the coin closes or memory runs
+ * low, and painted again in idle moments only while memory is plentiful:
+ * kept for good, they were part of what left the R1 short (Nov). Short
+ * of memory, an open paints them, as before the warm-up. */
+#define COIN_WARM_MIN_KB (12 * 1024)
+static void coin_faces_release(void)
+{
+    if (coin_page_obj || !coin_rows) return;
+    sl_give_back(coin_tex, sizeof coin_tex);
+    coin_rows = 0;
+    coin_art_ready = false;
+}
+/* Painted once, the faces are also kept on the card (as Chess keeps its
+ * pieces: the build's name and a sum of the bytes head the file): opened
+ * before the warm-up is through, which is every time it was closed a
+ * moment ago, the coin reads them back and does not paint for 1.4 s. */
+#define COIN_ART_FILE ROCKBOX_DIR "/sloppy/coin-art.bin"
+extern const char rbversion[];
+struct coin_art_head { char magic[8]; char build[40]; uint32_t sum; };
+static void coin_art_head_now(struct coin_art_head *h)
+{
+    memset(h, 0, sizeof *h);
+    memcpy(h->magic, "GCOIN1\0", 8);
+    snprintf(h->build, sizeof h->build, "%s", rbversion);
+    uint32_t sum = 2166136261u;
+    const uint8_t *b = (const uint8_t *)coin_tex;
+    for (size_t i = 0; i < sizeof coin_tex; i++) sum = (sum ^ b[i]) * 16777619u;
+    h->sum = sum;
+}
+static bool coin_art_load(void)
+{
+    int fd = open(COIN_ART_FILE, O_RDONLY);
+    if (fd < 0) return false;
+    struct coin_art_head h, now;
+    char more;
+    bool ok = read(fd, &h, sizeof h) == (ssize_t)sizeof h && read(fd, coin_tex, sizeof coin_tex) == (ssize_t)sizeof coin_tex &&
+              read(fd, &more, 1) == 0;
+    close(fd);
+    if (!ok) return false;
+    coin_art_head_now(&now);
+    return !memcmp(&h, &now, sizeof h);
+}
+static void coin_art_save(void)
+{
+    struct coin_art_head h;
+    coin_art_head_now(&h);
+    mkdir(ROCKBOX_DIR "/sloppy");
+    int fd = open(COIN_ART_FILE ".tmp", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return;
+    bool ok = write(fd, &h, sizeof h) == (ssize_t)sizeof h && write(fd, coin_tex, sizeof coin_tex) == (ssize_t)sizeof coin_tex;
+    if (close(fd) < 0) ok = false;
+    if (!ok || rename(COIN_ART_FILE ".tmp", COIN_ART_FILE) < 0) remove(COIN_ART_FILE ".tmp");
+}
+/* the faces for a coin that is opening: read back, or painted and kept */
+static void coin_art_now(void)
+{
+    if (coin_art_ready) return;
+    uint32_t t0 = sl_ms();
+    bool kept = coin_art_load();
+    if (kept)
+    {
+        coin_build_luts();               /* what painting's first row makes: the rim's too */
+        coin_rows = 2 * COIN_TEX;
+        coin_art_ready = true;
+    }
+    else
+    {
+        coin_rows = 0;                   /* a read that failed may have written over warmed rows */
+        coin_paint(0);
+        coin_art_save();
+    }
+    sl_log("coin: faces %s in %lu ms", kept ? "read from the card" : "painted", (unsigned long)(sl_ms() - t0));
+}
 static void coin_warm(lv_timer_t *t)
 {
-    if (coin_art_ready) { lv_timer_delete(t); return; }
+    (void)t;
+    static uint32_t room_checked;
+    static bool room;
+    if (coin_art_ready) return;
     /* on a still home screen only: a slice during a game would hitch it */
     if (npages <= 1 && !np_open && g_state == G_IDLE && !lv_anim_count_running() &&
         sl_ms() - last_touch_ms > 1200)
-        coin_paint(8);
+    {
+        if (sl_ms() - room_checked > 2000 || !room_checked)
+        {
+            long kb = sl_mem_available_kb();
+            room = kb < 0 || kb >= COIN_WARM_MIN_KB + sl_mem_floor_kb();
+            room_checked = sl_ms();
+        }
+        if (room) coin_paint(8);
+    }
 }
 
 /* ---- one frame of the coin ------------------------------------------- */
@@ -838,9 +922,11 @@ static void coin_deleted(lv_event_t *e)
     coin_state = COIN_IDLE;
     coin_in_flight = false;
     coin_burst_at = coin_pop_at = coin_glint_at = 0;
-    /* both are drawn again on the next open; the faces stay, warmed at start-up */
+    /* all drawn again on the next open; the faces warmed again in idle
+     * moments while memory is plentiful (coin_warm) */
     sl_give_back(coin_px, sizeof coin_px);
     sl_give_back(coin_shadow_px, sizeof coin_shadow_px);
+    coin_faces_release();
     statusbar_retheme();
 }
 static void coin_arrow_bob(void *o, int32_t v) { lv_obj_set_style_translate_y(o, v, 0); }
@@ -849,7 +935,8 @@ static bool coin_on_top(void) { return coin_page_obj && npages && pages[npages -
 static void coin_page(void)
 {
     if (page_bring_back(coin_page_obj)) return;
-    if (!coin_art_ready) coin_paint(0);   /* opened before the warm-up finished */
+    if (!sl_app_room(coin_art_ready ? 700 : 1100, "Flip a Coin")) return;
+    coin_art_now();                       /* opened before the warm-up finished: from the card */
     lv_obj_t *p, *body = page_new("Flip a Coin", &p);
     coin_page_obj = p;
     coin_load();
@@ -1191,6 +1278,8 @@ static void magic_sky_paint(void)
  * the answer stay live objects on top: their colour and text change. */
 static void magic_ball_flatten(lv_obj_t *shine)
 {
+    lv_obj_update_layout(magic_ball);
+    if (!sl_mem_room((long)lv_obj_get_width(magic_ball) * lv_obj_get_height(magic_ball) * 4 / 1024, "the 8-ball's body")) return;
     lv_obj_add_flag(magic_window, LV_OBJ_FLAG_HIDDEN);
     magic_ball_buf = lv_snapshot_take(magic_ball, LV_COLOR_FORMAT_ARGB8888);
     lv_obj_remove_flag(magic_window, LV_OBJ_FLAG_HIDDEN);
@@ -1485,6 +1574,7 @@ static void magic_deleted(lv_event_t *e)
 static void magic_page(void)
 {
     if (page_bring_back(magic_page_obj)) return;
+    if (!sl_app_room(400, "Magic 8 Ball")) return;
     lv_obj_t *p, *body = page_new("Magic 8 Ball", &p);
     magic_page_obj = p;
     magic_choice = -1;
@@ -1512,9 +1602,16 @@ static void magic_page(void)
     lv_obj_set_style_bg_opa(scene, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(scene, 1, 0);
     lv_obj_set_style_border_color(scene, lv_color_hex(0x453969), 0);
-    magic_sky_px = malloc((size_t)MAGIC_SKY_W * MAGIC_SKY_H * 2);
-    magic_sky_bg = malloc((size_t)MAGIC_SKY_W * MAGIC_SKY_H * 2);
-    magic_glow_a = magic_glow_make();
+    /* the sky, its still copy and the glow are ~0.9 MB, and making the copy
+     * borrows 0.7 MB more: with Bluetooth playing a test R1 had 2.5 MB, and
+     * the 8 Ball froze it for good (2026-11-08). Without room, the scene's
+     * own gradient. */
+    if (sl_mem_room(1600, "the 8-ball's sky"))
+    {
+        magic_sky_px = malloc((size_t)MAGIC_SKY_W * MAGIC_SKY_H * 2);
+        magic_sky_bg = malloc((size_t)MAGIC_SKY_W * MAGIC_SKY_H * 2);
+        magic_glow_a = magic_glow_make();
+    }
     if (magic_sky_px && magic_sky_bg)
     {
         magic_sky = lv_canvas_create(scene);
@@ -1611,6 +1708,12 @@ static void magic_page(void)
     {
         lv_obj_delete(magic_sky);
         magic_sky = NULL;
+    }
+    if (!magic_sky)                                 /* and nothing kept for it */
+    {
+        free(magic_sky_px); free(magic_sky_bg); free(magic_glow_a);
+        magic_sky_px = magic_sky_bg = NULL;
+        magic_glow_a = NULL;
     }
     magic_sky_paint();
     page_push(p);

@@ -252,26 +252,38 @@ static void control_error_log(const char *what, int err)
 #define notify_control_access_error() (splashf(HZ*2, "%s %s", \
                             __func__, ID2P(LANG_PLAYLIST_CONTROL_ACCESS_ERROR)))
 #else
+#ifdef HAVE_SLOPPY_UI
+/* SloppyOS: logged, not splashed. A splash sleeps its 2 s on the thread
+ * that hit the error, the UI's, and a song preview reads the queue a few
+ * times: Your taste took 15 s a card and froze a thrown card on screen
+ * (a test R1, 2026-11-08). The first few are logged; a broken queue
+ * would fill the log. */
+static int access_errors_logged;
+#endif
 static void notify_access_error(void) {
     int err = errno;
-    control_error_log("playlist file", err);   /* the cause, as for the control file */
 #ifdef HAVE_SLOPPY_UI
-    if (err == EROFS) return;           /* said in words by the player instead */
-#endif
+    if (access_errors_logged < 20) { access_errors_logged++; control_error_log("playlist file", err); }
+    else sloppy_card_error(err);
+#else
+    control_error_log("playlist file", err);   /* the cause, as for the control file */
     splash(HZ*2, ID2P(LANG_PLAYLIST_ACCESS_ERROR));
+#endif
 }
 static void notify_control_access_error(void) {
     /* The cause, for the next report: errno is what the last file call
      * left (EROFS when the card went read-only, say). */
     int err = errno;
-    control_error_log("playlist control file", err);
 #ifdef HAVE_SLOPPY_UI
-    if (err == EROFS) return;           /* said in words by the player instead */
-#endif
+    if (access_errors_logged < 20) { access_errors_logged++; control_error_log("playlist control file", err); }
+    else sloppy_card_error(err);
+#else
+    control_error_log("playlist control file", err);
 #if (CONFIG_PLATFORM & PLATFORM_HOSTED)
     splashf(HZ*2, "%s (errno %d: %s)", str(LANG_PLAYLIST_CONTROL_ACCESS_ERROR), err, strerror(err));
 #else
     splashf(HZ*2, "%s (errno %d)", str(LANG_PLAYLIST_CONTROL_ACCESS_ERROR), err);
+#endif
 #endif
 }
 #endif

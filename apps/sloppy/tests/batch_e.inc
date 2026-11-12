@@ -996,7 +996,7 @@ static void e_give_back_tests(void) {
         printf("given back on close: %s, %zu KB\n", app[i].name, app[i].size / 1024);
     }
     assert(e_nonzero(snake_bg_px, sizeof snake_bg_px) == 0 && e_nonzero(fl_bg, sizeof fl_bg) == 0);
-    assert(!fl_bg_made[0] && !fl_bg_made[1] && coin_art_ready);   /* the faces stay: warmed at start-up */
+    assert(!fl_bg_made[0] && !fl_bg_made[1] && !coin_art_ready && coin_rows == 0);   /* the faces too: warmed again only with memory to spare (Nov 11) */
 }
 static void e_tests(void) {
     e_give_back_tests();

@@ -957,6 +957,7 @@ static void pet_game_deleted(lv_event_t *e)
     pet_game_page_obj = pet_game_message = pet_game_score = NULL;
     pet_game_canvas = pet_game_float = pet_game_again = NULL;
     pet_game_pads[0] = pet_game_pads[1] = NULL;
+    sl_give_back(pet_game_buf, sizeof pet_game_buf);   /* 306 KB, filled whole on every frame of a game */
     pet_refresh();
 }
 

@@ -272,7 +272,7 @@ static bool quiz_find_clip_track(void)
     }
     return false;
 }
-static bool clip_insert(int track);
+static bool clip_insert(int track, int position);
 static bool quiz_clip_begin(void)
 {
     if (quiz.kind != QUIZ_SONG || quiz.track < 0 || quiz.track >= sl_lib.n_tracks) return false;
@@ -295,6 +295,11 @@ static bool quiz_clip_begin(void)
     }
     if (!was_playing && original_amount == 0 && playlist_create(NULL, NULL) < 0)
     { toast_warn("Could not start the song clip"); return false; }
+    /* A clip taken out while stopped leaves Rockbox's playing index on the
+     * gap, at the end of a one-song list: "after the playing song" was then
+     * past the end. In the list, and the clip after it, by number. */
+    if (index >= original_amount) index = original_amount ? original_amount - 1 : 0;
+    if (index < 0) index = 0;
     quiz.clip.amount = original_amount;
     quiz.clip.index = index;
     /* A track skip can briefly expose bogus codec position data. Never feed
@@ -308,16 +313,16 @@ static bool quiz_clip_begin(void)
     quiz.clip.resume_crc32 = global_status.resume_crc32;
     quiz.clip.resume_elapsed = global_status.resume_elapsed;
     quiz.clip.resume_offset = global_status.resume_offset;
-    return clip_insert(quiz.track);
+    return clip_insert(quiz.track, original_amount ? index + 1 : 0);
 }
-/* The clip itself: track's middle, in front of the queue. */
-static bool clip_insert(int track)
+/* The clip itself: track's middle, at position in the list. */
+static bool clip_insert(int track, int position)
 {
     /* No sync: the playing song stops and playlist_start() below writes the
      * control file anyway, so a flush and fsync here only delay the clip. */
     char path[MAX_PATH];
     sl_track_path(track, path, sizeof path);
-    int inserted = playlist_insert_track(NULL, path, PLAYLIST_INSERT_FIRST, false, false);
+    int inserted = playlist_insert_track(NULL, path, position, false, false);
     if (inserted < 0)
     { toast_warn("Could not start the song clip"); return false; }
     quiz.clip.sample_index = inserted;
@@ -369,7 +374,12 @@ static bool clip_swap(int track)
     playlist_delete(NULL, quiz.clip.sample_index);
     quiz.clip.audible = quiz.clip.hushed = quiz.clip.heard_seen = false;
     quiz.clip.asked_at = sl_ms();
-    if (clip_insert(track)) return true;
+    /* where the last clip was, by number: the delete leaves the playing
+     * index on the gap, so "after the playing song" landed one further on,
+     * past the end when your list was one song, and the slot left between
+     * was read as the playlist file "/" ("Error accessing playlist file",
+     * 2 s each, a test R1 2026-11-08) */
+    if (clip_insert(track, quiz.clip.sample_index)) return true;
     quiz.clip.active = false;           /* the clip is gone: the queue is as it was */
     quiz_aa_reclaim();
     if (quiz.clip.was_playing) playlist_start(quiz.clip.index, quiz.clip.elapsed, 0);

@@ -48,6 +48,7 @@ struct snk_prim {
     float dx, dy, il2;              /* segment: b - a and 1 / |b - a|^2 */
     float cx, cy, uax, uay, ubx, uby, sweep, sg;   /* arc: centre, end directions */
     float p0, p1;                   /* path parameter at a and at b, in cells */
+    float gx0, gy0, gx1, gy1;       /* the piece itself, unpadded: it lies inside */
     int x0, y0, x1, y1;             /* pixel box, clipped */
 };
 
@@ -91,6 +92,7 @@ static bool snk_bits_live;
 
 static uint32_t snk_now(void) { return lv_tick_get(); }
 static float snk_clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+static inline float snk_pos(float v) { return v > 0 ? v : 0; }   /* fmaxf(0, v), with no call into libm for every pixel */
 static float snk_smooth(float v) { v = snk_clamp01(v); return v * v * (3 - 2 * v); }
 static float snk_back(float v)          /* ease out with a little overshoot */
 {
@@ -314,6 +316,7 @@ static void snk_prim_box(struct snk_prim *g, float ex, float ey)
 {
     float mx0 = fminf(fminf(g->ax, g->bx), ex), my0 = fminf(fminf(g->ay, g->by), ey);
     float mx1 = fmaxf(fmaxf(g->ax, g->bx), ex), my1 = fmaxf(fmaxf(g->ay, g->by), ey);
+    g->gx0 = mx0; g->gy0 = my0; g->gx1 = mx1; g->gy1 = my1;
     snk_box(mx0 - SNAKE_RMAX, my0 - SNAKE_RMAX, mx1 + SNAKE_RMAX, my1 + SNAKE_RMAX + 6,
             &g->x0, &g->y0, &g->x1, &g->y1, false);
 }
@@ -402,8 +405,8 @@ static inline float snk_prim_d(const struct snk_prim *g, float px, float py, flo
  * swallowed apple is on its way down */
 static float snk_radius(float s, float gulp_s, float gulp_amp)
 {
-    float r = SNAKE_R + 1.8f * fmaxf(0, 1 - s / 22);
-    float taper = fminf(snk_len_px * 0.6f, 74);
+    float r = SNAKE_R + 1.8f * snk_pos(1 - s / 22);
+    float taper = snk_len_px * 0.6f < 74 ? snk_len_px * 0.6f : 74;
     float into = s - (snk_len_px - taper);
     if (into > 0) { float t = into / taper; r -= 5.4f * t * t; }
     if (gulp_amp > 0)
@@ -413,13 +416,50 @@ static float snk_radius(float s, float gulp_s, float gulp_amp)
     }
     return r;
 }
-static bool snk_owner(int i, float px, float py, float d)
+/* only how far: the same distance as snk_prim_d's, without the nearest
+ * point and where along the piece it is (a turn's angle), which asking
+ * who is nearer never uses */
+static inline float snk_prim_far(const struct snk_prim *g, float px, float py)
 {
-    for (int j = i - 2; j <= i + 2; j++)
+    if (!g->arc)
+    {
+        float pax = px - g->ax, pay = py - g->ay;
+        float h = snk_clamp01((pax * g->dx + pay * g->dy) * g->il2);
+        return snk_len2(px - (g->ax + g->dx * h), py - (g->ay + g->dy * h));
+    }
+    float vx = px - g->cx, vy = py - g->cy, l = snk_len2(vx, vy);
+    if (g->sweep > 1e-4f && l > 1e-4f &&
+        g->sg * (g->uax * vy - g->uay * vx) >= 0 && g->sg * (vx * g->uby - vy * g->ubx) >= 0)
+        return fabsf(l - SNAKE_CELL / 2.0f);
+    float da = snk_len2(px - g->ax, py - g->ay), db = snk_len2(px - g->bx, py - g->by);
+    return da <= db ? da : db;
+}
+/* mid: the pixel is beside the piece's own length (inside a turn's
+ * quarter, or between a run's ends), where the pieces joined to it cannot
+ * be nearer: they leave from its ends, going away. Only the ones after
+ * those are asked. */
+static bool snk_owner_at(int i, float px, float py, float d, bool mid)
+{
+    for (int j = i - 2; j <= i + 2; j += mid ? 4 : 1)
     {
         if (j == i || j < 0 || j >= snk_nprim) continue;
-        float qx, qy, prm;
-        float dj = snk_prim_d(&snk_prim[j], px, py, &qx, &qy, &prm);
+        /* outside a neighbour's box by 4 px, it is RMAX + 4 away at least:
+         * farther than any pixel either pass draws (RMAX + 3), so it can't
+         * be the nearer one. The exact distance cost four of every five
+         * calls a frame (a long snake ran at 65-81 ms on the R1) */
+        const struct snk_prim *n = &snk_prim[j];
+        if (px < n->x0 - 4 || px > n->x1 + 4 || py < n->y0 - 4 || py > n->y1 + 4) continue;
+        /* The piece lies inside its unpadded box, so it is no nearer than
+         * the box is: farther than d, it cannot be the nearer one (the
+         * next row of the body, 27 px away, whose padded box reaches over
+         * this one). 0.01 px to spare: a pixel as near both (a tie, common
+         * on the grid) must still be measured, and d is a rounded root */
+        float ox = n->gx0 - px > px - n->gx1 ? n->gx0 - px : px - n->gx1;
+        float oy = n->gy0 - py > py - n->gy1 ? n->gy0 - py : py - n->gy1;
+        if (ox < 0) ox = 0;
+        if (oy < 0) oy = 0;
+        if (ox * ox + oy * oy > (d + 0.01f) * (d + 0.01f)) continue;
+        float dj = snk_prim_far(n, px, py);
         if (dj < d || (dj == d && j < i)) return false;
     }
     return true;
@@ -502,18 +542,208 @@ static void snk_body_colour(float t, float *r, float *g, float *b)
     *g = 208 + (190 - 208) * t;
     *b = 96 + (200 - 96) * t;
 }
+/* No neighbour's piece comes within reach of this strip of pixels, so
+ * snk_owner would say yes to every one of them nearer than reach (each
+ * neighbour's unpadded box is farther than that from them all) */
+static bool snk_alone(int i, float x0, float y0, float x1, float y1, float reach)
+{
+    for (int j = i - 2; j <= i + 2; j++)
+    {
+        if (j == i || j < 0 || j >= snk_nprim) continue;
+        const struct snk_prim *n = &snk_prim[j];
+        float ox = n->gx0 - x1 > x0 - n->gx1 ? n->gx0 - x1 : x0 - n->gx1;
+        float oy = n->gy0 - y1 > y0 - n->gy1 ? n->gy0 - y1 : y0 - n->gy1;
+        if (ox < 0) ox = 0;
+        if (oy < 0) oy = 0;
+        if (ox * ox + oy * oy <= (reach + 0.01f) * (reach + 0.01f)) return false;
+    }
+    return true;
+}
+/* A turn's box is mostly far from the turn. -1: this pixel is farther
+ * than lim from it for sure (what snk_prim_d would measure, without its
+ * roots and its angle: inside the quarter by how far from the circle,
+ * outside it by how far from the two ends); 1: inside the quarter; 0: by
+ * an end. */
+static inline int snk_arc_where(const struct snk_prim *g, float px, float py, float lim)
+{
+    const float R = SNAKE_CELL / 2.0f;
+    float vx = px - g->cx, vy = py - g->cy, l2 = vx * vx + vy * vy;
+    if (g->sweep > 1e-4f && l2 > 1e-4f && g->sg * (g->uax * vy - g->uay * vx) >= 0 && g->sg * (vx * g->uby - vy * g->ubx) >= 0)
+        return l2 > (R + lim) * (R + lim) || (lim < R && l2 < (R - lim) * (R - lim)) ? -1 : 1;
+    float ax = px - g->ax, ay = py - g->ay, bx = px - g->bx, by = py - g->by;
+    return ax * ax + ay * ay > lim * lim && bx * bx + by * by > lim * lim ? -1 : 0;
+}
+struct snk_paint { float gulp_s, gulp_amp, dead, shadow; };
+/* the body is no wider than this anywhere on a piece (the head's swell
+ * is at its start, an apple going down adds its bulge at most) */
+static float snk_widest(const struct snk_prim *g, const struct snk_paint *q)
+{
+    return SNAKE_R + 1.8f * fmaxf(0, 1 - (g->p0 - snk_ph) * SNAKE_CELL / 22) + q->gulp_amp;
+}
+/* one pixel of a piece's shadow, dropped 4 px: the plain way, any piece */
+static inline void snk_shadow_px(int i, const struct snk_prim *g, int x, int y, const struct snk_paint *q, bool mid)
+{
+    float px = x + 0.5f, py = y + 0.5f - 4, qx, qy, prm;
+    float d = snk_prim_d(g, px, py, &qx, &qy, &prm);
+    if (d > SNAKE_RMAX + 3) return;
+    float r = snk_radius((prm - snk_ph) * SNAKE_CELL, q->gulp_s, q->gulp_amp);
+    float a = snk_smooth((r + 3 - d) / 7) * q->shadow;
+    if (a <= 0 || !snk_owner_at(i, px, py, d, mid)) return;
+    snk_blend(snake_px, x, y, 0, 0, 0, a);
+}
+/* and of its body */
+static inline void snk_body_px(int i, const struct snk_prim *g, int x, int y, const struct snk_paint *q, bool mid, bool flat)
+{
+    float px = x + 0.5f, py = y + 0.5f, qx, qy, prm;
+    float d = snk_prim_d(g, px, py, &qx, &qy, &prm);
+    if (d > SNAKE_RMAX) return;
+    float s = (prm - snk_ph) * SNAKE_CELL;
+    float r = flat ? SNAKE_R : snk_radius(s, q->gulp_s, q->gulp_amp);   /* flat: its plain width all along (snk_flat) */
+    float cov = snk_clamp01(r - d + 0.5f);
+    if (cov <= 0 || !snk_owner_at(i, px, py, d, mid)) return;
+    float nx = (px - qx) / r, ny = (py - qy) / r, n2 = nx * nx + ny * ny;
+    if (n2 > 1) { float l = sqrtf(n2); nx /= l; ny /= l; n2 = 1; }
+    float nz = sqrtf(1 - n2);
+    float lam = snk_pos(-0.40f * nx - 0.60f * ny + 0.69f * nz);
+    float ndh = snk_pos(-0.22f * nx - 0.33f * ny + 0.92f * nz);
+    float sp = ndh * ndh; sp *= sp; sp *= sp; sp *= sp; sp *= sp;
+    float cr, cg, cb;
+    snk_body_colour(snk_len_px > 1 ? s / snk_len_px : 0, &cr, &cg, &cb);
+    /* pale spots down the back, carried along with the body */
+    float spot_r = 3.4f * r / SNAKE_R, reach = spot_r + 0.51f;
+    if (s > 20 && d < reach)             /* farther from its middle than that, a spot adds nothing */
+    {
+        float m = fmodf(s, SNAKE_CELL) - SNAKE_CELL / 2.0f;
+        if (m > -reach && m < reach)
+        {
+            float spot = spot_r - snk_len2(m, d);
+            float k = snk_clamp01(spot + 0.5f) * 0.38f;
+            cr += (236 - cr) * k; cg += (255 - cg) * k; cb += (214 - cb) * k;
+        }
+    }
+    float k = 0.46f + 0.66f * lam;
+    cr *= k; cg *= k; cb *= k;
+    cr += 255 * sp * 0.55f; cg += 255 * sp * 0.55f; cb += 255 * sp * 0.55f;
+    if (q->dead > 0)
+    {
+        /* the colour drains from the head back to the tail */
+        float tpos = snk_len_px > 1 ? s / snk_len_px : 0;
+        float dk = snk_clamp01(q->dead * 1.9f - tpos * 0.9f);
+        float grey = cr * 0.3f + cg * 0.59f + cb * 0.11f;
+        grey = grey * 0.8f + 30;
+        cr += (grey - cr) * dk * 0.75f; cg += (grey - cg) * dk * 0.75f; cb += (grey - cb) * dk * 0.75f;
+    }
+    snk_blend(snake_px, x, y, cr, cg, cb, cov);
+}
+/* A straight run along the grid, which is most of a long snake: across
+ * it, the edge, the light and the shadow depend only on how far a pixel
+ * is from the middle line, so they are worked out once a run (40 values)
+ * and not once a pixel, and a spot's root is taken only at a spot. Painted
+ * a pixel at a time, a 40-long snake took 67 ms a frame on the R1, 78 with
+ * music over Bluetooth (a test R1's log, Nov 12). The ends of a run, the
+ * head's swell, the tail's taper, a swallowed apple on its way down and a
+ * dying snake keep the plain way, a column at a time. The picture is the
+ * same, pixel for pixel (the test keeps the painter before to hold it to). */
+/* the body is its plain width all along this piece: past the head's
+ * swell, before the tail's taper, and no swallowed apple inside it */
+static bool snk_flat(const struct snk_prim *g, const struct snk_paint *q)
+{
+    float s0 = (g->p0 - snk_ph) * SNAKE_CELL, s1 = (g->p1 - snk_ph) * SNAKE_CELL;
+    return s0 >= 22.01f && s1 <= snk_len_px - fminf(snk_len_px * 0.6f, 74) - 0.01f &&
+           (q->gulp_amp <= 0 || s1 < q->gulp_s - 25.6f || s0 > q->gulp_s + 25.6f);
+}
+/* a turn is drawn within lim of itself: its box, cut down to that */
+static void snk_arc_box(const struct snk_prim *g, float lim, float drop, int *x0, int *y0, int *x1, int *y1)
+{
+    int v;
+    if ((v = (int)floorf(g->gx0 - lim) - 1) > *x0) *x0 = v;
+    if ((v = (int)floorf(g->gy0 - lim + drop) - 1) > *y0) *y0 = v;
+    if ((v = (int)ceilf(g->gx1 + lim) + 1) < *x1) *x1 = v;
+    if ((v = (int)ceilf(g->gy1 + lim + drop) + 1) < *y1) *y1 = v;
+}
+static bool snk_run(int i, const struct snk_prim *g, bool body, int x0, int y0, int x1, int y1, const struct snk_paint *q)
+{
+    bool horiz = g->dy == 0;
+    if (g->arc || g->il2 == 0 || (g->dx != 0 && g->dy != 0) || (body && q->dead > 0)) return false;
+    int c0 = horiz ? y0 : x0, c1 = horiz ? y1 : x1, a0 = horiz ? x0 : y0, a1 = horiz ? x1 : y1;
+    float cov[64], lit[64], shine[64], far[64];
+    if (c1 - c0 > 64) return false;
+    float drop = body ? 0 : 4;           /* the shadow is looked up 4 px higher */
+    float reach = body ? SNAKE_R + 0.5f : SNAKE_R + 3;   /* nothing is drawn farther from the middle line */
+    float lim = snk_widest(g, q) + (body ? 0.5f : 3) + 0.01f;   /* nor, where the body is wider, than this */
+    for (int c = c0; c < c1; c++)
+    {
+        float e = horiz ? c + 0.5f - drop - g->ay : c + 0.5f - g->ax, d = fabsf(e);
+        far[c - c0] = d;
+        if (!body)
+        {
+            cov[c - c0] = d > SNAKE_RMAX + 3 ? 0 : snk_smooth((SNAKE_R + 3 - d) / 7) * q->shadow;
+            continue;
+        }
+        cov[c - c0] = d > SNAKE_RMAX ? 0 : snk_clamp01(SNAKE_R - d + 0.5f);
+        float n = e / SNAKE_R, n2 = n * n;
+        if (n2 > 1) { n /= sqrtf(n2); n2 = 1; }
+        float nx = horiz ? 0 : n, ny = horiz ? n : 0, nz = sqrtf(1 - n2);
+        float lam = snk_pos(-0.40f * nx - 0.60f * ny + 0.69f * nz);
+        float ndh = snk_pos(-0.22f * nx - 0.33f * ny + 0.92f * nz);
+        float sp = ndh * ndh; sp *= sp; sp *= sp; sp *= sp; sp *= sp;
+        lit[c - c0] = 0.46f + 0.66f * lam;
+        shine[c - c0] = 255 * sp * 0.55f;
+    }
+    for (int a = a0; a < a1; a++)
+    {
+        float pa = horiz ? a + 0.5f : a + 0.5f - drop;
+        float h = (horiz ? (pa - g->ax) * g->dx : (pa - g->ay) * g->dy) * g->il2;
+        float s = (g->p0 + (g->p1 - g->p0) * h - snk_ph) * SNAKE_CELL;
+        bool mid = h > 0 && h < 1;
+        if (!mid || snk_radius(s, q->gulp_s, q->gulp_amp) != SNAKE_R)
+        {
+            for (int c = c0; c < c1; c++)
+                if (far[c - c0] > lim) continue;   /* a run is never nearer than its middle line */
+                else if (body) snk_body_px(i, g, horiz ? a : c, horiz ? c : a, q, mid, false);
+                else snk_shadow_px(i, g, horiz ? a : c, horiz ? c : a, q, mid);
+            continue;
+        }
+        /* the middle of a run, most of it: no other piece near, nothing to ask */
+        bool alone = horiz ? snk_alone(i, pa, g->ay - reach, pa, g->ay + reach, reach)
+                           : snk_alone(i, g->ax - reach, pa, g->ax + reach, pa, reach);
+        float br = 0, bg = 0, bb = 0, m = 100;
+        if (body)
+        {
+            snk_body_colour(snk_len_px > 1 ? s / snk_len_px : 0, &br, &bg, &bb);
+            if (s > 20) m = fmodf(s, SNAKE_CELL) - SNAKE_CELL / 2.0f;
+        }
+        for (int c = c0; c < c1; c++)
+        {
+            float v = cov[c - c0], d = far[c - c0];
+            if (v <= 0) continue;
+            int x = horiz ? a : c, y = horiz ? c : a;
+            if (!alone && !snk_owner_at(i, x + 0.5f, y + 0.5f - drop, d, true)) continue;
+            if (!body) { snk_blend(snake_px, x, y, 0, 0, 0, v); continue; }
+            float cr = br, cg = bg, cb = bb;
+            if (d < 4 && m > -4 && m < 4)         /* farther, the spot adds nothing */
+            {
+                float spot = 3.4f * SNAKE_R / SNAKE_R - snk_len2(m, d);
+                float k = snk_clamp01(spot + 0.5f) * 0.38f;
+                cr += (236 - cr) * k; cg += (255 - cg) * k; cb += (214 - cb) * k;
+            }
+            float k = lit[c - c0], sh = shine[c - c0];
+            snk_blend(snake_px, x, y, cr * k + sh, cg * k + sh, cb * k + sh, v);
+        }
+    }
+    return true;
+}
 static void snk_draw_snake(uint32_t now)
 {
-    float gulp_s = 0, gulp_amp = 0;
+    struct snk_paint q = { 0, 0, 0, SNK_LIGHT ? 0.17f : 0.45f };
     if (snk_gulp_at)
     {
         float t = (now - snk_gulp_at) / (float)sl_snake_period(&snake_state);
-        gulp_s = 14 + t * SNAKE_CELL * 1.6f;
-        if (gulp_s > snk_len_px + 20) snk_gulp_at = 0;
-        else gulp_amp = 3.4f * snk_clamp01(t * 3) * (1 - snk_clamp01((gulp_s - snk_len_px * 0.7f) / (snk_len_px * 0.3f + 1)));
+        q.gulp_s = 14 + t * SNAKE_CELL * 1.6f;
+        if (q.gulp_s > snk_len_px + 20) snk_gulp_at = 0;
+        else q.gulp_amp = 3.4f * snk_clamp01(t * 3) * (1 - snk_clamp01((q.gulp_s - snk_len_px * 0.7f) / (snk_len_px * 0.3f + 1)));
     }
-    float dead = snake_state.alive || snake_state.won ? 0 : snk_clamp01((now - snk_die_at - 120) / 500.0f);
-    float shadow = SNK_LIGHT ? 0.17f : 0.45f;
+    q.dead = snake_state.alive || snake_state.won ? 0 : snk_clamp01((now - snk_die_at - 120) / 500.0f);
     /* shadows first, so no body pixel is ever darkened by a neighbour's */
     for (int i = 0; i < snk_nprim; i++)
     {
@@ -522,16 +752,27 @@ static void snk_draw_snake(uint32_t now)
         if (y1 > SNAKE_BOARD) y1 = SNAKE_BOARD;
         int x0, x1, yy0, yy1;
         if (!snk_box(g->x0, y0, g->x1 - 1, y1 - 1, &x0, &yy0, &x1, &yy1, true)) continue;
+        if (snk_run(i, g, false, x0, yy0, x1, yy1, &q)) continue;
+        float lim = snk_widest(g, &q) + 3 + 0.01f;
+        bool turn = g->arc, flat = turn && snk_flat(g, &q);
+        if (turn) snk_arc_box(g, lim, 4, &x0, &yy0, &x1, &yy1);
         for (int y = yy0; y < yy1; y++)
             for (int x = x0; x < x1; x++)
             {
-                float px = x + 0.5f, py = y + 0.5f - 4, qx, qy, prm;
-                float d = snk_prim_d(g, px, py, &qx, &qy, &prm);
-                if (d > SNAKE_RMAX + 3) continue;
-                float r = snk_radius((prm - snk_ph) * SNAKE_CELL, gulp_s, gulp_amp);
-                float a = snk_smooth((r + 3 - d) / 7) * shadow;
-                if (a <= 0 || !snk_owner(i, px, py, d)) continue;
-                snk_blend(snake_px, x, y, 0, 0, 0, a);
+                int w = turn ? snk_arc_where(g, x + 0.5f, y + 0.5f - 4, lim) : 0;
+                if (w < 0) continue;
+                if (w && flat)
+                {
+                    /* inside the quarter of a plain-width turn: the shadow
+                     * needs only how far from the circle, not where along it */
+                    float px = x + 0.5f, py = y + 0.5f - 4;
+                    float d = fabsf(snk_len2(px - g->cx, py - g->cy) - SNAKE_CELL / 2.0f);
+                    if (d > SNAKE_RMAX + 3) continue;
+                    float a = snk_smooth((SNAKE_R + 3 - d) / 7) * q.shadow;
+                    if (a > 0 && snk_owner_at(i, px, py, d, true)) snk_blend(snake_px, x, y, 0, 0, 0, a);
+                    continue;
+                }
+                snk_shadow_px(i, g, x, y, &q, w);
             }
     }
     for (int i = 0; i < snk_nprim; i++)
@@ -539,45 +780,15 @@ static void snk_draw_snake(uint32_t now)
         const struct snk_prim *g = &snk_prim[i];
         int x0, y0, x1, y1;
         if (!snk_box(g->x0, g->y0, g->x1 - 1, g->y1 - 1, &x0, &y0, &x1, &y1, true)) continue;
+        if (snk_run(i, g, true, x0, y0, x1, y1, &q)) continue;
+        float lim = snk_widest(g, &q) + 0.5f + 0.01f;
+        bool turn = g->arc, flat = turn && snk_flat(g, &q);
+        if (turn) snk_arc_box(g, lim, 0, &x0, &y0, &x1, &y1);
         for (int y = y0; y < y1; y++)
             for (int x = x0; x < x1; x++)
             {
-                float px = x + 0.5f, py = y + 0.5f, qx, qy, prm;
-                float d = snk_prim_d(g, px, py, &qx, &qy, &prm);
-                if (d > SNAKE_RMAX) continue;
-                float s = (prm - snk_ph) * SNAKE_CELL;
-                float r = snk_radius(s, gulp_s, gulp_amp);
-                float cov = snk_clamp01(r - d + 0.5f);
-                if (cov <= 0 || !snk_owner(i, px, py, d)) continue;
-                float nx = (px - qx) / r, ny = (py - qy) / r, n2 = nx * nx + ny * ny;
-                if (n2 > 1) { float l = sqrtf(n2); nx /= l; ny /= l; n2 = 1; }
-                float nz = sqrtf(1 - n2);
-                float lam = fmaxf(0, -0.40f * nx - 0.60f * ny + 0.69f * nz);
-                float ndh = fmaxf(0, -0.22f * nx - 0.33f * ny + 0.92f * nz);
-                float sp = ndh * ndh; sp *= sp; sp *= sp; sp *= sp; sp *= sp;
-                float cr, cg, cb;
-                snk_body_colour(snk_len_px > 1 ? s / snk_len_px : 0, &cr, &cg, &cb);
-                /* pale spots down the back, carried along with the body */
-                if (s > 20)
-                {
-                    float m = fmodf(s, SNAKE_CELL) - SNAKE_CELL / 2.0f;
-                    float spot = 3.4f * r / SNAKE_R - snk_len2(m, d);
-                    float k = snk_clamp01(spot + 0.5f) * 0.38f;
-                    cr += (236 - cr) * k; cg += (255 - cg) * k; cb += (214 - cb) * k;
-                }
-                float k = 0.46f + 0.66f * lam;
-                cr *= k; cg *= k; cb *= k;
-                cr += 255 * sp * 0.55f; cg += 255 * sp * 0.55f; cb += 255 * sp * 0.55f;
-                if (dead > 0)
-                {
-                    /* the colour drains from the head back to the tail */
-                    float tpos = snk_len_px > 1 ? s / snk_len_px : 0;
-                    float dk = snk_clamp01(dead * 1.9f - tpos * 0.9f);
-                    float grey = cr * 0.3f + cg * 0.59f + cb * 0.11f;
-                    grey = grey * 0.8f + 30;
-                    cr += (grey - cr) * dk * 0.75f; cg += (grey - cg) * dk * 0.75f; cb += (grey - cb) * dk * 0.75f;
-                }
-                snk_blend(snake_px, x, y, cr, cg, cb, cov);
+                int w = turn ? snk_arc_where(g, x + 0.5f, y + 0.5f, lim) : 0;
+                if (w >= 0) snk_body_px(i, g, x, y, &q, w, flat);
             }
     }
 }
@@ -1188,6 +1399,37 @@ static void snake_swipe_move(int x, int y)
     snk_swipe_dir = dir;
     snk_ax = x; snk_ay = y;
 }
+/* The swipes come from the driver's trail, every sample in order, not from
+ * the one point touch_read sees each frame: a game frame on the R1 takes
+ * 50-90 ms and a quick flick could start and end inside one, never seen
+ * (a test R1, Nov 12). The lift's point counts too. Off the game, or
+ * blocked, the trail is skipped: nothing old steers later. */
+static unsigned snk_trail_at;
+static bool snk_trail_down, snk_trail_ok;
+static bool snake_trail_live(void) { return snake_takes_swipe(H - 1); }
+static void snake_trail_skip(void) { snk_trail_at = button_touch_trail_end(); snk_trail_down = false; }
+static void snake_trail_feed(void)
+{
+    if (!snake_trail_live()) { snake_trail_skip(); return; }
+    int pos, down;
+    while ((down = button_touch_trail(&snk_trail_at, &pos)) >= 0)
+    {
+        int x = pos >> 16, y = pos & 0xffff;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x >= W) x = W - 1;
+        if (y >= H) y = H - 1;
+        if (sl_flipped) { x = W - 1 - x; y = H - 1 - y; }
+        if (down && !snk_trail_down)
+        {
+            snk_trail_ok = snake_takes_swipe(y);
+            if (snk_trail_ok) snake_swipe_begin(x, y);
+        }
+        else if (snk_trail_ok && snk_trail_down) snake_swipe_move(x, y);
+        snk_trail_down = down;
+        if (!snake_trail_live()) { snake_trail_skip(); return; }   /* it died or paused on that turn */
+    }
+}
 static void snake_pause_cb(lv_event_t *e)
 {
     (void)e;
@@ -1281,6 +1523,7 @@ static lv_obj_t *snake_round(lv_obj_t *parent, const char *symbol, int x, int y,
 static void snake_page(void)
 {
     if (page_bring_back(snake_page_obj)) return;
+    if (!sl_app_room(800, "Snake")) return;
     lv_obj_t *p, *body = page_new("Snake", &p);
     snake_page_obj = p;
     snake_scores_load();

@@ -1511,9 +1511,16 @@ static void accent_wheel_paint(void)
     }
 }
 
+/* painted whole each time the page opens: 196 KB back when it closes */
+static void accent_page_deleted(lv_event_t *e)
+{
+    (void)e;
+    sl_give_back(accent_wheel_pixels, sizeof accent_wheel_pixels);
+}
 static void accent_page(void)
 {
     lv_obj_t *p, *body = page_new("Accent color", &p);
+    lv_obj_add_event_cb(p, accent_page_deleted, LV_EVENT_DELETE, NULL);
     accent_set_rgb(C_ACCENT);
     /* the wheel and its brightness, one card; the presets, another; the
      * button that wears the colour under them */

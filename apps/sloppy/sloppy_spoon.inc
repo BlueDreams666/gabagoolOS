@@ -1579,6 +1579,7 @@ static lv_obj_t *spn_label(lv_obj_t *parent, const lv_font_t *font, uint32_t col
 static void spoon_page(void)
 {
     if (page_bring_back(spoon_page_obj)) return;
+    if (!sl_app_room(600, "Freaky Spoon")) return;
     lv_obj_t *p, *body = page_new("Freaky Spoon", &p);
     spoon_page_obj = p;
     spn_load();

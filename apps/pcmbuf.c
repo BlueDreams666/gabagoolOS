@@ -167,8 +167,6 @@ static enum
     CROSSFADE_START,        /* New crossfade is starting */
     CROSSFADE_CONTINUE,     /* Next track continues fade */
 } crossfade_status = CROSSFADE_INACTIVE;
-/* current_tick until which the last crossfade can still be heard */
-static long crossfade_audible_until;
 
 static bool crossfade_mixmode;
 static bool crossfade_auto_skip;
@@ -744,13 +742,20 @@ void pcmbuf_start_track_change(enum pcm_track_change_type type)
     {
         /* SloppyOS: a manual skip cuts cleanly when nothing is playing (a
            skip while paused would otherwise fade the old song back in over
-           the new one on resume) or while the last crossfade can still be
-           heard (a second quick skip would stack a third song on the mix). */
+           the new one on resume). */
         bool manual_cut = !auto_skip &&
-            (mixer_channel_status(PCM_MIXER_CHAN_PLAYBACK) != CHANNEL_PLAYING ||
-             TIME_BEFORE(current_tick, crossfade_audible_until));
+            mixer_channel_status(PCM_MIXER_CHAN_PLAYBACK) != CHANNEL_PLAYING;
 
-        if (crossfade_status == CROSSFADE_INACTIVE &&
+        /* A skip while a crossfade is still running fades again: what is
+           queued, the mix of both songs, fades out as one and the new song
+           comes in over it (a manual fade never mixes the old songs on).
+           It cut straight to the third song (a tester, 10 Nov). */
+        if (!auto_skip && !manual_cut && crossfade_status != CROSSFADE_INACTIVE &&
+            crossfade_status != CROSSFADE_START)
+            crossfade_cancel();
+
+        if ((crossfade_status == CROSSFADE_INACTIVE ||
+             (!auto_skip && crossfade_status == CROSSFADE_START)) &&
             pcmbuf_unplayed_bytes() >= DATA_LEVEL(2) &&
             !low_latency_mode && !manual_cut)
         {
@@ -789,11 +794,6 @@ void pcmbuf_start_track_change(enum pcm_track_change_type type)
         crossfade_auto_skip = auto_skip;
 
         crossfade_status = CROSSFADE_START;
-        crossfade_audible_until = current_tick +
-            MAX(global_settings.crossfade_fade_in_delay +
-                global_settings.crossfade_fade_in_duration,
-                global_settings.crossfade_fade_out_delay +
-                global_settings.crossfade_fade_out_duration) * HZ;
 
         pcmbuf_monitor_track_change(auto_skip);
 

@@ -552,6 +552,30 @@ static void sl_give_back(void *p, size_t n)
 #endif
 }
 
+/* Memory a closed page freed goes back to the system. glibc returns only
+ * the top of its heap on its own: what pages and apps freed below it
+ * stayed the player's, so leaving an app gave back little and memory only
+ * ever grew until the R1 froze (test R1 logs, Nov). malloc_trim hands back
+ * every free page; a moment after a page closes, once nothing moves. */
+#if defined(HIBY_LINUX) && !defined(SIMULATOR)
+#include <malloc.h>
+#endif
+static uint32_t sl_trim_at;              /* when a trim is due; 0 none */
+static void sl_trim_soon(void) { sl_trim_at = sl_ms() + 400; if (!sl_trim_at) sl_trim_at = 1; }
+static void sl_trim_now(const char *why)
+{
+    sl_trim_at = 0;
+#if defined(HIBY_LINUX) && !defined(SIMULATOR)
+    unsigned long peak, before = sl_perf_rss_kb(&peak);
+    malloc_trim(0);
+    unsigned long after = sl_perf_rss_kb(&peak);
+    if (before >= after + 128)
+        sl_log("memory: %lu KiB back to the system (%s), the player %lu KiB", before - after, why, after);
+#else
+    (void)why;
+#endif
+}
+
 static void sl_perf_memory(const char *where);
 #include "sloppy_cfmeter.inc"
 
@@ -754,6 +778,8 @@ static int g_vy, g_vx;              /* recent vertical and sideways speed, px/s 
 /* A tap that woke the paused touch reader but lifted before it was read:
  * 1 = press it at tap_x, tap_y on the next read, 2 = then let go. */
 static int tap_replay, tap_x, tap_y;
+static unsigned tap_trail_at;              /* the driver's trail, read up to here (touch_read) */
+static bool tap_trail_skip;               /* the reader was paused: what it missed is not replayed */
 static bool g_on_sheet;             /* may pull the Up Next sheet down */
 static bool g_on_acts;              /* or a song's sheet (acts) */
 static bool g_on_game;              /* a game steered by swipes (Snake) */
@@ -766,6 +792,7 @@ static bool quiz_active;             /* hide track titles while a music question
 
 static void back_drag(int dx);
 static void back_release(int dx, int vx);
+static bool arc_side_playing(void);      /* sloppy_arcade.inc: a game held sideways, running */
 static bool cf_is_open(void);
 static int  page_depth(void);
 static bool overlay_visible(void);
@@ -882,6 +909,11 @@ static bool fl_on_top(void);
 static bool fl_key(int btn);
 static void snake_swipe_begin(int x, int y);
 static void snake_swipe_move(int x, int y);
+static void snake_trail_feed(void);       /* the driver's trail: every touch sample in order */
+static void snake_trail_skip(void);
+static bool snake_trail_live(void);
+unsigned button_touch_trail_end(void);    /* button-devinput.c */
+int button_touch_trail(unsigned *at, int *pos);
 static void uq_sheet_drag(int dy);
 static void uq_sheet_release(int dy, int vy);
 static void acts_sheet_drag(int dy);
@@ -928,6 +960,33 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
     if (x >= W) x = W - 1;
     if (y >= H) y = H - 1;
     cfm_touch_read(down, x, y);
+    /* A whole tap between two reads (a slow frame: a game, a page being
+     * built) left the panel up both times and was never seen. The driver's
+     * trail still has it: a contact that began and lifted since the last
+     * read, still in place, is played back as a tap, like a tap that woke
+     * the reader. One that moved is no tap (Snake reads its swipes itself). */
+    {
+        static bool in, fresh, moved;
+        static int sx, sy;
+        int tp, td, fx = -1, fy = 0;
+        if (tap_trail_skip) { tap_trail_skip = false; tap_trail_at = button_touch_trail_end(); in = false; }
+        while ((td = button_touch_trail(&tap_trail_at, &tp)) >= 0)
+        {
+            int px = tp >> 16, py = tp & 0xffff;
+            if (td && !in) { in = fresh = true; moved = false; sx = px; sy = py; }
+            else if (td && (abs(px - sx) > 12 || abs(py - sy) > 12)) moved = true;
+            else if (!td && in)
+            {
+                if (fresh && !moved) { fx = sx; fy = sy; }
+                in = false;
+            }
+        }
+        fresh = false;
+        if (fx >= 0 && !down && g_state == G_IDLE && !tap_replay && fx < W && fy < H)
+        {
+            tap_x = fx; tap_y = fy; tap_replay = 1;
+        }
+    }
     if (tap_replay == 1)
     {
         if (down) tap_replay = 0;          /* still down: read it as it is */
@@ -944,6 +1003,7 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
 
     if (sl_power_filter_touch(down, x, y))
     {
+        snake_trail_skip();
         g_state = G_IDLE;
         lv_indev_reset(indev, NULL);
         data->state = LV_INDEV_STATE_RELEASED;
@@ -952,6 +1012,7 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
     }
     if (nav_contact_blocked)
     {
+        snake_trail_skip();
         nav_contact_blocked = down;
         g_state = G_IDLE;
         lv_indev_reset(indev, NULL);
@@ -959,6 +1020,7 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
         data->point.x = x; data->point.y = y;
         return;
     }
+    snake_trail_feed();
     if (down)
     {
         /* Speed from the last few samples, not the whole contact: a flick
@@ -975,10 +1037,12 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
             }
         }
         if (g_state == G_IDLE && (lv_display_get_rotation(disp) != LV_DISPLAY_ROTATION_0 || cf_is_open() ||
-                                  po_is_open()))
+                                  po_is_open() || arc_side_playing()))
         {
             /* Cover Flow (either way up): no system gestures; the power off
-             * slider: none at all (its knob starts in the back-swipe edge) */
+             * slider: none at all (its knob starts in the back-swipe edge);
+             * a game held sideways: its up and down are where the Control
+             * Center is pulled from */
             g_state = G_LVGL;
             g_dragged = false;
         }
@@ -1037,9 +1101,8 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
                 if (g_on_game)
                 {
                     /* the game has the whole contact: no back-swipe, no press */
-                    g_state = G_GAME;
+                    g_state = G_GAME;          /* steered from the trail (snake_trail_feed) */
                     lv_indev_reset(indev, NULL);
-                    snake_swipe_begin(g_x0, g_y0);
                 }
                 else if (g_on_mini && abs(dx) > abs(dy))
                 {
@@ -1123,7 +1186,6 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
         }
         if (g_state == G_GAME)
         {
-            snake_swipe_move(x, y);
             data->state = LV_INDEV_STATE_RELEASED;
             data->point.x = x; data->point.y = y;
             g_lx = x; g_ly = y;
@@ -1670,7 +1732,8 @@ static void sl_doing_is(const char *what, const char *detail);
 static bool sl_report_write(char *path, size_t n);
 static void report_make_cb(lv_event_t *e);
 static void lag_set(int on);
-static long lag_until;
+static bool lag_rec;
+static void heard_ask(const char *what, bool skip);
 /* ------------------------------------------------------------ playback */
 #include "sloppy_queue.h"
 /* Starting something the user just picked cuts the old song cleanly. The
@@ -1705,6 +1768,7 @@ static void sl_start_list_at(int index, unsigned long ms)
     album_chain = -1;                 /* a new list: play_album re-arms it after */
     sr_stop();                        /* and radio, which sets itself going after */
     if (audio_status() & AUDIO_STATUS_PLAY) audio_stop();
+    heard_ask("a list started", false);
     playlist_start(index, ms, 0);
     if (q_kept_n) sl_log("queue carried over: %d", q_restore());
 }
@@ -1847,6 +1911,7 @@ static void toggle_play(void)
     sl_bt_resume_due = false;                 /* the user decides now */
     if (!(st & AUDIO_STATUS_PLAY))
     {
+        heard_ask("play", false);
         if (playlist_resume() != -1)
         {
             /* Resume by the audible time when it is known. The saved byte
@@ -1859,7 +1924,10 @@ static void toggle_play(void)
         }
     }
     else if (st & AUDIO_STATUS_PAUSE)
+    {
+        heard_ask("resume", false);
         sl_resume();
+    }
     else
     {
         audio_pause();
@@ -1901,7 +1969,7 @@ static void page_hide_cb(lv_anim_t *a)
     if (lv_obj_get_x(p) < 0)
         lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);   /* covered: skip drawing it */
 }
-static void page_delete_cb(lv_anim_t *a) { lv_obj_delete(a->var); }
+static void page_delete_cb(lv_anim_t *a) { lv_obj_delete(a->var); sl_trim_soon(); }
 
 /* Give the first visible menu items a quick, staggered entrance. Keeping the
  * reveal bounded avoids animating an entire long song or album list. */
@@ -1942,17 +2010,23 @@ static struct { lv_obj_t *img[2], *page, *below; lv_draw_buf_t *buf[2]; } ps;
 static void ps_gone_cb(lv_event_t *e);
 static long sl_mem_available_kb(void);
 static bool sl_mem_room(long need_kb, const char *why);
+static bool sl_app_room(long need_kb, const char *app);
 #define SL_MEM_SWAP_KB 4096   /* free memory the R1 swapped under (its logs: 3.7-4.3 MB): nothing optional below it */
 static long sl_mem_floor_kb(void);
 /* The pictures borrow 1.5 MB for a moment. With the player short of memory
  * that borrowing pushed out the code and the song being read, and every
  * page then took seconds (the R1 log, 5 MB free with Bluetooth on): only
- * with room to spare, else the live slide. -1 is no /proc (the desk). */
-#define PS_MIN_FREE_KB (24 * 1024)
+ * with room to spare, else the live slide. Room is the floor the rest of
+ * the UI keeps and 4 MB more after the borrowing. A fixed 24 MB (set when
+ * the music had twice the memory) was more than an R1 now has free (12-18
+ * MB, Nov logs), so every slide was live at 60-80 ms a frame. -1 is no
+ * /proc (the desk). */
+#define PS_KB ((long)W * H * 2 * 2 / 1024)
+#define PS_SPARE_KB 4096
 static bool ps_room(void)
 {
     long kb = sl_mem_available_kb();
-    return kb < 0 || kb >= PS_MIN_FREE_KB;
+    return kb < 0 || kb - PS_KB >= sl_mem_floor_kb() + PS_SPARE_KB;
 }
 static bool ps_back;                     /* the slide is a pop: ps.page goes at the end */
 static void ps_end(void)
@@ -2792,6 +2866,50 @@ static void np_vol_cb(lv_event_t *e)
     setvol();
     statusbar_update();
 }
+/* The volume moves only by sliding, and only as far as the finger goes:
+ * a tap on the bar set it to the tap's place, and a thumb going for Next
+ * hit the bar and played at full volume (a tester, Nov 10). Ahead of the
+ * slider's own handling, which never sees the press. */
+#define NP_VOL_SLOP 10                    /* px before a contact is a slide */
+static void np_vol_touch_cb(lv_event_t *e)
+{
+    static int x0, v0;
+    static bool sliding;
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_indev_t *indev = lv_indev_active();
+    lv_point_t p = { 0, 0 };
+    if (indev) lv_indev_get_point(indev, &p);
+    if (code == LV_EVENT_PRESSED)
+    {
+        x0 = p.x;
+        v0 = lv_slider_get_value(np_vol);
+        sliding = false;
+    }
+    else if (code == LV_EVENT_PRESSING && indev)
+    {
+        int dx = p.x - x0;
+        if (!sliding && (dx > NP_VOL_SLOP || dx < -NP_VOL_SLOP))
+        {
+            sliding = true;
+            x0 += dx > 0 ? NP_VOL_SLOP : -NP_VOL_SLOP;   /* only the slop is lost, not the step that crossed it */
+        }
+        if (sliding)
+        {
+            int w = lv_obj_get_width(np_vol);
+            int v = v0 + (p.x - x0) * 100 / (w > 0 ? w : 1);
+            v = v < 0 ? 0 : v > 100 ? 100 : v;
+            if (v != lv_slider_get_value(np_vol))
+            {
+                lv_slider_set_value(np_vol, v, LV_ANIM_OFF);
+                np_vol_cb(e);
+            }
+        }
+    }
+    else if (code != LV_EVENT_RELEASED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_CLICKED &&
+             code != LV_EVENT_SHORT_CLICKED && code != LV_EVENT_LONG_PRESSED && code != LV_EVENT_LONG_PRESSED_REPEAT)
+        return;
+    lv_event_stop_processing(e);
+}
 
 static bool sr_on(void);
 static void lyr_build(lv_obj_t *parent);
@@ -2978,6 +3096,7 @@ static void np_build(void)
     lv_obj_set_pos(np_vol, 64, y + 248);
     lv_slider_set_range(np_vol, 0, 100);
     lv_obj_add_event_cb(np_vol, np_vol_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(np_vol, np_vol_touch_cb, LV_EVENT_ALL | LV_EVENT_PREPROCESS, NULL);
     np_paint();   /* a light or true-dark theme from boot, not only after a change */
 }
 
@@ -7510,6 +7629,7 @@ static void sl_next(void)
     if (t >= 0 && t + 1 < sl_lib.n_tracks && sl_lib.tracks[t + 1].cue == sl_lib.tracks[t].cue + 1
         && sl_track_path_is(t + 1, id3->path))
     { cue_seek(sl_lib.tracks[t + 1].start); return; }
+    heard_ask("next", true);
     audio_next();
 }
 /* the song before, never a restart (a swipe back): in a cue sheet, its track before */
@@ -7518,6 +7638,7 @@ static void sl_prev_song(void)
     struct mp3entry *id3 = (audio_status() & AUDIO_STATUS_PLAY) ? audio_current_track() : NULL;
     int t = cue_now(id3, NULL, NULL);
     if (t > 0 && sl_lib.tracks[t].cue > 1 && sl_track_path_is(t - 1, id3->path)) { cue_seek(sl_lib.tracks[t - 1].start); return; }
+    heard_ask("previous", true);
     audio_prev();
 }
 static void sl_prev(void)
@@ -7533,12 +7654,16 @@ static void sl_prev(void)
     }
     if (id3 && id3->elapsed > 3000)
     {
+        heard_ask("back to the start", true);
         if (!(audio_status() & AUDIO_STATUS_PAUSE))
             audio_pre_ff_rewind();
         audio_ff_rewind(0);
     }
     else
+    {
+        heard_ask("previous", true);
         audio_prev();
+    }
 }
 
 /* What a key can do (Settings > Buttons). A book playing, next and
@@ -7784,6 +7909,12 @@ static void handle_button(long btn)
             backlight_set_timeout(sl_power_sleep_ms() / 1000);
 #if CONFIG_CHARGING
             backlight_set_timeout_plugged(sl_power_sleep_ms() / 1000);
+#endif
+#ifdef HAVE_BACKLIGHT_DIM_IDLE
+            /* That timeout only dims it; off after the user's own "off"
+             * time, which is never by default: a test R1's USB screen sat
+             * dimmed for 13 minutes (its trace, Nov 10). Dark 15 s on. */
+            backlight_set_off_timeout(15);
 #endif
         }
         default_event_handler(btn);
@@ -8541,28 +8672,32 @@ static void sl_mem_release(const char *why, bool images)
         sl_log("memory: released Cover Flow's %d covers, %d KiB (%s)", n, n * (CF_ART * CF_ART * 2 / 1024), why);
     }
     cf_art_trim();
+    coin_faces_release();                    /* the coin's faces, painted again when there is room */
     if (freed || images)
         sl_log("memory: released %lu KiB of glass%s (%s)",
                (unsigned long)(freed * W * H * 2 / 1024), images ? " and the image cache" : "", why);
+    sl_trim_now(why);                        /* what was let go, back to the system */
 }
 static long sl_mem_test_kb;               /* the harness: free memory as the R1 would have it, 0 the real one */
 #if !(defined(HIBY_R1) && !defined(SIMULATOR))
 static long sl_mem_test_unfilled_kb;      /* the harness: the music buffer not yet filled */
 #endif
-/* The music buffer (7 MB, static) gets its pages only as playback first
- * fills it, so until then the kernel counts it free. A test R1 (5 Nov):
- * Cover Flow took 40 covers at 18.7 MB "free" before anything played;
- * the shuffle then filled the buffer and left 2.5 MB, and it froze. The
- * budget counts what is still to come as taken. */
+/* The music buffer (4 MB of the 7 MB pool, see playback.c) gets its
+ * pages only as playback first fills it, so until then the kernel counts
+ * it free. A test R1 (5 Nov): Cover Flow took 40 covers at 18.7 MB "free"
+ * before anything played; the shuffle then filled the buffer and left
+ * 2.5 MB, and it froze. The budget counts what is still to come as taken:
+ * only where songs go, as the rest of the pool never fills. */
 static long sl_music_unfilled_kb(void)
 {
 #if defined(HIBY_R1) && !defined(SIMULATOR)
-    extern unsigned char *audiobufend;
+    extern unsigned char *audio_fill_start;
+    extern size_t audio_fill_len;
     static unsigned char vec[(MEMORYSIZE - 1) * 1024 * 1024 / 4096 + 1];
     long ps = sysconf(_SC_PAGESIZE);
-    if (ps < 4096) return 0;
-    uintptr_t end = (uintptr_t)audiobufend & ~(uintptr_t)(ps - 1);
-    uintptr_t start = ((uintptr_t)audiobufend - (MEMORYSIZE - 1) * 1024 * 1024 + ps - 1) & ~(uintptr_t)(ps - 1);
+    if (ps < 4096 || !audio_fill_start) return 0;
+    uintptr_t end = ((uintptr_t)audio_fill_start + audio_fill_len) & ~(uintptr_t)(ps - 1);
+    uintptr_t start = ((uintptr_t)audio_fill_start + ps - 1) & ~(uintptr_t)(ps - 1);
     size_t pages = (end - start) / ps;
     if (end <= start || pages > sizeof vec || mincore((void *)start, end - start, vec)) return 0;
     size_t out = 0;
@@ -8602,6 +8737,25 @@ static bool sl_mem_room(long need_kb, const char *why)
     kb = sl_mem_available_kb();
     if (kb - need_kb >= sl_mem_floor_kb()) return true;
     sl_log("memory: %s goes without, %ld KiB free, %ld wanted", why, kb, need_kb);
+    return false;
+}
+/* Before an app opens: room for what it needs and still a little left.
+ * The test R1s froze with 1.5 to 2.5 MB left; short of that, the caches go
+ * first (glass, decoded art, Cover Flow's covers, the coin's faces) and
+ * what was freed goes back to the system; still short, the app does not
+ * open and says so, rather than taking the player under. -1 (the desk) is
+ * plenty. */
+#define SL_APP_MIN_KB 2560
+static bool sl_app_room(long need_kb, const char *app)
+{
+    long keep = SL_APP_MIN_KB + (sl_bt_streaming() ? SL_MEM_BT_EXTRA_KB : 0);
+    long kb = sl_mem_available_kb();
+    if (kb < 0 || kb - need_kb >= keep) return true;
+    sl_mem_release(app, true);
+    kb = sl_mem_available_kb();
+    if (kb - need_kb >= keep) return true;
+    sl_log("memory: %s not opened, %ld KiB free, %ld wanted, %ld kept", app, kb, need_kb, keep);
+    toast_warn("Not enough memory to open this right now.");
     return false;
 }
 /* Who else holds the memory, once as it first runs low: the kernel's split
@@ -8674,6 +8828,8 @@ static void sl_mem_watch(void)
     static uint32_t next_ms, released_ms;
     static bool low;
     uint32_t now = sl_ms();
+    if (sl_trim_at && (int32_t)(now - sl_trim_at) >= 0 && g_state == G_IDLE && !lv_anim_count_running())
+        sl_trim_now("a page closed");
     if ((int32_t)(now - next_ms) < 0) return;
     long kb = sl_mem_available_kb();
     if (kb < 0) { next_ms = now + 5000; return; }
@@ -8788,7 +8944,7 @@ static bool touch_idle(uint32_t now)
     int pos;
     lv_timer_t *read = lv_indev_get_read_timer(touch);
     if (touch_paused) return true;
-    if (!read || now - last_touch_ms < 1000 || lv_indev_get_scroll_obj(touch) ||
+    if (!read || now - last_touch_ms < 1000 || lv_indev_get_scroll_obj(touch) || snake_trail_live() ||
         (button_status_wdata(&pos) & BUTTON_TOUCHSCREEN)) return false;
     lv_timer_pause(read);
     touch_paused = true;
@@ -8798,6 +8954,7 @@ static void touch_wake(long btn, intptr_t pos)
 {
     if (!touch_paused) return;
     touch_paused = false;
+    tap_trail_skip = true;
     if ((btn & BUTTON_TOUCHSCREEN) && !(btn & (BUTTON_REL | BUTTON_REPEAT)))
     {
         /* a quick tap can be over before the reader looks: keep where it was.
@@ -8820,6 +8977,16 @@ static void touch_wake(long btn, intptr_t pos)
  * first the loop looks 50 times a second, so the lift between the two is
  * seen. Stopping the look altogether (to save power) let only a key wake
  * it, which is what Double tap to wake off asks for. */
+/* A button event from the queue starts the reader again, but not a touch
+ * on a dark screen: the R1 does post one (Rockbox's own timeouts are 0, so
+ * its driver thinks the screen is lit), and the reader then handed that
+ * one tap to the power state, which woke on it. Double tap to wake felt
+ * like tap to wake (a tester, Nov 11). The look below wakes on two. */
+static void touch_wake_event(long btn, intptr_t pos)
+{
+    if (wallpaper_screen_dark && (btn & BUTTON_TOUCHSCREEN)) return;
+    touch_wake(btn, pos);
+}
 static bool dark_tap_armed, dark_tap_down;
 static uint32_t dark_tap_ms;
 static int dark_tap_x, dark_tap_y;
@@ -9110,7 +9277,7 @@ static void sloppy_run(void)
         long btn;
         while ((btn = sl_flip_key(button_get(false))) != BUTTON_NONE)
         {
-            touch_wake(btn, button_get_data());
+            touch_wake_event(btn, button_get_data());
             handle_button(btn);
         }
         sl_bt_volume_follow();
@@ -9258,6 +9425,7 @@ static void sloppy_run(void)
             else lag_pass((uint32_t)((lap_at - lap_start) / 1000), lap_names[worst], lap_us[worst] / 1000);
         }
         lag_audio();
+        heard_poll();
         bool busy = lv_anim_count_running() > 0 || g_state != G_IDLE;
         /* Idle with the screen on and no finger down: stop reading the
          * touch panel 60 times a second. A touch posts a button event,
@@ -9290,7 +9458,7 @@ static void sloppy_run(void)
                        (unsigned)(waited / 1000));
             }
             else lag_wait((uint32_t)(ticks * 1000 / HZ), (uint32_t)(waited / 1000));
-            if (btn != BUTTON_NONE) { touch_wake(btn, button_get_data()); handle_button(btn); }
+            if (btn != BUTTON_NONE) { touch_wake_event(btn, button_get_data()); handle_button(btn); }
         }
     }
 

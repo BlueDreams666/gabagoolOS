@@ -880,6 +880,12 @@ static void scratch_mem_init(void *mem)
 static int audiobuf_handle;
 #define AUDIO_BUFFER_RESERVE (256*1024)
 static size_t filebuflen;
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+#define AUDIO_R1_FILL_MAX (4*1024*1024)
+/* where the songs go, for SloppyOS's count of pages still to come */
+unsigned char *audio_fill_start;
+size_t audio_fill_len;
+#endif
 
 
 size_t audio_buffer_size(void)
@@ -953,7 +959,22 @@ static void audio_reset_buffer_noalloc(
     clear_last_folder_album_art();
 #endif
 
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+    /* The R1: the songs fill 4 MB at most of the 7 MB buffer. A filled
+     * page is the player's for good, and with Bluetooth's daemons up a
+     * full 7 MB left 2 MB for everything else: the screen froze while the
+     * kernel paged (test R1 logs, 8 Nov). 4 MB is still 35 s of CD FLAC.
+     * The rest stays the buffer's on paper (its shrink sums are as they
+     * were) and never gets a page. */
+    {
+        size_t fill = filebuflen < AUDIO_R1_FILL_MAX ? filebuflen : AUDIO_R1_FILL_MAX;
+        audio_fill_start = filebuf;
+        audio_fill_len = fill;
+        buffering_reset(filebuf, fill);
+    }
+#else
     buffering_reset(filebuf, filebuflen);
+#endif
 
     buffer_state = AUDIOBUF_STATE_INITIALIZED;
 
