@@ -178,6 +178,7 @@ It helps a lot if you attach the log file from your card:
 
 Big thanks to the people and projects this is built on:
 
+- **[sloppyjoo](https://github.com/sloppyjoo)**, who helped make GabagoolOS
 - **[Rockbox](https://www.rockbox.org)**, which plays your music
 - **[WillNHT's R1 port](https://github.com/WillNHT/rockbox-hiby-r1)** and
   **[bahusoid's Audiobook Mod](https://github.com/bahusoid/rockbox)**, where
