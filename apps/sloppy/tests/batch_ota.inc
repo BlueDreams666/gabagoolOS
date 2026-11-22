@@ -12,6 +12,7 @@
  * keeps on this Mac (SLOPPY_OTA_CRYPTO=<path> for another). The key pair
  * is made here, at random, for this run only; no key is kept anywhere. */
 #include <dlfcn.h>
+#include "sloppy_ota_key.h"
 #define OT_LIB_MAC "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/libcrypto.1.1.dylib"
 #define OT_W SIM_TMP "/sloppy-ota-work"
 #define OT_TOOL "sloppyos/sloppy-dev/ota/make-update.py"
@@ -240,6 +241,38 @@ static void ot_drop(const char *name, const char *man, int flags)
     ot_path(p, sizeof p, name);
     ot_put(p, b, flags & 2 ? n - 300 : n);
     free(b);
+}
+/* the internet the online check sees: the release's text and its update file */
+static const char *ot_net_feed, *ot_net_u;
+static size_t ot_net_n;
+static int ot_net_cut;
+static char ot_net_asked[1024];
+static int ot_net(const char *url, char *out, size_t cap, const char *path)
+{
+    (void)path;
+    if (strlen(ot_net_asked) + strlen(url) + 2 < sizeof ot_net_asked) { strcat(ot_net_asked, url); strcat(ot_net_asked, "\n"); }
+    if (strstr(url, SL_OTA_FEED_NAME)) { snprintf(out, cap, "%s", ot_net_feed); return strncmp(ot_net_feed, "GBFEED1", 7) ? 404 : 200; }
+    if (strstr(url, ".gbupdate") && ot_net_u && ot_net_n <= cap)
+    {
+        size_t give = ot_net_cut ? ot_net_n / 2 : ot_net_n;
+        memcpy(out, ot_net_u, give);
+        sl_net_http_fake_len = give;
+        return 200;
+    }
+    return 404;
+}
+static struct sl_ota_status ot_net_wait(void)
+{
+    struct sl_ota_status s;
+    for (uint64_t t0 = h_ms(); h_ms() - t0 < 20000; )
+    {
+        sl_ota_status(&s);
+        if (s.net != SL_OTA_NET_CHECKING && s.net != SL_OTA_NET_DOWNLOADING && s.state != SL_OTA_RECEIVING) { usleep(5000); sl_ota_status(&s); return s; }
+        frame(20);
+        usleep(2000);
+    }
+    assert(!"the online check never settled");
+    return s;
 }
 static void ot_wait(void)
 {
@@ -679,6 +712,118 @@ static void ot_tests(void)
     pop_hide_now();
     ot_user_untouched();
     printf("PASS: ota: from the phone remote: the upload lands, is checked and installs; no key, USB mode and a dropped phone keep nothing.\n");
+
+    /* the release key is in this build: 32 bytes, not the zeros of a build without one */
+    {
+        static const unsigned char rk[32] = SL_OTA_KEY;
+        int nz = 0;
+        for (int i = 0; i < 32; i++) nz += rk[i] != 0;
+        assert(SL_OTA_KEY_SET == 1 && nz > 20);
+    }
+    /* ---- online: the newest release's text, then its update file, checked as one from the remote */
+    {
+        /* the feed's text: only plain names and sizes, nothing else taken */
+        char v[16], f[96];
+        uint64_t sz;
+        assert(sl_ota_feed_parse("GBFEED1\nversion 1.2\nfile GabagoolOS-1.2.gbupdate\nsize 1234\n", v, sizeof v, f, sizeof f, &sz) &&
+               !strcmp(v, "1.2") && !strcmp(f, "GabagoolOS-1.2.gbupdate") && sz == 1234);
+        assert(sl_ota_feed_parse("GBFEED1\r\nversion 10.0.1\r\nsize 9\r\nfile a.gbupdate\r\n", v, sizeof v, f, sizeof f, &sz) && !strcmp(v, "10.0.1"));
+        assert(!sl_ota_feed_parse("<html>Not Found</html>", v, sizeof v, f, sizeof f, &sz));
+        assert(!sl_ota_feed_parse("GBFEED1\nversion 1.2\nfile ../../x.gbupdate\nsize 9\n", v, sizeof v, f, sizeof f, &sz));
+        assert(!sl_ota_feed_parse("GBFEED1\nversion 1.2\nfile x.gbupdate?a=b\nsize 9\n", v, sizeof v, f, sizeof f, &sz));
+        assert(!sl_ota_feed_parse("GBFEED1\nversion 1.2\nfile x.zip\nsize 9\n", v, sizeof v, f, sizeof f, &sz));
+        assert(!sl_ota_feed_parse("GBFEED1\nversion x1\nfile x.gbupdate\nsize 9\n", v, sizeof v, f, sizeof f, &sz));
+        assert(!sl_ota_feed_parse("GBFEED1\nversion 1.2\nfile x.gbupdate\nsize 0\n", v, sizeof v, f, sizeof f, &sz));
+        assert(!sl_ota_feed_parse("GBFEED1\nversion 1.2\nfile x.gbupdate\nsize 99999999999\n", v, sizeof v, f, sizeof f, &sz));
+    }
+    ot_card_old();
+    ot_sh("rm -f '%s'/*.gbupdate", sim_root_dir);
+    sl_ota_test_reset();
+    ot_keys();
+    snprintf(sl_ota_running, sizeof sl_ota_running, "1.0");
+    {
+        size_t n;
+        char *u = ot_slurp(OT_W "/u11.gbupdate", &n);
+        assert(u);
+        /* the release tool writes the text the player reads */
+        ot_sh("cp " OT_W "/u11.gbupdate " OT_W "/GabagoolOS-1.1.gbupdate && python3 -I %s feed " OT_W "/GabagoolOS-1.1.gbupdate > /dev/null", OT_TOOL);
+        char want[160];
+        snprintf(want, sizeof want, "GBFEED1\nversion 1.1\nfile GabagoolOS-1.1.gbupdate\nsize %zu\n", n);
+        char *fd = ot_slurp(OT_W "/gabagoolOS-update.txt", NULL);
+        assert(fd && !strcmp(fd, want));
+        static char feed[200];
+        snprintf(feed, sizeof feed, "%s", fd);
+        free(fd);
+        ot_net_feed = feed; ot_net_u = u; ot_net_n = n; ot_net_cut = 0; ot_net_asked[0] = '\0';
+        sl_net_http_fake = ot_net;
+        struct sl_ota_status s;
+        /* no key: nothing asked of the internet */
+        sl_ota_test_key_set = false;
+        sl_ota_check_online(); s = ot_net_wait();
+        assert(s.net == SL_OTA_NET_IDLE && !ot_net_asked[0]);
+        ot_keys();
+        /* a newer one: said on the page, with its size and Download */
+        update_page(); frame(200);
+        sl_ota_check_online(); s = ot_net_wait();
+        assert(s.net == SL_OTA_NET_NEWER && !strcmp(s.net_version, "1.1") && s.net_size == n);
+        assert(strstr(ot_net_asked, SL_OTA_FEED_BASE SL_OTA_FEED_NAME));
+        for (int i = 0; i < 4; i++) { up_poll(); frame(100); }
+        assert(!strcmp(set_v_update(), "Update available"));
+        assert(has_text(lv_screen_active(), "GabagoolOS 1.1 is available") && has_text(lv_screen_active(), "Download"));
+        shot("update-online.ppm");
+        /* fetched: from the release's own address, then checked and installed as from the remote */
+        assert(sl_ota_download());
+        s = ot_net_wait();
+        ot_wait();
+        sl_ota_status(&s);
+        assert(strstr(ot_net_asked, SL_OTA_FEED_BASE "GabagoolOS-1.1.gbupdate"));
+        assert(s.state == SL_OTA_FOUND && s.from_net && !s.file[0] && !strcmp(s.version, "1.1"));
+        for (int i = 0; i < 4; i++) { up_poll(); frame(100); }
+        assert(has_text(lv_screen_active(), "DOWNLOADED"));
+        s = ot_install();
+        assert(s.state == SL_OTA_READY && !ot_there(".rockbox/update/incoming.gbupdate"));
+        assert(sl_ota_swap() == 0 && ot_set_new());
+        s = ot_restart();
+        assert(s.trial && !strcmp(sl_ota_running, "1.1"));
+        /* the newest already: said so */
+        sl_net_http_fake = ot_net;
+        sl_ota_check_online(); s = ot_net_wait();
+        assert(s.net == SL_OTA_NET_LATEST);
+        assert(sl_ota_revert() == 0);
+        s = ot_restart();
+        sl_net_http_fake = ot_net;
+        /* the file cut short on the way: nothing kept, said as not reaching it */
+        sl_ota_check_online(); s = ot_net_wait();
+        assert(s.net == SL_OTA_NET_NEWER);
+        ot_net_cut = 1;
+        assert(sl_ota_download());
+        s = ot_net_wait();
+        ot_wait();
+        sl_ota_status(&s);
+        assert(s.net == SL_OTA_NET_FAILED && s.state == SL_OTA_NONE && !ot_there(".rockbox/update/incoming.part") &&
+               !ot_there(".rockbox/update/incoming.gbupdate") && ot_set_old());
+        ot_net_cut = 0;
+        /* no answer, or one that is not the text: failed, nothing changed */
+        ot_net_feed = "<html>404</html>";
+        sl_ota_check_online(); s = ot_net_wait();
+        assert(s.net == SL_OTA_NET_FAILED && s.state == SL_OTA_NONE);
+        for (int i = 0; i < 4; i++) { up_poll(); frame(100); }
+        assert(has_text(lv_screen_active(), "Couldn't reach the update server"));
+        ot_net_feed = feed;
+        /* a damaged file from the internet: refused by its signature, as one from anywhere */
+        sl_ota_check_online(); s = ot_net_wait();
+        u[n - 10] ^= 1;
+        assert(sl_ota_download());
+        ot_net_wait();
+        ot_wait();
+        s = ot_install();
+        assert(s.state == SL_OTA_REJECTED && s.why == SL_OTA_E_DAMAGED && ot_set_old() && !ot_there(".rockbox/update/incoming.gbupdate"));
+        sl_net_http_fake = NULL;
+        free(u);
+        while (npages > 1) { page_pop(); frame(300); }
+    }
+    ot_user_untouched();
+    printf("PASS: ota: online: the newest release's text, then its file, checked and installed; up to date, cut short, no answer and damaged are said and keep nothing.\n");
 
     /* ---- tidy: the card as it was */
     ot_sh("rm -rf '%s/.rockbox/update' '%s/" SL_OTA_UNDO "' '%s/.rockbox/rockbox.r1' '%s/.rockbox/codecs/ota_a.codec' '%s/.rockbox/codecs/ota_gone.codec' "

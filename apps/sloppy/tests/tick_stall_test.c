@@ -49,6 +49,28 @@ static void *holder(void *arg)
     return NULL;
 }
 
+static void *misuser(void *arg)
+{
+    (void)arg;
+    kernel_misuse("sleep");
+    kernel_misuse("block");               /* counted, the first one kept */
+    return NULL;
+}
+/* stand-in queues: only their addresses are kept */
+static char qa_mem, qb_mem;
+#define QA ((struct event_queue *)&qa_mem)
+#define QB ((struct event_queue *)&qb_mem)
+static bool off_seen;
+static void *poster(void *arg)
+{
+    (void)arg;
+    off_seen = kernel_off_thread();
+    kernel_wake_later(QA);
+    kernel_wake_later(QB);
+    kernel_wake_later(QA);              /* already waiting: kept once */
+    return NULL;
+}
+
 int main(void)
 {
     union sigval none = { 0 };
@@ -83,5 +105,23 @@ int main(void)
     assert(runs > 3);                   /* the lock back: the tasks run again */
     printf("tick: %ld ticks counted while the lock was kept, %u put off, tasks ran again after\n",
            counted, tick_skipped);
+
+    /* posts from other OS threads leave the waking to this one, the
+     * scheduler's (tick_start ran here): each queue once, taken here */
+    assert(!kernel_off_thread());
+    pthread_t p;
+    pthread_create(&p, NULL, poster, NULL);
+    pthread_join(p, NULL);
+    assert(off_seen);
+    struct event_queue *a = kernel_wake_take(), *b = kernel_wake_take();
+    assert(kernel_wake_take() == NULL);
+    assert(a && b && a != b && (a == QA || a == QB) && (b == QA || b == QB));
+    printf("wake: two queues posted from another thread, %s, each woken here once\n",
+           off_seen ? "seen as off the scheduler's thread" : "?");
+    /* a refused sleep on another thread: the first kept, with a stack */
+    pthread_create(&p, NULL, misuser, NULL);
+    pthread_join(p, NULL);
+    assert(kernel_misuse_n == 2 && !strcmp(kernel_misuse_what, "sleep") && kernel_misuse_stack[0]);
+    printf("misuse: a sleep asked for on another thread is kept with its caller's stack\n");
     return 0;
 }

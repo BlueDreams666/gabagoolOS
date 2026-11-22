@@ -25,10 +25,12 @@ struct test_settings global_settings;
 static int playing, paused, pauses, resumes, jack, switches;
 static char routed_to[128];
 
-unsigned int rb_test_sleep(unsigned int ticks) { usleep(ticks * 10000); return 0; }
+pthread_t bt_test_main;
+int bt_test_off_kernel;
+unsigned int rb_test_sleep(unsigned int ticks) { bt_test_kernel_call(); usleep(ticks * 10000); return 0; }
 int audio_status(void) { return (playing ? AUDIO_STATUS_PLAY : 0) | (paused ? AUDIO_STATUS_PAUSE : 0); }
-void audio_pause(void) { if (playing) paused = 1; pauses++; }
-void audio_resume(void) { paused = 0; resumes++; }
+void audio_pause(void) { bt_test_kernel_call(); if (playing) paused = 1; pauses++; }
+void audio_resume(void) { bt_test_kernel_call(); paused = 0; resumes++; }
 bool headphones_inserted(void) { return jack; }
 int hiby_has_valid_output(void) { return jack ? 2 : 0; }
 bool button_add_input_device(int i) { (void)i; return true; }
@@ -460,8 +462,24 @@ static void pair_tests(void)
     pthread_join(ans, NULL);
 }
 
+/* a plain thread, not a GabagoolOS worker: bt_off_kernel stays false here */
+static int plain_running;
+static void *plain_disconnects(void *arg)
+{
+    (void)arg;
+    for (int i = 0; i < 6; i++)
+    {
+        playing = 1; paused = 0;
+        hiby_bt_connect(&phones);
+        bt_disconnect();
+    }
+    __atomic_store_n(&plain_running, 0, __ATOMIC_RELEASE);
+    return NULL;
+}
+
 int main(void)
 {
+    bt_test_main = pthread_self();
     setvbuf(stdout, NULL, _IOLBF, 0);    /* a crash keeps what was said */
     /* The receiver blocks SIGPIPE on its own thread, which is enough on
      * Linux (the signal goes to the writing thread). macOS sends it to the
@@ -634,6 +652,19 @@ int main(void)
     bt_disconnect();
     assert(paused && pauses == 1 && !hiby_bt_take_audio_pause());
     printf("PASS: Rockbox-thread disconnect pauses directly.\n");
+
+    /* the 22 Nov freeze: a plain thread that is no GabagoolOS worker (receive
+     * mode, the AirPods link) disconnecting while another thread's jobs set
+     * and clear bt_embedded_ui under it: no splash, sleep or pause there */
+    bt_test_off_kernel = 0;
+    pthread_t pl;
+    plain_running = 1;
+    pthread_create(&pl, NULL, plain_disconnects, NULL);
+    while (__atomic_load_n(&plain_running, __ATOMIC_ACQUIRE)) { bt_embedded_ui = !bt_embedded_ui; usleep(200); }
+    pthread_join(pl, NULL);
+    bt_embedded_ui = false;
+    assert(bt_test_off_kernel == 0);
+    printf("PASS: a plain thread's disconnect asks for no splash, sleep or pause, whatever the shared flag says.\n");
     bt_off_kernel = true;
     pair_tests();
     rx_tests();

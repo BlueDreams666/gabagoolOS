@@ -12,6 +12,10 @@ void sloppy_boot_mark(const char *stage);
  * why: 0 power off, 1 battery low, 2 battery empty. False when the classic
  * UI owns the screen. */
 bool sloppy_shutdown_screen(int why);
+/* check_bootfile(): a new rockbox.r1 came onto the card in USB mode. True
+ * when GabagoolOS takes it from here: it restarts into it once the USB
+ * screen has gone. False when the classic UI owns the screen: it asks. */
+bool sloppy_boot_changed(void);
 /* a line in the breadcrumb log on the card, /.rockbox/sloppy/sloppy.log */
 void sl_log(const char *fmt, ...);
 /* a card error from any thread (errno): read-only (EROFS) asks for a check, once */

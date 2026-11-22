@@ -232,9 +232,13 @@ void sl_lib_cache_drop(void);         /* the next sl_lib_begin reads the databas
 #define SL_SYM_XFADE "\xEE\x80\x81"   /* U+E001 one sound ramping down as another ramps up */
 #define SL_SYM_GLOBE "\xEE\x80\x82"   /* U+E002 a globe: languages and places */
 #include "lvgl.h"
+extern void *lv_timer_slowest_cb;      /* lib/lvgl lv_timer.c: the slowest timer callback since cleared */
+extern uint32_t lv_timer_slowest_ms;
 void sl_art_init(void);
 void sl_art_apply(lv_obj_t *cover_box, int album, int size);
 bool sl_art_apply_scaled(lv_obj_t *cover_box, int album, int size);   /* false: no thumbnail yet */
+/* the same, read and scaled on a thread of its own: true when it is coming (the box gets it on a later UI pass) */
+bool sl_art_apply_scaled_async(lv_obj_t *cover_box, int album, int size);
 void sl_art_prefer(int album);   /* make this album's art next (Cover Flow's neighbours) */
 const char *sl_art_src(int album, int size);   /* "R:<path>" of a made thumbnail, or NULL */
 bool sl_art_load_square(int album, int size, uint16_t *dst); /* cached art for Now Playing */

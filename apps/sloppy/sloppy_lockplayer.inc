@@ -330,16 +330,19 @@ static void lp_refresh(void)
     }
     if (!show) return;
 
-    if (strcmp(lp_last_path, id3->path))
+    static int lp_last_tags = -1;        /* the file's own tags came after the song started */
+    int tags = (id3->title && id3->title[0]) | (id3->artist && id3->artist[0]) << 1;
+    if (strcmp(lp_last_path, id3->path) || tags != lp_last_tags)
     {
+        lp_last_tags = tags;
         strlcpy(lp_last_path, id3->path, sizeof lp_last_path);
         char name[64];
         label_if_changed(lp_title, track_title(id3, name, sizeof name));
         label_if_changed(lp_artist, track_artist(id3));
         lp_set_art(id3);
     }
-    else if (!lp_art_ready)
-        lp_set_art(id3);                /* art may arrive after the track starts */
+    else if (!lp_art_ready || np_art_stale())
+        lp_set_art(id3);                /* art may arrive after the track starts, or the song before's came first */
 
     if (lp_scrub_ms < 0)
         lp_show_time(id3, visible_elapsed(id3));

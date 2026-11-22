@@ -18,14 +18,17 @@
  * picture for the menu. Leaving, locking or a USB cable keeps the place.
  *
  * Held sideways (the menu's switch) the four side keys are along the top,
- * as a console's: the volume keys are left and right, Play and Next still
- * A and B, so running and jumping take no finger off anything. The picture
- * is turned a quarter, the same size in the middle, and the screen either
- * side of it is up, down and Select on the left, A, B and Start on the
- * right: Play and Next are the two ends of one rocker, which may not go
- * down together, so B can be held on the screen while Next jumps. The
- * menu stays upright, and with it open the volume keys are the volume's
- * again.
+ * as a console's, and nothing is drawn on the screen but the game. From
+ * the power key's end they are Left, B, A and Right (Volume up, Volume
+ * down, Play and Next). Volume up, Volume down and
+ * Play are read by one ADC on the R1 (button-r1.c: "jz adc keyboard"),
+ * which hears one of them at a time; Next has a line of its own. So Right
+ * goes with A or B, and Left with neither: the screen right of the
+ * picture is A, for a jump while Left is held. Left of the picture is Up
+ * (the half nearer the keys) and Down. Start and Select are in the menu
+ * (a tap on the picture), pressed once from there. The picture is turned a
+ * quarter, the same size in the middle. The menu stays upright, and with
+ * it open the volume keys are the volume's again.
  *
  * Doom is still a classic Rockbox program; it runs outside this interface
  * and GabagoolOS comes back when it ends. */
@@ -432,7 +435,9 @@ static void arc_scan_cb(lv_event_t *e)
 enum { ARC_K_DPAD = 0x0f };
 static struct {
     lv_obj_t *page, *screen, *pad, *arm[4], *arrow[4], *hub, *btn_a, *btn_b, *btn_sel, *btn_start, *btn_menu, *note;
-    lv_obj_t *side, *side_btn[6];          /* sideways: the screen either side of the picture: up, down, Select; A, B, Start */
+    lv_obj_t *side;                        /* sideways: the screen either side of the picture, read, not drawn */
+    bool held;                             /* paused by a lock or a panel, not by the menu */
+    unsigned pulse, pulse_frames;          /* a button pressed once from the menu (Start, Select) */
     uint16_t *px;                          /* the picture at three times */
     lv_timer_t *timer;
     int rom;
@@ -686,10 +691,9 @@ static unsigned arc_keys_at(int x, int y)
     return 0;
 }
 /* Sideways: the long way of the screen is across, u from the left, and v
- * down from the keys' edge. Left of the picture, from the top: up, down,
- * Select; right of it: A, B, Start. */
+ * down from the keys' edge. Left of the picture: Up (the half nearer the
+ * keys), Down; right of it: A. */
 #define ARC_SIDE_BAR ((H - ARC_PIC_W) / 2)   /* 160: the screen either side of the picture */
-static const unsigned arc_side_key[6] = { GB_UP, GB_DOWN, GB_SELECT, GB_A, GB_B, GB_START };
 static void arc_side_uv(int x, int y, int *u, int *v)
 {
     if (arc_side_cw()) { *u = H - 1 - y; *v = x; }
@@ -699,9 +703,8 @@ static unsigned arc_side_keys_at(int x, int y)
 {
     int u, v;
     arc_side_uv(x, y, &u, &v);
-    int slot = v < 180 ? 0 : v < 360 ? 1 : 2;
-    if (u < ARC_SIDE_BAR) return arc_side_key[slot];
-    if (u >= H - ARC_SIDE_BAR) return arc_side_key[3 + slot];
+    if (u < ARC_SIDE_BAR) return v < W / 2 ? GB_UP : GB_DOWN;
+    if (u >= H - ARC_SIDE_BAR) return GB_A;
     return 0;
 }
 static void arc_show_keys(void)
@@ -710,12 +713,6 @@ static void arc_show_keys(void)
     if (k == arc.shown) return;
     unsigned changed = k ^ arc.shown;
     arc.shown = k;
-    for (int i = 0; i < 6; i++)
-        if (arc.side_btn[i] && (changed & arc_side_key[i]))
-        {
-            if (k & arc_side_key[i]) lv_obj_add_state(arc.side_btn[i], LV_STATE_PRESSED);
-            else lv_obj_remove_state(arc.side_btn[i], LV_STATE_PRESSED);
-        }
     static const unsigned arm_key[4] = { GB_UP, GB_RIGHT, GB_DOWN, GB_LEFT };
     uint32_t acc = sl_zune() ? ZN_PINK : C_ACCENT_UI, ink = sl_theme() == 1 && !sl_zune() ? 0x43576a : 0xb3bfcb;
     for (int i = 0; i < 4; i++)
@@ -765,17 +762,33 @@ static void arc_side_cb(lv_event_t *e)
     else arc.touch = 0;
     arc_show_keys();
 }
-/* the R1's keys: Play is A, Next is B (their press and their release).
- * Sideways the volume keys are left and right while the game runs: the
- * upper one is the left one with the keys along the top (the right one
- * with the screen set upside down, turned the other way). Paused, the
- * menu open, they are the volume's. */
+/* Sideways, a side key by where it is: down the R1's side from the power
+ * key they are Volume up, Volume down, Play and Next; along the top from
+ * the power key's end that is Left, B, A, Right. Turned the other way (the
+ * screen set upside down) the power key is at the right end, so the same
+ * places read the other way round. b comes after sl_flip_key, which swaps
+ * the volume keys when the screen is upside down. */
+static unsigned arc_side_key_of(int b)
+{
+    bool vol_up = sl_flipped ? b == BUTTON_DOWN : b == BUTTON_UP;
+    bool vol_down = sl_flipped ? b == BUTTON_UP : b == BUTTON_DOWN;
+    int from_power = vol_up ? 0 : vol_down ? 1 : b == BUTTON_LEFT ? 2 : b == BUTTON_RIGHT ? 3 : -1;
+    if (from_power < 0) return 0;
+    static const unsigned along_top[4] = { GB_LEFT, GB_B, GB_A, GB_RIGHT };
+    return along_top[arc_side_cw() ? 3 - from_power : from_power];
+}
+/* the R1's keys: Play is A, Next is B (their press and their release);
+ * sideways, all four are the game's while it runs (arc_side_key_of).
+ * Paused, the menu open, the volume keys are the volume's. */
 static bool arcade_key(int b, bool rel)
 {
     if (!arc_on_top()) return false;
     unsigned k = b == BUTTON_LEFT ? GB_A : b == BUTTON_RIGHT ? GB_B : 0;
-    if (arc_opt.side && !arc.paused && (b == BUTTON_UP || b == BUTTON_DOWN))
-        k = (b == BUTTON_UP) != arc_side_cw() ? GB_LEFT : GB_RIGHT;
+    if (arc_opt.side)
+    {
+        if (arc.paused) return b == BUTTON_LEFT || b == BUTTON_RIGHT || b == BUTTON_PLAY || b == BUTTON_NEXT || b == BUTTON_PREV;
+        k = arc_side_key_of(b);
+    }
     if (!k) return b == BUTTON_PLAY || b == BUTTON_NEXT || b == BUTTON_PREV;   /* a headset's keys do nothing here */
     if (rel) arc.keys &= ~k; else arc.keys |= k;
     arc_show_keys();
@@ -787,7 +800,7 @@ static void arc_pause(bool on)
 {
     if (on == arc.paused) return;
     arc.paused = on;
-    if (on) { arc_sound_stop(); arc.touch = arc.keys = 0; arc_show_keys(); }
+    if (on) { arc_sound_stop(); arc.touch = arc.keys = 0; arc.pulse_frames = 0; arc_show_keys(); }
     else
     {
         arc.t0 = lv_tick_get();
@@ -804,14 +817,26 @@ static void arc_tick(lv_timer_t *t)
     if (hidden || (overlay_visible() && !arc.sheet))
     {
         arc_pause(true);
+        arc.held = true;
         if (sl_power_hides_ui() && !arc.hidden_saved) { arc.hidden_saved = true; arc_keep_place(); }   /* locked: a flat battery keeps it */
         return;
     }
     if (arc.sheet)
     {
-        if (acts_open_now) return;
-        arc.sheet = false;                 /* the menu was put away: carry on */
+        /* the menu put away, and gone: while it slides off it is still an
+         * overlay, and taken for another one it paused the game for good
+         * (a test R1, Nov 13: no frame after the menu closed) */
+        if (acts_open_now || (acts && !lv_obj_has_flag(acts, LV_OBJ_FLAG_HIDDEN))) return;
+        arc.sheet = false;                 /* carry on */
+        arc.held = false;
         arc_pause(false);
+    }
+    else if (arc.held)
+    {
+        /* back from a lock or a panel: paused, and the menu says so, its
+         * Resume one tap away (keys alone did nothing on a paused game) */
+        arc.held = false;
+        if (gb_running()) { arc_menu_open(); return; }
     }
     if (arc.paused || !gb_running()) return;
     uint32_t now = lv_tick_get();          /* the interface's clock (sl_ms on the player) */
@@ -823,7 +848,8 @@ static void arc_tick(lv_timer_t *t)
     unsigned keys = arc.touch | arc.keys;
     for (int i = 0; i < n; i++)
     {
-        gb_frame(keys, i == n - 1);
+        gb_frame(keys | (arc.pulse_frames ? arc.pulse : 0), i == n - 1);
+        if (arc.pulse_frames) arc.pulse_frames--;
         arc_sound_push();
     }
     arc.frames += n;
@@ -1022,14 +1048,25 @@ static void arc_sound_cb(lv_event_t *e)
     arc_cfg_save();
 }
 static void arc_layout(void);
+static void arc_menu_refill_async(void *ud) { (void)ud; if (arc.page && arc.sheet && acts_open_now) arc_menu_fill(); }
 static void arc_side_opt_cb(lv_event_t *e)
 {
     arc_opt.side = !arc_opt.side;
     arc_opt_label(lv_event_get_current_target(e), "Hold sideways", arc_opt.side ? "On" : "Off");
     arc_cfg_save();
     arc_layout();
-    if (arc_opt.side) toast("The volume keys are left and right. Play is A, Next is B.");
+    lv_async_call(arc_menu_refill_async, NULL);   /* Start and Select come and go with it: after this tap, not under it */
+    if (arc_opt.side) toast("Along the top from the power key: Left, B, A, Right. Tap right of the game for A.");
 }
+/* Start or Select, pressed once (8 frames, about 130 ms) as the game goes on */
+static void arc_press_once(unsigned k)
+{
+    arc.pulse = k;
+    arc.pulse_frames = 8;
+    arc_menu_close();
+}
+static void arc_start_cb(lv_event_t *e) { (void)e; arc_press_once(GB_START); }
+static void arc_select_cb(lv_event_t *e) { (void)e; arc_press_once(GB_SELECT); }
 static void arc_menu_open(void)
 {
     if (!arc.page || arc.sheet) return;
@@ -1051,6 +1088,12 @@ static void arc_menu_fill(void)
     sl_place(t2, 16, 12 + lv_font_get_line_height(&ss_semibold_23) + 4);
     lv_obj_set_height(hd, LV_MAX(84, 12 + lv_font_get_line_height(&ss_semibold_23) + 4 + lv_font_get_line_height(&ss_regular_16) + 12));
     acts_row_cb(LV_SYMBOL_PLAY, "Resume", arc_resume_cb, 0);
+    if (arc_opt.side)
+    {
+        /* sideways the screen has no room for them: here, each pressed once */
+        acts_row_cb(LV_SYMBOL_RIGHT, "START", arc_start_cb, 0);
+        acts_row_cb(LV_SYMBOL_RIGHT, "SELECT", arc_select_cb, 0);
+    }
     acts_row_cb(LV_SYMBOL_DOWNLOAD, "Save game here", arc_save_cb, 0);
     if (arc_has_state(r->path, ".state")) acts_row_cb(LV_SYMBOL_UPLOAD, "Load saved game", arc_load_cb, 0);
     lv_obj_t *row;
@@ -1115,12 +1158,10 @@ static void arc_layout(void)
     arc_show_keys();
     arc_blit();
 }
-/* Sideways' controls: six quiet tiles on the black either side of the
- * picture, each lit while it is held. Their marks are turned to read
- * with the keys along the top. */
+/* Sideways' screen: one panel under the picture that reads the finger
+ * (arc_side_keys_at); nothing drawn on it, the game is the whole screen. */
 static void arc_side_build(lv_obj_t *pg)
 {
-    bool cw = arc_side_cw();
     arc.side = box(pg);
     lv_obj_set_size(arc.side, W, H);
     lv_obj_set_pos(arc.side, 0, 0);
@@ -1130,38 +1171,6 @@ static void arc_side_build(lv_obj_t *pg)
     lv_obj_add_event_cb(arc.side, arc_side_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(arc.side, arc_side_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(arc.side, arc_side_cb, LV_EVENT_PRESS_LOST, NULL);
-    uint32_t acc = sl_zune() ? ZN_PINK : C_ACCENT_UI;
-    static const char *const mark[6] = { NULL, NULL, "SELECT", "A", "B", "START" };
-    static const int v_from[3] = { 20, 190, 370 }, v_to[3] = { 170, 350, 460 };
-    for (int i = 0; i < 6; i++)
-    {
-        /* across: the bar's middle 120; down: its slot of the height */
-        int u0 = (i < 3 ? 0 : H - ARC_SIDE_BAR) + 20, u1 = u0 + ARC_SIDE_BAR - 40;
-        int v0 = v_from[i % 3], v1 = v_to[i % 3];
-        lv_obj_t *t = box(arc.side);
-        arc.side_btn[i] = t;
-        lv_obj_set_size(t, v1 - v0, u1 - u0);
-        lv_obj_set_pos(t, cw ? v0 : W - v1, cw ? H - u1 : u0);
-        lv_obj_set_style_radius(t, sl_zune() ? 0 : SL_R_MD, 0);
-        lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(t, lv_color_hex(0x1c1c1e), 0);
-        lv_obj_set_style_bg_color(t, lv_color_hex(acc), LV_STATE_PRESSED);
-        lv_obj_remove_flag(t, LV_OBJ_FLAG_CLICKABLE);      /* the panel under them reads the finger */
-        lv_obj_t *l;
-        /* up is towards the keys: the arrow that points there on the upright panel */
-        if (i < 2) l = text(t, (i == 0) != cw ? LV_SYMBOL_RIGHT : LV_SYMBOL_LEFT, &sl_sym_18, 0xb3bfcb);
-        else
-        {
-            bool letter = i == 3 || i == 4;
-            l = text(t, mark[i], letter ? &ss_bold_28 : &ss_semibold_18, letter ? 0xfffffe : 0xb3bfcb);
-            if (!letter) lv_obj_set_style_text_letter_space(l, 1, 0);
-            lv_obj_update_layout(l);
-            lv_obj_set_style_transform_pivot_x(l, lv_obj_get_width(l) / 2, 0);
-            lv_obj_set_style_transform_pivot_y(l, lv_obj_get_height(l) / 2, 0);
-            lv_obj_set_style_transform_rotation(l, cw ? 2700 : 900, 0);
-        }
-        lv_obj_center(l);
-    }
     lv_obj_add_flag(arc.side, LV_OBJ_FLAG_HIDDEN);
 }
 static void arc_rescan_async(void *ud) { (void)ud; arc_scan_cb(NULL); }

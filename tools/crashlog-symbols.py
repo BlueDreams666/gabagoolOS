@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Name the addresses in a player's .rockbox/crash.log.
+"""Name the addresses in a player's .rockbox/crash.log, or the slowest
+timer in sloppy.log's lag and stall lines.
 
     tools/crashlog-symbols.py crash.log rockbox.elf
+    tools/crashlog-symbols.py sloppy.log rockbox.elf
 
 rockbox.elf (or, less precisely, rockbox.map) comes from the same build as
 the rockbox.r1 that crashed: CI's "-symbols" artifact, or
@@ -102,6 +104,8 @@ def main():
                     print("  %-3s %s  %s" % (key, m.group(1), name(spans, starts, int(m.group(1), 16))))
         elif line.startswith("version "):
             print("  " + line)
+        elif re.search(r"timer 0x[0-9a-f]+", line):   # a lag or stall line in sloppy.log
+            print(re.sub(r"timer (0x[0-9a-f]+)", lambda m: "timer %s" % name(spans, starts, int(m.group(1), 16)), line))
         elif line.startswith("stack:"):
             print("  called from (newest first; a few may be stale):")
             for a in line.split()[1:]:

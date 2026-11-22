@@ -61,6 +61,56 @@ void tick_unlock(void)
     pthread_mutex_unlock(&tick_mtx);
 }
 
+struct event_queue;
+static pthread_t kernel_thread;
+static volatile bool kernel_thread_known;
+bool kernel_off_thread(void)
+{
+    return kernel_thread_known && !pthread_equal(pthread_self(), kernel_thread);
+}
+/* the queues whose waiters the scheduler's thread is to wake */
+static pthread_mutex_t wake_mtx = PTHREAD_MUTEX_INITIALIZER;
+static struct event_queue *wake_list[16];
+static int wake_n;
+void kernel_wake_later(struct event_queue *q)
+{
+    pthread_mutex_lock(&wake_mtx);
+    int i;
+    for (i = 0; i < wake_n && wake_list[i] != q; i++)
+        ;
+    if (i == wake_n && wake_n < (int)(sizeof wake_list / sizeof wake_list[0]))
+        wake_list[wake_n++] = q;
+    pthread_mutex_unlock(&wake_mtx);
+    interrupt();
+}
+struct event_queue *kernel_wake_take(void)
+{
+    struct event_queue *q = NULL;
+    if (!wake_n)                         /* unlocked look: a miss is taken on the next pass */
+        return NULL;
+    pthread_mutex_lock(&wake_mtx);
+    if (wake_n)
+        q = wake_list[--wake_n];
+    pthread_mutex_unlock(&wake_mtx);
+    return q;
+}
+
+const char *volatile kernel_misuse_what;
+volatile unsigned kernel_misuse_n;
+unsigned long kernel_misuse_stack[8];
+extern char __executable_start[], etext[];
+void kernel_misuse(const char *what)
+{
+    if (__atomic_add_fetch(&kernel_misuse_n, 1, __ATOMIC_RELAXED) != 1)
+        return;                          /* the first is kept */
+    const unsigned long *w = __builtin_frame_address(0);
+    int k = 0;
+    for (int i = 0; i < 256 && k < 8; i++)
+        if (w[i] >= (unsigned long)__executable_start && w[i] < (unsigned long)etext)
+            kernel_misuse_stack[k++] = w[i];
+    kernel_misuse_what = what;
+}
+
 static pthread_cond_t wfi_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t wfi_mtx = PTHREAD_MUTEX_INITIALIZER;
 /*
@@ -127,6 +177,8 @@ void interrupt(void)
 void tick_start(unsigned int interval_in_ms)
 {
     int ret = 0;
+    kernel_thread = pthread_self();      /* init_tick, on the scheduler's thread */
+    kernel_thread_known = true;
     timer_t timerid;
     struct itimerspec ts;
     sigevent_t sigev;

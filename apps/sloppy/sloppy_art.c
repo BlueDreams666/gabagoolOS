@@ -757,9 +757,11 @@ void sl_art_invalidate_cache(void)
 /* USB mode: the card is unmounted for the computer, and an open folder
  * would keep it mounted. The prune starts over from the top afterwards. */
 static void art_job_settle(void);
+static void sc_settle(void);
 void sl_art_release(void)
 {
     art_job_settle();
+    sc_settle();                         /* a live tile's cover being read */
     if (prune_depth >= 0) thumb_prune_pending = true;
     while (prune_depth >= 0) closedir(prune_dir[prune_depth--]);
 }
@@ -1381,6 +1383,160 @@ bool sl_art_apply_scaled(lv_obj_t *boxo, int album, int size)
     lv_obj_set_style_clip_corner(img, true, 0);
     lv_obj_add_event_cb(img, scaled_deleted, LV_EVENT_DELETE, dsc);
     return true;
+}
+
+/* ---- scaled covers made beside the UI (the home's live tiles) ----
+ * A live tile takes a new cover at each peek and a mosaic at each swap.
+ * Read from the card and scaled on the UI loop, that held it 60-240 ms
+ * every two seconds on an idle home (test R1 logs, Nov 12-13): the read is
+ * a system call, and Rockbox's own threads take turns with the UI on one
+ * OS thread, so one of them would hold the loop as long. Here the loop finds
+ * the file (sl_art_src may make a missing size), and a pthread of its own
+ * reads it with the plain POSIX calls on the card's real path, as the
+ * wallpaper maker does, and scales it; the loop puts the finished picture
+ * in its box (sc_poll) or drops it when the box has gone. USB mode waits
+ * for any read under way (sl_art_release). */
+#pragma push_macro("open")
+#pragma push_macro("read")
+#pragma push_macro("close")
+#undef open
+#undef read
+#undef close
+enum { SC_FREE, SC_WORKING, SC_MADE, SC_FAILED };
+#define SC_JOBS 6
+static struct sc_job {
+    int state;                     /* SC_*, atomic */
+    lv_obj_t *box;                 /* NULL once the box has gone */
+    int size;
+    char real[MAX_PATH + 96];
+    lv_image_dsc_t *dsc;
+} sc_jobs[SC_JOBS];
+static int sc_working;             /* jobs a thread holds a card file for, atomic */
+static lv_timer_t *sc_timer;
+#if defined(SIMULATOR) || defined(SLOPPY_NET_TEST)
+int sl_art_scaled_jobs_made;       /* the tests: pictures that came from a thread */
+#endif
+/* the thread's part: the thumbnail read whole, then scaled to size x size */
+static lv_image_dsc_t *sc_make(const char *real, int size)
+{
+    int fd = open(real, O_RDONLY);
+    if (fd < 0) return NULL;
+    lv_image_header_t hdr;
+    bool ok = read(fd, &hdr, sizeof hdr) == (ssize_t)sizeof hdr &&
+              hdr.magic == LV_IMAGE_HEADER_MAGIC && hdr.cf == LV_COLOR_FORMAT_RGB565 &&
+              hdr.w > 0 && hdr.w <= SL_ART_GRID && hdr.h > 0 && hdr.h <= SL_ART_GRID && hdr.stride == hdr.w * 2;
+    uint16_t *src = ok ? malloc((size_t)hdr.w * hdr.h * 2) : NULL;
+    lv_image_dsc_t *dsc = src ? malloc(sizeof *dsc + (size_t)size * size * 2) : NULL;
+    ok = dsc && read(fd, src, (size_t)hdr.w * hdr.h * 2) == (ssize_t)((size_t)hdr.w * hdr.h * 2);
+    close(fd);
+    if (!ok) { free(src); free(dsc); return NULL; }
+    uint16_t *px = (uint16_t *)(dsc + 1);
+    scale565(src, hdr.w, hdr.h, px, size, size);
+    free(src);
+    memset(dsc, 0, sizeof *dsc);
+    dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
+    dsc->header.cf = LV_COLOR_FORMAT_RGB565;
+    dsc->header.w = size;
+    dsc->header.h = size;
+    dsc->header.stride = size * 2;
+    dsc->data = (const uint8_t *)px;
+    dsc->data_size = (uint32_t)size * size * 2;
+    return dsc;
+}
+#pragma pop_macro("open")
+#pragma pop_macro("read")
+#pragma pop_macro("close")
+static void *sc_worker(void *arg)
+{
+    struct sc_job *j = arg;
+    lv_image_dsc_t *dsc = sc_make(j->real, j->size);
+    j->dsc = dsc;
+    __atomic_store_n(&j->state, dsc ? SC_MADE : SC_FAILED, __ATOMIC_RELEASE);
+    __atomic_sub_fetch(&sc_working, 1, __ATOMIC_ACQ_REL);
+    return NULL;
+}
+static void sc_box_deleted(lv_event_t *e)
+{
+    struct sc_job *j = lv_event_get_user_data(e);
+    j->box = NULL;                       /* the picture, when it comes, is dropped */
+}
+static void sc_attach(lv_obj_t *boxo, lv_image_dsc_t *dsc)
+{
+    lv_obj_t *img = lv_image_create(boxo);
+    lv_image_set_src(img, dsc);
+    lv_obj_center(img);
+    lv_obj_add_flag(img, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_style_radius(img, lv_obj_get_style_radius(boxo, 0), 0);
+    lv_obj_set_style_clip_corner(img, true, 0);
+    lv_obj_add_event_cb(img, scaled_deleted, LV_EVENT_DELETE, dsc);
+}
+/* finished pictures into their boxes; a gone box's picture freed */
+static void sc_poll(lv_timer_t *t)
+{
+    (void)t;
+    for (int i = 0; i < SC_JOBS; i++)
+    {
+        struct sc_job *j = &sc_jobs[i];
+        int st = __atomic_load_n(&j->state, __ATOMIC_ACQUIRE);
+        if (st != SC_MADE && st != SC_FAILED) continue;
+        if (j->box)
+        {
+            lv_obj_remove_event_cb_with_user_data(j->box, sc_box_deleted, j);
+            if (st == SC_MADE) { sc_attach(j->box, j->dsc); j->dsc = NULL;
+#if defined(SIMULATOR) || defined(SLOPPY_NET_TEST)
+                sl_art_scaled_jobs_made++;
+#endif
+            }
+        }
+        free(j->dsc);
+        j->dsc = NULL;
+        j->box = NULL;
+        __atomic_store_n(&j->state, SC_FREE, __ATOMIC_RELEASE);
+    }
+}
+bool sl_art_apply_scaled_async(lv_obj_t *boxo, int album, int size)
+{
+    if (album < 0 || album >= sl_lib.n_albums || size <= 0 || size > 480) return false;
+    int thumb = sizes[0];                /* the smallest thumbnail at least this big */
+    for (unsigned i = 0; i < sizeof sizes / sizeof sizes[0]; i++)
+        if (sizes[i] >= size && sizes[i] < thumb) thumb = sizes[i];
+    const char *path = sl_art_src(album, thumb);
+    const char *root = sl_net_card_root();
+    if (!path || !root) return false;
+    struct sc_job *j = NULL;
+    for (int i = 0; i < SC_JOBS && !j; i++)
+        if (__atomic_load_n(&sc_jobs[i].state, __ATOMIC_ACQUIRE) == SC_FREE) j = &sc_jobs[i];
+    if (!j || snprintf(j->real, sizeof j->real, "%s%s", root, path + 2) >= (int)sizeof j->real)
+        return sl_art_apply_scaled(boxo, album, size);   /* all busy: as before, here */
+    if (!sc_timer) sc_timer = lv_timer_create(sc_poll, 20, NULL);
+    j->box = boxo;
+    j->size = size;
+    j->dsc = NULL;
+    __atomic_store_n(&j->state, SC_WORKING, __ATOMIC_RELEASE);
+    __atomic_add_fetch(&sc_working, 1, __ATOMIC_ACQ_REL);
+    pthread_attr_t a;
+    pthread_t th;
+    bool started = !pthread_attr_init(&a);
+    if (started)
+    {
+        pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+        started = !pthread_create(&th, &a, sc_worker, j);
+        pthread_attr_destroy(&a);
+    }
+    if (!started)
+    {
+        __atomic_sub_fetch(&sc_working, 1, __ATOMIC_ACQ_REL);
+        __atomic_store_n(&j->state, SC_FREE, __ATOMIC_RELEASE);
+        j->box = NULL;
+        return sl_art_apply_scaled(boxo, album, size);
+    }
+    lv_obj_add_event_cb(boxo, sc_box_deleted, LV_EVENT_DELETE, j);
+    return true;
+}
+/* USB mode: no thread may hold a card file when the card goes (3 s at most) */
+static void sc_settle(void)
+{
+    for (int waited = 0; __atomic_load_n(&sc_working, __ATOMIC_ACQUIRE) > 0 && waited < 3000; waited += 2) usleep(2000);
 }
 
 /* The colour a cover reads as, from its smallest thumbnail: the hue the

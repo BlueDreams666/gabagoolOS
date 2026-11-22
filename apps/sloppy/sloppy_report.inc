@@ -67,8 +67,8 @@ static void lag_pass(uint32_t ms, const char *step, uint32_t step_ms)
 {
     if (ms <= LAG_MS || !lag_on() || !lag_room()) return;
     char a[32];
-    sl_log("lag: %u ms pass, %u ms in %s, doing %s; %s, %ld KiB free", (unsigned)ms, (unsigned)step_ms, step,
-           sl_doing, lag_audio_now(a, sizeof a), sl_mem_available_kb());
+    sl_log("lag: %u ms pass, %u ms in %s, doing %s; %s, %ld KiB free; slowest timer %p (%u ms)", (unsigned)ms, (unsigned)step_ms, step,
+           sl_doing, lag_audio_now(a, sizeof a), sl_mem_available_kb(), lv_timer_slowest_cb, (unsigned)lv_timer_slowest_ms);
 }
 /* What held a wait up: the thread of ours that ran longest without giving
  * the core back (the kernel keeps it), the player's own CPU time and the

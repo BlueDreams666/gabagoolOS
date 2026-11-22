@@ -28,6 +28,8 @@
 
 #include "tick.h"
 
+#include "netlink-uevent.h"
+
 static int netlink_fd = -1;
 static bool state_hs = false;
 static bool state_bal = false;
@@ -110,7 +112,9 @@ void drain_netlink_events(void)
                         refresh_switch = true;
                     }
                     //change@/devices/i2c-0/0-0062/power_supply/battery
-                    if (!battery && strstr(buf, "battery")) {
+                    //and the usb supply's: the only one that changes when
+                    //a cable goes into a full player (netlink-uevent.h)
+                    if (!battery && uevent_is_power(buf)) {
                         last_battery_event = current_tick;
                         battery = true;
                     }
@@ -130,6 +134,9 @@ void drain_netlink_events(void)
     }
     if (refresh_switch)
         update_switch_states();
+    /* no power event for a while: read the supplies again all the same */
+    if (uevent_power_stale(current_tick, last_battery_event, HZ))
+        last_battery_event = current_tick;
 }
 
 int hiby_has_valid_output(void) {

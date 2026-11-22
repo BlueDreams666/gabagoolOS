@@ -24,7 +24,7 @@
 
 /* This build's version: what an update must be newer than. Raise it with
  * every release (make-update.py's --version is the next one). */
-#define SL_VERSION "1.1"
+#define SL_VERSION "1.2"
 
 #define SL_OTA_EXT ".gbupdate"
 #define SL_OTA_DIR "/.rockbox/update"          /* under the card's root */
@@ -55,6 +55,21 @@ enum {
     SL_OTA_E_STOPPED,    /* cancelled */
 };
 enum { SL_OTA_PH_ZIP = 1, SL_OTA_PH_COMPARE, SL_OTA_PH_UNPACK };
+/* Online: the newest release's small text at a fixed address (the public
+ * repository's latest release), then its update file, fetched into the
+ * same place the phone remote's goes and checked the same way: the
+ * signature, the version, every hash. The text only says what to fetch;
+ * nothing in it is trusted. */
+#define SL_OTA_FEED_BASE "https://github.com/BlueDreams666/gabagoolOS/releases/latest/download/"
+#define SL_OTA_FEED_NAME "gabagoolOS-update.txt"
+enum {
+    SL_OTA_NET_IDLE,     /* not asked */
+    SL_OTA_NET_CHECKING,
+    SL_OTA_NET_LATEST,   /* net_version is the newest, and this build has it */
+    SL_OTA_NET_NEWER,    /* net_version (net_size bytes) can be downloaded */
+    SL_OTA_NET_DOWNLOADING,
+    SL_OTA_NET_FAILED,   /* no answer, or one that made no sense */
+};
 
 struct sl_ota_status {
     unsigned seq;                /* moves with every change */
@@ -77,6 +92,11 @@ struct sl_ota_status {
     bool trial;                  /* this start is the first on a new version, not kept yet */
     char updated_to[16];         /* set once a swap is kept: the banner's version */
     bool restart;                /* the start found a swap half done: restart to finish */
+    /* online */
+    int net;                     /* SL_OTA_NET_* */
+    char net_version[16];
+    uint64_t net_size;
+    bool from_net;               /* what came in (RECEIVING, then FOUND) was downloaded, not sent from the remote */
 };
 
 /* At start, before anything else of ours reads the card: a journal left by
@@ -103,6 +123,13 @@ int  sl_ota_revert(void);
 int  sl_ota_upload_begin(uint64_t len);
 bool sl_ota_upload_write(const void *b, size_t n);   /* false: stop (USB mode, write failed) */
 void sl_ota_upload_end(bool complete);  /* complete: checked like a file at the top */
+/* online, on a thread of their own: ask for the newest release; fetch it
+ * (net NEWER) into the updater, which then finds it as from the remote */
+void sl_ota_check_online(void);
+bool sl_ota_download(void);
+void sl_ota_net_cancel(void);
+/* the feed's text: its version, file name and size, false when it is not one */
+bool sl_ota_feed_parse(const char *t, char *ver, size_t vn, char *file, size_t fn, uint64_t *size);
 
 #if defined(SIMULATOR) || defined(SLOPPY_NET_TEST)
 /* the tests: a release key and the library to load, the version running,

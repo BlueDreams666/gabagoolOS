@@ -931,6 +931,14 @@ void check_bootfile(bool do_rolo)
                                                    ID2P(LANG_REBOOT_NOW) };
                     static const struct text_message message={ lines, 2 };
                     button_clear_queue(); /* Empty the keyboard buffer */
+#ifdef HAVE_SLOPPY_UI
+                    /* GabagoolOS restarts into it itself: Rockbox's yes/no
+                     * never showed over it, and the player sat on the USB
+                     * screen until the power key (R1 traces, 13 Nov) */
+                    if(sloppy_boot_changed())
+                        ;
+                    else
+#endif
                     if(gui_syncyesno_run(&message, NULL, NULL) == YESNO_YES)
                     {
                         audio_hard_stop();

@@ -1026,6 +1026,9 @@ static unsigned long long thread_now_us(void)
 
 void switch_thread(void)
 {
+#ifdef HAVE_TICK_LOCK
+    if (kernel_off_thread()) { kernel_misuse("switch"); return; }
+#endif
     const unsigned int core = CURRENT_CORE;
     struct core_entry *corep = __core_id_entry(core);
     struct thread_entry *thread = corep->running;
@@ -1059,6 +1062,9 @@ void switch_thread(void)
     /* TODO: make a real idle task */
     for (;;)
     {
+#ifdef HAVE_TICK_LOCK
+        queue_wake_deferred();          /* posts from other OS threads */
+#endif
         disable_irq();
 
         /* Check for expired timeouts */
@@ -1148,6 +1154,9 @@ void switch_thread(void)
  */
 void sleep_thread(int ticks)
 {
+#ifdef HAVE_TICK_LOCK
+    if (kernel_off_thread()) { kernel_misuse("sleep_thread"); return; }
+#endif
     struct thread_entry *current = __running_self_entry();
     LOCK_THREAD(current);
     prepare_block(current, STATE_SLEEPING, MAX(ticks, 0) + 1);
@@ -1163,6 +1172,9 @@ void sleep_thread(int ticks)
  */
 void block_thread_(struct thread_entry *current, int timeout)
 {
+#ifdef HAVE_TICK_LOCK
+    if (kernel_off_thread()) { kernel_misuse("block"); return; }
+#endif
     LOCK_THREAD(current);
 
 #ifdef HAVE_PRIORITY_SCHEDULING

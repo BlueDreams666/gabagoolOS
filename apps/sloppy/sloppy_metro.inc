@@ -115,6 +115,7 @@ static struct
     uint32_t drag_moved_at;               /* tiles last made room for it */
     char music_path[MAX_PATH];
     int last_min, ticks, peek_turn, game_ix;
+    int peek_next;                         /* 1 + the slot whose back was made for the next peek, 0 none */
     int cf_pos, cf_flow_at;                /* Cover Flow tile: centre album, albums_by_title order */
     uint32_t seed;
     bool had_albums;                      /* the library had loaded when the tiles were filled */
@@ -453,8 +454,9 @@ static lv_obj_t *mt_art(lv_obj_t *parent, int album, const char *key, int size)
     lv_obj_set_style_text_opa(note, 150, 0);
     lv_obj_center(note);
     if (album < 0) return art;
-    /* scaled once, so redraws of a live tile just copy pixels */
-    if (sl_art_apply_scaled(art, album, size + 2)) return art;
+    /* scaled once, so redraws of a live tile just copy pixels; read and
+     * scaled beside the UI, so a peek or a swap does not hold it */
+    if (sl_art_apply_scaled_async(art, album, size + 2)) return art;
     int thumb = size <= SL_ART_ROW ? SL_ART_ROW : size <= SL_ART_PAGE ? SL_ART_PAGE : SL_ART_GRID;
     /* rounded up and a touch over: a scaled cover never leaves a hairline of tile */
     if (size != thumb)
@@ -1883,19 +1885,33 @@ static void mt_tick(lv_timer_t *t)
         for (int k = 0; k < mt.n; k++)
             if (!mt.slot[k].faces && mt.slot[k].back && mt_on_screen(mt.slot[k].obj))
                 mt_mosaic_swap(mt.slot[k].back);
-    /* a live tile on screen peeks at its back face, taking turns: tiles
-     * scrolled away do not use up turns */
-    if (mt.ticks % 4) return;
-    for (int k = 0; k < mt.n; k++)
+    /* A live tile on screen peeks at its back face, taking turns: tiles
+     * scrolled away do not use up turns. The back is made a second before
+     * the peek, while it is out of sight, so its cover has come from the
+     * card by the time it slides into view (sl_art_apply_scaled_async). */
+    if (mt.ticks % 4 == 3)
     {
-        struct mt_slot *s = &mt.slot[mt.peek_turn++ % mt.n];
-        if (!s->faces || s->down_at || lv_anim_get(s->faces, mt_set_face) || !mt_on_screen(s->obj) ||
-            !mt_back(s))
-            continue;
-        mt_peek(s->faces, mt_px(mt_span_h(s->size)));
-        s->down_at = mt.ticks + 4;
-        break;
+        mt.peek_next = 0;
+        for (int k = 0; k < mt.n; k++)
+        {
+            int at = mt.peek_turn++ % mt.n;
+            struct mt_slot *s = &mt.slot[at];
+            if (!s->faces || s->down_at || lv_anim_get(s->faces, mt_set_face) || !mt_on_screen(s->obj) ||
+                !mt_back(s))
+                continue;
+            mt.peek_next = at + 1;
+            break;
+        }
+        return;
     }
+    if (mt.ticks % 4) return;
+    int at = mt.peek_next - 1;
+    mt.peek_next = 0;
+    if (at < 0 || at >= mt.n) return;
+    struct mt_slot *s = &mt.slot[at];
+    if (!s->faces || s->down_at || lv_anim_get(s->faces, mt_set_face) || !mt_on_screen(s->obj)) return;
+    mt_peek(s->faces, mt_px(mt_span_h(s->size)));
+    s->down_at = mt.ticks + 4;
 }
 
 static void mt_page_deleted(lv_event_t *e)

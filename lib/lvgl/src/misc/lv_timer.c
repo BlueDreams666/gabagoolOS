@@ -309,6 +309,11 @@ bool lv_timer_get_paused(lv_timer_t * timer)
  * @param timer pointer to lv_timer
  * @return true: execute, false: not executed
  */
+/* SloppyOS: the slowest timer callback since the player last cleared it,
+ * named in its lag lines (tools/crashlog-symbols.py names the address) */
+void * lv_timer_slowest_cb;
+uint32_t lv_timer_slowest_ms;
+
 static bool lv_timer_exec(lv_timer_t * timer)
 {
     if(timer->paused) return false;
@@ -323,7 +328,16 @@ static bool lv_timer_exec(lv_timer_t * timer)
         timer->last_run = lv_tick_get();
         LV_TRACE_TIMER("calling timer callback: %p", *((void **)&timer->timer_cb));
 
-        if(timer->timer_cb && original_repeat_count != 0) timer->timer_cb(timer);
+        if(timer->timer_cb && original_repeat_count != 0) {
+            lv_timer_cb_t cb = timer->timer_cb;     /* the timer may be deleted by it */
+            uint32_t t0 = lv_tick_get();
+            cb(timer);
+            uint32_t took = lv_tick_elaps(t0);
+            if(took >= lv_timer_slowest_ms) {
+                lv_timer_slowest_ms = took;
+                lv_timer_slowest_cb = *((void **)&cb);
+            }
+        }
 
         if(!state.timer_deleted) {
             LV_TRACE_TIMER("timer callback %p finished", *((void **)&timer->timer_cb));

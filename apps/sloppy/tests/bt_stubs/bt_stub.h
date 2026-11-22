@@ -69,8 +69,15 @@ static inline bool simplelist_show_list(struct simplelist_info *i) { i->selectio
 static inline void simplelist_reset_lines(void) {}
 static inline void simplelist_addline(const char *f, ...) { (void)f; }
 static inline int simplelist_get_line_count(void) { return 0; }
-static inline void splash(int t, const char *s) { (void)t; (void)s; }
-static inline void splashf(int t, const char *s, ...) { (void)t; (void)s; }
+/* The R1's scheduler thread is the test's main thread: a splash, sleep or
+ * pause asked for on any other is counted (on the R1 it froze the UI) */
+#include <pthread.h>
+extern pthread_t bt_test_main;
+extern int bt_test_off_kernel;
+static inline bool kernel_off_thread(void) { return !pthread_equal(pthread_self(), bt_test_main); }
+static inline void bt_test_kernel_call(void) { if (kernel_off_thread()) __atomic_add_fetch(&bt_test_off_kernel, 1, __ATOMIC_RELAXED); }
+static inline void splash(int t, const char *s) { (void)t; (void)s; bt_test_kernel_call(); }
+static inline void splashf(int t, const char *s, ...) { (void)t; (void)s; bt_test_kernel_call(); }
 static inline int get_action(int c, int t) { (void)c; (void)t; return ACTION_NONE; }
 static inline int gui_syncyesno_run(const struct text_message *m, void *y, void *n)
 { (void)m; (void)y; (void)n; return YESNO_NO; }

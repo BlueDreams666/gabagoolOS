@@ -116,9 +116,7 @@ Features the base mod's author has contributed to the official Rockbox repositor
 ## Contributing
 
 The [documentation site](https://willnht.github.io/rockbox-hiby-r1/) has a page per
-touch, how to build and test, and the commit conventions. It applies to people and to
-agents alike.
+feature.
 
 PR titles are Conventional Commits and are checked by CI, because the merge commit is
-what versions the release. Issues are labelled from
-[`.github/labels.yml`](.github/labels.yml); new ones are triaged automatically, and
+what versions the release. Issues are labelled; new ones are triaged automatically.

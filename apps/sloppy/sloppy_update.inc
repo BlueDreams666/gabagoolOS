@@ -189,6 +189,46 @@ static void up_progress(void)
 
 /* ------------------------------------------------------------ the actions */
 static void up_install_cb(lv_event_t *e) { (void)e; if (!sl_ota_install()) toast_warn("The update could not start"); }
+static void up_check_cb(lv_event_t *e) { (void)e; sl_ota_check_online(); }
+static void up_download_cb(lv_event_t *e) { (void)e; if (!sl_ota_download()) toast_warn("The update could not start"); }
+static void up_net_cancel_cb(lv_event_t *e) { (void)e; sl_ota_net_cancel(); }
+/* Online: ask for the newest release, then fetch it into the updater, which
+ * checks it as it checks one from the card. Over Wi-Fi only. */
+static void up_online(lv_obj_t *body, const struct sl_ota_status *s)
+{
+    lv_obj_t *g = up_card(body, "Online");
+    char b[160], a[24];
+    switch (s->net)
+    {
+        case SL_OTA_NET_CHECKING:
+            up_label(g, "Checking online\xe2\x80\xa6", &ss_regular_18, C_SUB, false);
+            break;
+        case SL_OTA_NET_NEWER:
+            snprintf(b, sizeof b, sl_tr("GabagoolOS %s is available"), s->net_version);
+            up_label(g, b, &ss_semibold_23, C_TEXT, true);
+            up_mb(a, sizeof a, s->net_size);
+            up_label(g, a, &ss_regular_16, C_SUB, false);
+            up_pill(g, "Download", true, up_download_cb);
+            break;
+        case SL_OTA_NET_LATEST:
+            up_label(g, "You have the newest version.", &ss_regular_18, C_TEXT, true);
+            up_pill(g, "Check for updates", false, up_check_cb);
+            break;
+        case SL_OTA_NET_FAILED:
+            up_label(g, "Couldn't reach the update server", &ss_semibold_21, C_TEXT, true);
+            up_label(g, "Check Wi-Fi, then try again.", &ss_regular_16, C_SUB, true);
+            up_pill(g, "Try again", false, up_check_cb);
+            break;
+        default:
+        {
+            struct sl_wifi_status w;
+            sl_net_wifi_status(&w);
+            if (!w.connected) up_label(g, "Connect to Wi-Fi to check for updates online.", &ss_regular_16, C_SUB, true);
+            up_pill(g, "Check for updates", true, up_check_cb);
+            break;
+        }
+    }
+}
 static void up_cancel_cb(lv_event_t *e) { (void)e; sl_ota_cancel(); }
 static void up_again_cb(lv_event_t *e) { (void)e; sl_ota_scan(); }
 /* on the way out: what plays paused and its place saved, then the swap */
@@ -251,7 +291,7 @@ static void up_fill(void)
         case SL_OTA_FOUND:
         {
             up_version_card(body, NULL, C_SUB);
-            lv_obj_t *g = up_card(body, s->file[0] ? "Found on the card" : "Sent from the phone remote");
+            lv_obj_t *g = up_card(body, s->file[0] ? "Found on the card" : s->from_net ? "Downloaded" : "Sent from the phone remote");
             snprintf(b, sizeof b, "GabagoolOS %s", s->version);
             up_label(g, b, &ss_semibold_23, C_TEXT, false);
             up_mb(a, sizeof a, s->size);
@@ -268,11 +308,12 @@ static void up_fill(void)
         {
             up_version_card(body, NULL, C_SUB);
             lv_obj_t *g = up_card(body, NULL);
-            up_title = up_label(g, s->state == SL_OTA_RECEIVING ? "Receiving from the phone remote" : "Checking the update",
+            up_title = up_label(g, s->state != SL_OTA_RECEIVING ? "Checking the update" : s->from_net ? "Downloading" : "Receiving from the phone remote",
                                 &ss_semibold_21, C_TEXT, false);
             up_bar_make(g, 0);
             up_line = up_label(g, "", &ss_regular_16, C_SUB, false);
             if (s->state == SL_OTA_WORKING) up_pill(g, "Cancel", false, up_cancel_cb);
+            else if (s->from_net) up_pill(g, "Cancel", false, up_net_cancel_cb);
             up_progress();
             opt_note(body, "Nothing on the player changes until you restart. You can keep listening.");
             break;
@@ -321,13 +362,13 @@ static void up_fill(void)
             {
                 snprintf(b, sizeof b, sl_tr("Updated to GabagoolOS %s"), SL_VERSION);
                 up_version_card(body, b, C_ACCENT_TXT);
+                up_online(body, s);            /* updated once, still asked of again */
                 up_notes(body, s->notes);
                 break;
             }
             up_version_card(body, NULL, C_SUB);
-            lv_obj_t *c = sl_empty(body, IC_G_DOWNLOAD, 80, "No update on the card",
-                                   "Copy the .gbupdate file to the top of the card, or send it from the phone remote (Wi-Fi > Phone remote).", SL_INSET);
-            sl_empty_action(c, "Look again", up_again_cb, NULL);
+            up_online(body, s);
+            opt_note(body, "Or copy a .gbupdate file to the top of the card, or send it from the phone remote (Wi-Fi > Phone remote).");
             break;
         }
     }
@@ -341,7 +382,7 @@ static void up_fill(void)
 }
 static int up_shape_of(const struct sl_ota_status *s)
 {
-    return s->key << 12 | s->prev << 11 | (s->trial || s->notes[0]) << 10 | s->state << 5 | s->why;
+    return s->from_net << 16 | s->net << 13 | s->key << 12 | s->prev << 11 | (s->trial || s->notes[0]) << 10 | s->state << 5 | s->why;
 }
 static void up_page_deleted(lv_event_t *e) { (void)e; up_page_obj = up_box = up_bar = up_line = up_title = NULL; }
 static void update_page(void)
@@ -365,6 +406,7 @@ static void update_page(void)
 static const char *set_v_update(void)
 {
     if (up_st.state == SL_OTA_FOUND || up_st.state == SL_OTA_READY) return "Update ready";
+    if (up_st.net == SL_OTA_NET_NEWER) return "Update available";
     return SL_VERSION;
 }
 

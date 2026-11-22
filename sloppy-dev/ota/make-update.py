@@ -21,6 +21,12 @@ the zip and of every file. Only files under .rockbox/ are put in, never
       writes OUT.gbupdate from the three
   make-update.py all --key KEY.pem ...build arguments... -o OUT
       build, sign and pack
+  make-update.py feed OUT.gbupdate
+      writes gabagoolOS-update.txt beside it: the version, the file's name
+      and its size, which Settings > Software update > Check for updates
+      reads from the newest release on GitHub. Attach both to the release.
+      The file names stay plain (letters, digits, . _ -) or the player
+      refuses them.
 
 OPENSSL=/path/to/openssl picks the openssl to run (default: openssl).
 The file: b"GBUPDATE\\x01\\0\\0\\0", u32 LE manifest length, u32 LE 64,
@@ -105,6 +111,21 @@ def pack(out):
     print(out + '.gbupdate', len(MAGIC) + 8 + len(m) + len(s) + len(z), 'bytes')
 
 
+def feed(gbupdate):
+    b = open(gbupdate, 'rb').read()
+    if b[:12] != MAGIC:
+        raise SystemExit('not a .gbupdate')
+    mlen, = struct.unpack('<I', b[12:16])
+    man = json.loads(b[20:20 + mlen].decode('utf-8'))
+    name = os.path.basename(gbupdate)
+    if not set(name) <= set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-') or len(name) > 80:
+        raise SystemExit(f'the player takes only plain names (letters, digits, . _ -): {name!r}')
+    out = os.path.join(os.path.dirname(os.path.abspath(gbupdate)), 'gabagoolOS-update.txt')
+    with open(out, 'w', encoding='ascii', newline='\n') as f:
+        f.write(f"GBFEED1\nversion {man['version']}\nfile {name}\nsize {len(b)}\n")
+    print(out, man['version'], name, len(b), 'bytes')
+
+
 def pubkey(key):
     der = subprocess.run([openssl(), 'pkey', '-in', key, '-pubout', '-outform', 'DER'], check=True,
                          capture_output=True).stdout
@@ -133,11 +154,13 @@ def main():
             p.add_argument('--key', required=True)
     p = sp.add_parser('sign'); p.add_argument('--key', required=True); p.add_argument('out')
     p = sp.add_parser('pack'); p.add_argument('out')
+    p = sp.add_parser('feed'); p.add_argument('gbupdate')
     a = ap.parse_args()
     if a.cmd == 'pubkey': pubkey(a.key)
     elif a.cmd == 'build': build(a)
     elif a.cmd == 'sign': sign(a.key, a.out)
     elif a.cmd == 'pack': pack(a.out)
+    elif a.cmd == 'feed': feed(a.gbupdate)
     else: build(a); sign(a.key, a.out); pack(a.out)
 
 

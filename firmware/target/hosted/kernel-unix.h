@@ -38,4 +38,26 @@ void interrupt(void);
 void tick_lock(void);
 void tick_unlock(void);
 
+/* A post from another OS thread (a tick task, mostly) stores its event, but
+ * waking the thread that waits on the queue is left to the scheduler's own
+ * thread: wakeup_thread edits the scheduler's lists, which that thread edits
+ * unlocked. Done from the tick's thread, a key posted as the UI went to
+ * sleep on the button queue could lose the UI for good: it stayed blocked,
+ * every other thread ran on, and no key woke it (a test R1, 19 Nov). */
+struct event_queue;
+bool kernel_off_thread(void);
+void kernel_wake_later(struct event_queue *q);
+struct event_queue *kernel_wake_take(void);
+void queue_wake_deferred(void);
+
+/* A sleep, block or switch asked for on another OS thread would mark the
+ * Rockbox thread running there as waiting and switch contexts on the wrong
+ * OS thread: the UI was left asleep for good, its saved stack another
+ * thread's (a test R1, 22 Nov). It is refused, and the first caller's
+ * stack kept for the log. */
+void kernel_misuse(const char *what);
+extern const char *volatile kernel_misuse_what;
+extern volatile unsigned kernel_misuse_n;
+extern unsigned long kernel_misuse_stack[8];
+
 #endif /* __KERNEL_UNIX_H__ */

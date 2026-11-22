@@ -21,6 +21,9 @@
 #include "kernel-internal.h"
 #include "system.h"
 #include "lcd-transition.h"
+#ifdef HAVE_TICK_LOCK
+#include <time.h>
+#endif
 
 /* Unless otherwise defined, do nothing */
 #ifndef YIELD_KERNEL_HOOK
@@ -192,6 +195,16 @@ unsigned int thread_self(void)
  */
 unsigned sleep(unsigned ticks)
 {
+#ifdef HAVE_TICK_LOCK
+    if (kernel_off_thread())
+    {
+        kernel_misuse("sleep");
+        struct timespec ts = { 0, (long)(ticks + 1) * (1000000000L / HZ) };
+        while (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+        nanosleep(&ts, NULL);
+        return 0;
+    }
+#endif
     /* In certain situations, certain bootloaders in particular, a normal
      * threading call is inappropriate. */
     if (SLEEP_KERNEL_HOOK(ticks))
@@ -216,6 +229,9 @@ unsigned sleep(unsigned ticks)
  */
 void yield(void)
 {
+#ifdef HAVE_TICK_LOCK
+    if (kernel_off_thread()) { kernel_misuse("yield"); return; }
+#endif
     /* In certain situations, certain bootloaders in particular, a normal
      * threading call is inappropriate. */
     if (YIELD_KERNEL_HOOK())

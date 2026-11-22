@@ -137,6 +137,15 @@ static void btrx_clean(const char *in, char *out, size_t size);
 static pid_t btrx_spawn(const char *cmd, int *to_child, int *from_child);
 static void btrx_end_child(pid_t *pid, int wait_ms);
 static __thread bool bt_off_kernel;     /* a GabagoolOS worker: never enters the Rockbox kernel */
+/* May this thread enter the Rockbox kernel (a splash, a sleep, a pause)?
+ * Not a GabagoolOS worker, nor any other plain thread (receive mode, the
+ * AirPods link): bt_embedded_ui is shared by every thread and cannot tell,
+ * and a classic splash on a plain thread, its flag cleared under it by
+ * another thread's job, put the UI thread to sleep for good (22 Nov). */
+static inline bool bt_kernel_ok(void) { return !bt_off_kernel && !kernel_off_thread(); }
+#undef splash                           /* Rockbox's is splashf under another name */
+#define splashf(...) do { if (bt_kernel_ok()) splashf(__VA_ARGS__); } while (0)
+#define splash(t, s) splashf(t, s)
 /* A device the user just disconnected is not routed to again on its own
  * for a while, even if it links straight back. */
 static char bt_dropped_mac[18];
@@ -987,13 +996,13 @@ bool hiby_bt_take_audio_pause(void)
 
 static void bt_sleep(int ticks)
 {
-    if (bt_off_kernel) usleep(ticks * (1000000 / HZ));
+    if (!bt_kernel_ok()) usleep(ticks * (1000000 / HZ));
     else sleep(ticks);
 }
 
 static void bt_kick_audio_if_playing(void)
 {
-    if (bt_off_kernel) { bt_kick_pending = true; return; }
+    if (!bt_kernel_ok()) { bt_kick_pending = true; return; }
     int status = audio_status();
     if ((status & AUDIO_STATUS_PLAY) && !(status & AUDIO_STATUS_PAUSE))
     {
@@ -1018,7 +1027,7 @@ void bt_route_to_local(void)
     if (from_bt && !jack)
     {
         bt_kick_pending = false;
-        if (bt_off_kernel) bt_pause_pending = true;
+        if (!bt_kernel_ok()) bt_pause_pending = true;
         else if (audio_status() & AUDIO_STATUS_PLAY) audio_pause();
     }
     else

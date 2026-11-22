@@ -267,6 +267,28 @@ static inline void get_context(struct ctx *c)
     setjmp(c->thread_buf);
 }
 
+/* A switched-out thread's saved stack pointer (0 when unknown), for the
+ * UI's watchdog to say where a thread waits. glibc's MIPS setjmp keeps it
+ * second in the buffer, after the pc. */
+uintptr_t thread_saved_sp(unsigned int thread_id)
+{
+#ifdef __mips__
+    struct thread_entry *t = __thread_id_entry(thread_id);
+    struct ctx *c = t->context.uc;
+    return c ? (uintptr_t)((void * const *)c->thread_buf)[1] : 0;
+#else
+    (void)thread_id;
+    return 0;
+#endif
+}
+/* and the stack it runs on (none for the main thread, on the process's) */
+void thread_stack_bounds(unsigned int thread_id, uintptr_t *lo, uintptr_t *hi)
+{
+    struct thread_entry *t = __thread_id_entry(thread_id);
+    *lo = (uintptr_t)t->stack;
+    *hi = *lo + t->stack_size;
+}
+
 
 static void setup_thread(struct regs *context);
 

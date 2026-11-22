@@ -998,7 +998,37 @@ static void e_give_back_tests(void) {
     assert(e_nonzero(snake_bg_px, sizeof snake_bg_px) == 0 && e_nonzero(fl_bg, sizeof fl_bg) == 0);
     assert(!fl_bg_made[0] && !fl_bg_made[1] && !coin_art_ready && coin_rows == 0);   /* the faces too: warmed again only with memory to spare (Nov 11) */
 }
+/* The Bluetooth page is built again only when a look finds something new
+ * (each time is the whole page: 130 ms on the R1), and the log says what */
+static void e_bt_redraw_tests(void) {
+    while (npages > 1) { page_pop(); frame(300); }
+    sl_bt_demo_on = true; sl_bt_demo_index = 0;
+    sl_bt_demo_aap = (struct hiby_bt_aap){ .up = true, .left = 80, .right = 81, .box = 50, .noise = 1 };
+    sl_bt_page(); for (int i = 0; i < 20; i++) frame(100);
+    lv_obj_t *first = lv_obj_get_child(sl_bt_body, 0);
+    sl_bt_begin(SL_BT_JOB_REFRESH, ""); for (int i = 0; i < 10; i++) frame(100);
+    sl_bt_watch_cb(NULL); for (int i = 0; i < 10; i++) frame(100);
+    assert(lv_obj_get_child(sl_bt_body, 0) == first);              /* the same look: the page left alone */
+    sl_bt_demo_aap.left = 79;                                        /* a bud's battery moved */
+    sl_bt_watch_cb(NULL); for (int i = 0; i < 10; i++) frame(100);
+    assert(lv_obj_get_child(sl_bt_body, 0) != first && lbf_log_has("page redrawn: AirPods say up 1, 79/81/50%"));
+    first = lv_obj_get_child(sl_bt_body, 0);
+    sl_bt_demo_index = -1;                                           /* the headphones went */
+    sl_bt_begin(SL_BT_JOB_REFRESH, ""); for (int i = 0; i < 10; i++) frame(100);
+    assert(lv_obj_get_child(sl_bt_body, 0) != first && lbf_log_has("page redrawn after a look: the state"));
+    sl_bt_demo_aap = (struct hiby_bt_aap){ .left = -1, .right = -1, .box = -1 };
+    /* nothing connected, the AirPods' state unknown: opened that way, the page
+     * was built again at every look, its shown state never set (19 Nov) */
+    while (npages > 1) { page_pop(); frame(300); }
+    sl_bt_page(); for (int i = 0; i < 20; i++) frame(100);
+    first = lv_obj_get_child(sl_bt_body, 0);
+    for (int k = 0; k < 3; k++) { sl_bt_watch_cb(NULL); for (int i = 0; i < 10; i++) frame(100); }
+    assert(lv_obj_get_child(sl_bt_body, 0) == first);
+    while (npages > 1) { page_pop(); frame(300); }
+    printf("PASS: the Bluetooth page is built again only when a look or the AirPods say something new, and the log says which\n");
+}
 static void e_tests(void) {
+    e_bt_redraw_tests();
     e_give_back_tests();
     e_codec_tests();
     e_radio_tests();

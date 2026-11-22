@@ -273,6 +273,7 @@ extern const lv_font_t sl_sym_14, sl_sym_16, sl_sym_18, sl_sym_20, sl_sym_22, sl
  * only one kept its log was gone by the time the card reached a computer
  * (a test R1, 4 Nov). */
 static int log_fd = -1;
+static bool boot_changed;           /* a new rockbox.r1 came over USB: restart into it (sloppy_boot_changed) */
 static bool log_started;            /* the previous log was rotated out this boot */
 #define DB_USB_NOTE "/tmp/sloppy-usb-was-on"   /* USB mode was on: update the library (sloppy_dbupdate.inc) */
 static volatile bool log_held;      /* USB mode: the card is being handed to the computer */
@@ -2534,6 +2535,11 @@ static const char *track_title(const struct mp3entry *id3, char *buf, size_t n)
     int cue = cue_now(id3, NULL, NULL);
     if (cue >= 0) return sl_lib.tracks[cue].title;   /* the sheet's track, not the file's tag */
     if (id3->title && id3->title[0]) return id3->title;
+    /* the file's tags not read yet (a song just started): the library's,
+     * which read the same file (Now Playing showed the file's name and
+     * "Unknown artist" for a whole song, a test R1, 18 Nov) */
+    int t = sl_lib_find_path(id3->path);
+    if (t >= 0 && sl_lib.tracks[t].title && sl_lib.tracks[t].title[0]) return sl_lib.tracks[t].title;
     const char *name = strrchr(id3->path, '/');
     strlcpy(buf, name ? name + 1 : id3->path, n);
     char *dot = strrchr(buf, '.');
@@ -2548,6 +2554,12 @@ static const char *track_artist(const struct mp3entry *id3)
     if (cue >= 0) return sl_track_artist(cue);
     if (id3->artist && id3->artist[0]) return id3->artist;
     if (id3->albumartist && id3->albumartist[0]) return id3->albumartist;
+    int t = sl_lib_find_path(id3->path);   /* its tags not read yet: the library's */
+    if (t >= 0)
+    {
+        const char *a = sl_track_artist(t);
+        if (a && a[0]) return a;
+    }
     return "Unknown artist";
 }
 
@@ -2579,6 +2591,7 @@ static lv_image_dsc_t np_img;
 static uint16_t *np_img_buf;
 static int np_img_album = -1;
 static bool np_img_provisional;
+static int np_img_hid = -1;                /* the playback picture shown, or none */
 static char np_last_path[MAX_PATH];
 /* sloppy_npwave.inc: the waveform seek bar (P19) */
 #define WV_H 28                          /* its tallest bar, and the control's box */
@@ -3343,6 +3356,13 @@ static bool wf_fetch(const char *url, size_t cap, void (*done)(bool ok, const ch
 
 static uint32_t np_glow_at;              /* the glass is due for the cover shown since then */
 static void np_glow_soon(void) { if (!np_glow_at) np_glow_at = lv_tick_get() ? lv_tick_get() : 1; }
+/* After quick skips playback can hand over the song before's picture for a
+ * moment (the new one not buffered yet): a picture whose handle is no longer
+ * the current one is taken again. */
+static bool np_art_stale(void)
+{
+    return np_img_hid >= 0 && aa_slot >= 0 && playback_current_aa_hid(aa_slot) != np_img_hid;
+}
 static void np_set_art(struct mp3entry *id3)
 {
     int track = sl_lib_find_path(id3->path);
@@ -3358,6 +3378,7 @@ static void np_set_art(struct mp3entry *id3)
             memcpy(np_img_buf, bmp->data, (size_t)bmp->width * h * 2);
             stride = bmp->width * 2;
             np_img_provisional = false;
+            np_img_hid = hid;
             goto show_art;
         }
     }
@@ -3371,10 +3392,12 @@ static void np_set_art(struct mp3entry *id3)
         w = h = W;
         stride = W * 2;
         np_img_provisional = true;
+        np_img_hid = -1;
         goto show_art;
     }
     np_img_album = -1;
     np_img_provisional = false;
+    np_img_hid = -1;
     hidden_if_changed(np_art_img, true);
     unsigned hue = 0;
     for (const char *p = id3->album ? id3->album : id3->path; *p; p++) hue = hue * 31 + (unsigned char)*p;
@@ -3460,9 +3483,13 @@ static void np_update(bool force)
         return;
     bool path_changed = strcmp(np_last_path, id3->path) != 0;
     static int np_last_cue = -1;         /* a cue sheet's next track is a new song in the same file */
+    static int np_last_tags = -1;        /* the file's own tags came after the song started */
     int cue = cue_now(id3, NULL, NULL);
-    bool changed = force || path_changed || cue != np_last_cue;
+    int tags = (id3->title && id3->title[0]) | (id3->artist && id3->artist[0]) << 1 | (id3->album && id3->album[0]) << 2;
+    bool song = force || path_changed || cue != np_last_cue;
+    bool changed = song || tags != np_last_tags;   /* tags alone: the words, nothing else */
     np_last_cue = cue;
+    np_last_tags = tags;
     if (changed)
     {
         strlcpy(np_last_path, id3->path, sizeof np_last_path);
@@ -3482,14 +3509,17 @@ static void np_update(bool force)
             lv_obj_set_style_text_font(np_zn, sl_zune_font(a, &ss_regular_60), 0);
             label_if_changed(np_zn, a);
         }
-        if (path_changed || np_img_provisional ||
-            lv_obj_has_flag(np_art_img, LV_OBJ_FLAG_HIDDEN)) np_set_art(id3);
-        lyr_track(id3->path);
-        np_book_buttons(audiobooks_is_book(id3->path) || sl_pod_is_episode(id3->path));
-        vnl_track_changed();
-        if (path_changed) { nps_pending(); nps_track_changed(); }   /* the song a slide showed, checked */
+        if (song)
+        {
+            if (path_changed || np_img_provisional || np_art_stale() ||
+                lv_obj_has_flag(np_art_img, LV_OBJ_FLAG_HIDDEN)) np_set_art(id3);
+            lyr_track(id3->path);
+            np_book_buttons(audiobooks_is_book(id3->path) || sl_pod_is_episode(id3->path));
+            vnl_track_changed();
+            if (path_changed) { nps_pending(); nps_track_changed(); }   /* the song a slide showed, checked */
+        }
     }
-    else if (np_img_provisional || lv_obj_has_flag(np_art_img, LV_OBJ_FLAG_HIDDEN))
+    else if (np_img_provisional || np_art_stale() || lv_obj_has_flag(np_art_img, LV_OBJ_FLAG_HIDDEN))
     {
         np_set_art(id3);   /* art may arrive after the track starts */
         if (!lv_obj_has_flag(np_art_img, LV_OBJ_FLAG_HIDDEN)) vnl_label_dirty = true;
@@ -7940,6 +7970,16 @@ static void handle_button(long btn)
             else if (handover == 0)
                 sl_log("usb: card handed over unmounted, and mounted again");
 #endif
+            if (boot_changed)
+            {
+                boot_changed = false;
+                sl_log("usb: a new build came over USB: restarting into it");
+                settings_save();
+                hist_flush();
+                notes_flush();
+                sl_log_flush();
+                system_reboot();
+            }
             /* still running (USB mode usually restarts us): the library now */
             if (lib_usb_stopped)
             {
@@ -8496,6 +8536,12 @@ static void bye_play(bool chime)
         sleep(1);
     }
 }
+bool sloppy_boot_changed(void)
+{
+    if (!sl_power_running) return false;    /* classic Rockbox owns the screen: it asks */
+    boot_changed = true;
+    return true;
+}
 bool sloppy_shutdown_screen(int why)
 {
     if (!sl_power_running) return false;    /* classic Rockbox owns the screen */
@@ -8527,6 +8573,81 @@ static void log_boot_times(void)
     }
     sl_log("boot: home screen %lums after the splash", (unsigned long)(sl_ms() - boot_ms0));
 }
+
+#if defined(HIBY_R1) && !defined(SIMULATOR)
+#include <sys/statvfs.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include "flash-run.h"
+/* This build's copy on the flash, for the next start to run from: made
+ * once, while nothing plays (it reads and writes 13 MB), on a thread that
+ * only takes what the music and the screen leave. */
+static volatile int flash_copy_going;
+static void *flash_copy_thread(void *arg)
+{
+    (void)arg;
+    setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 19);
+    uint32_t t0 = sl_ms();
+    int why = flash_run_copy(FLASH_RUN_SRC, FLASH_RUN_DIR);
+    if (!why) sl_log("start: the flash copy of this build is made (%lu ms): the next start runs from it", (unsigned long)(sl_ms() - t0));
+    else sl_log("start: no flash copy made (%d)", why);
+    flash_copy_going = 2;
+    return NULL;
+}
+static void flash_copy_tick(lv_timer_t *t)
+{
+    if (flash_copy_going || flash_run_state() != FLASH_RUN_NO_COPY) { if (flash_copy_going != 1) lv_timer_delete(t); return; }
+    int st = audio_status();
+    if ((st & AUDIO_STATUS_PLAY) && !(st & AUDIO_STATUS_PAUSE)) return;      /* later, when it is quiet */
+    pthread_attr_t attr;
+    pthread_t th;
+    if (pthread_attr_init(&attr)) return;
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    flash_copy_going = 1;
+    if (pthread_create(&th, &attr, flash_copy_thread, NULL)) flash_copy_going = 0;
+    pthread_attr_destroy(&attr);
+}
+/* Where the player runs from and what the R1's own storage has: the boot
+ * menu copies the player (13 MB) to /tmp, which is RAM that is never given
+ * back (Shmem, a quarter of the R1's 57 MB; with Bluetooth on 5-6 MB are
+ * left, and the stalls come from there). Whether it could run from the
+ * internal flash instead needs these, from both test R1s, first. */
+static void log_start_facts(void)
+{
+    char line[256];
+    flash_run_ok(FLASH_RUN_SRC, FLASH_RUN_DIR);            /* the screen is up: a start from the flash worked */
+    sl_log("start: the player runs %s", flash_run_says());
+    if (flash_run_state() == FLASH_RUN_NO_COPY) lv_timer_create(flash_copy_tick, 30000, NULL);
+    static const char *const at[] = { "/usr/data", "/tmp", "/" };
+    for (unsigned i = 0; i < sizeof at / sizeof at[0]; i++)
+    {
+        struct statvfs v;
+        if (statvfs(at[i], &v)) { sl_log("start: %s: %s", at[i], strerror(errno)); continue; }
+        sl_log("start: %s holds %lu KiB, %lu free%s%s", at[i], (unsigned long)((unsigned long long)v.f_blocks * v.f_frsize / 1024),
+               (unsigned long)((unsigned long long)v.f_bavail * v.f_frsize / 1024),
+               v.f_flag & ST_RDONLY ? ", read only" : "", v.f_flag & ST_NOEXEC ? ", no programs run from it" : "");
+    }
+    FILE *fp = fopen("/proc/mounts", "r");
+    for (int shown = 0; fp && shown < 8 && fgets(line, sizeof line, fp); )
+    {
+        char dev[64], dir[64], type[24], opts[96];
+        if (sscanf(line, "%63s %63s %23s %95s", dev, dir, type, opts) != 4) continue;
+        if (strcmp(dir, "/") && strcmp(dir, "/tmp") && strncmp(dir, "/usr/data", 9) && strcmp(dir, "/data") && strcmp(dir, "/dev/shm")) continue;
+        if (strstr(dir, "/mnt/")) continue;                /* the card: known */
+        sl_log("start: mount %s on %s, %s (%s)", dev, dir, type, opts);
+        shown++;
+    }
+    if (fp) fclose(fp);
+    fp = fopen("/proc/meminfo", "r");
+    long avail = -1, shm = -1;
+    while (fp && fgets(line, sizeof line, fp))
+        if (sscanf(line, "MemAvailable: %ld", &avail) != 1) sscanf(line, "Shmem: %ld", &shm);
+    if (fp) fclose(fp);
+    sl_log("start: %ld KiB of memory available, %ld held in /tmp and shared memory", avail, shm);
+}
+#else
+static void log_start_facts(void) {}
+#endif
 
 #include "sloppy_charge.inc"
 
@@ -8601,6 +8722,28 @@ static void np_follow_track(void)
 }
 /* What is on screen: labels, progress, the open sheets. Nothing is seen
  * while the panel is dark, so this waits and runs once on wake. */
+/* A Rockbox sleep, block or switch some plain thread asked for (refused by
+ * the kernel, which kept that caller's stack): said once, to be named with
+ * the build's .elf */
+static void sl_kernel_misuse_note(void)
+{
+#if defined(HIBY_LINUX) && !defined(SIMULATOR)
+    static unsigned told;
+    unsigned n = kernel_misuse_n;
+    if (!n || n == told || !kernel_misuse_what) return;
+    if (!told)
+    {
+        char b[160];
+        int k = 0;
+        for (int i = 0; i < 8 && kernel_misuse_stack[i] && k < (int)sizeof b - 10; i++)
+            k += snprintf(b + k, sizeof b - k, " %08lx", kernel_misuse_stack[i]);
+        b[k] = 0;
+        sl_log("kernel: a plain thread asked for '%s', refused; its stack%s", kernel_misuse_what, b);
+    }
+    else sl_log("kernel: %u refused asks from plain threads in all", n);
+    told = n;
+#endif
+}
 static void periodic_ui(void)
 {
     sl_card_error_note();
@@ -8898,6 +9041,7 @@ static void periodic(lv_timer_t *t)
      * album chaining and the battery warning on time */
     if (t) lv_timer_set_period(t, wallpaper_screen_dark ? 1000 : 250);
     bl_tick();
+    sl_kernel_misuse_note();       /* dark too: a screen-off freeze is where it was seen */
 #if defined(HIBY_R1) && !defined(SIMULATOR)
     usb_trace_flush();                   /* a plug that did not become USB mode, say: onto the card */
 #endif
@@ -9032,6 +9176,7 @@ static void touch_dark_poll(void)
 const char *volatile sl_at_where = "start";
 #if defined(HIBY_LINUX) && !defined(SIMULATOR)
 #include <signal.h>
+#include <sys/reboot.h>
 #include <ucontext.h>
 #include "crashlog-linux.h"
 /* 3 s into a hang (each hang, a few a session): where the UI thread is,
@@ -9040,6 +9185,44 @@ const char *volatile sl_at_where = "start";
  * share this OS thread, so the one running is named: a pc in another
  * thread's read() looked like the UI's own (2026-10-23). */
 static pthread_t sl_ui_thread;
+static uintptr_t sl_ui_stack_top;        /* an address in sloppy_run's frame: the UI's frames lie below it */
+extern uintptr_t thread_saved_sp(unsigned int thread_id);
+extern char __executable_start[], etext[];
+/* Every thread at a hang: its state and, when switched out, the return
+ * addresses on its saved stack. A freeze with the screen off (20 Nov) left
+ * the UI 'waiting' for minutes, other threads running, and the running
+ * thread's stack said nothing of what the UI waited on (the music thread,
+ * a lock, a queue): this names the UI's own calls and whom it waits for. */
+extern void thread_stack_bounds(unsigned int thread_id, uintptr_t *lo, uintptr_t *hi);
+static void sl_threads_note(void)
+{
+    for (unsigned int slot = 0; slot < MAXTHREADS; slot++)
+    {
+        struct thread_debug_info ti;
+        if (thread_get_debug_info(slot, &ti) <= 0) continue;
+        char b[240];
+        uintptr_t sp = thread_saved_sp(slot), lo, hi;
+        thread_stack_bounds(slot, &lo, &hi);
+        if (lo == hi) { lo = sl_ui_stack_top - 256 * 1024; hi = sl_ui_stack_top; }   /* the main thread: the process stack */
+        int n = snprintf(b, sizeof b, "watchdog: thread '%s' %s, stack", ti.name, ti.statusstr);
+        if (ti.statusstr[0] != '*' && sp > lo && sp < hi)
+        {
+            int k = 0;
+            for (const unsigned long *w = (const unsigned long *)sp;
+                 (uintptr_t)w < hi && k < 12 && n < (int)sizeof b - 10; w++)
+                if (*w >= (unsigned long)__executable_start && *w < (unsigned long)etext)
+                {
+                    n += snprintf(b + n, sizeof b - n, " %08lx", *w);
+                    k++;
+                }
+        }
+        else n += snprintf(b + n, sizeof b - n, " (running, or sp %08lx outside its stack %08lx-%08lx)",
+                           (unsigned long)sp, (unsigned long)lo, (unsigned long)hi);
+        if (n < (int)sizeof b - 1) b[n++] = '\n';
+        if (log_fd >= 0) syscall(SYS_write, log_fd, b, (size_t)n);
+    }
+    if (log_fd >= 0) syscall(SYS_fsync, log_fd);
+}
 static void sl_stuck_snapshot(int sig, siginfo_t *si, void *context)
 {
     (void)si;
@@ -9062,6 +9245,7 @@ static void sl_stuck_snapshot(int sig, siginfo_t *si, void *context)
         syscall(SYS_write, log_fd, b, (size_t)n);
         syscall(SYS_fsync, log_fd);
     }
+    sl_threads_note();
 }
 /* The log's fsync, off the UI thread (sl_log): as often as sl_log did it,
  * a quarter second later at most. Raw calls, like the rest of this thread. */
@@ -9074,6 +9258,23 @@ static void sl_log_sync(uint32_t now)
     if (fd >= 0) syscall(SYS_fsync, fd);
     synced_at = now;
 }
+/* The whole card, every 10 s: the log's fsync flushes the log, but not the
+ * covers, settings, history and playlist files written beside it, whose
+ * allocation bitmap a power cut (a frozen R1 held off, a flat battery) left
+ * half written: twice a Mac found it needing repair (13 and 18 Nov). With
+ * nothing waiting this costs nothing. */
+static void sl_card_sync(uint32_t now)
+{
+    static uint32_t synced_at;
+    if (log_held || now - synced_at < 10000) return;
+    synced_at = now;
+    int fd = log_fd;
+#ifdef SYS_syncfs
+    if (fd >= 0) syscall(SYS_syncfs, fd);
+#else
+    if (fd >= 0) sync();
+#endif
+}
 static void *sl_watchdog(void *arg)
 {
     (void)arg;
@@ -9084,6 +9285,7 @@ static void *sl_watchdog(void *arg)
         usleep(wallpaper_screen_dark ? 2000000 : 250000);
         uint32_t beat = sl_beat_ms, now = sl_ms();
         sl_log_sync(now);
+        sl_card_sync(now);
         static bool snapped;
         static int snaps;
         if (!beat || now - beat < 1000) { told = 0; snapped = false; continue; }
@@ -9113,6 +9315,22 @@ static void *sl_watchdog(void *arg)
             snapped = true;
             snaps++;
             pthread_kill(sl_ui_thread, SIGUSR2);
+        }
+        /* Stuck in the wait for good, and a key pressed that the UI never
+         * took: nothing will answer it, and holding the power key cut the
+         * power, card and all (20 Nov). Restart instead, the card synced.
+         * Only in the wait: a long step (a scan, a big list) is in another
+         * place, and a key pressed during it is answered after. */
+        if (now - beat >= 20000 && !strcmp(sl_at_where, "waiting") && button_queue_count() > 0)
+        {
+            static const char m[] = "watchdog: stuck in the wait with a key unanswered: restarting\n";
+            if (log_fd >= 0) { syscall(SYS_write, log_fd, m, sizeof m - 1); syscall(SYS_fsync, log_fd); }
+            int fd = log_fd;
+#ifdef SYS_syncfs
+            if (fd >= 0) syscall(SYS_syncfs, fd);
+#endif
+            sync();
+            reboot(RB_AUTOBOOT);
         }
     }
     return NULL;
@@ -9191,6 +9409,7 @@ static void sloppy_run(void)
         sa.sa_sigaction = sl_stuck_snapshot;
         sigaction(SIGUSR2, &sa, NULL);
         sl_ui_thread = pthread_self();
+        sl_ui_stack_top = (uintptr_t)&sa;
         pthread_t wd;
         if (pthread_create(&wd, NULL, sl_watchdog, NULL) == 0) { pthread_detach(wd); log_sync_thread = true; }
     }
@@ -9235,6 +9454,7 @@ static void sloppy_run(void)
         lv_timer_create(bootlogo_tick, 3000, NULL);   /* once the start has settled */
         sfx_play(SFX_SYS_BOOT);
         log_boot_times();
+        log_start_facts();
 
         lib_options_apply();
         lib_epoch++;
@@ -9360,6 +9580,8 @@ static void sloppy_run(void)
         LAP(2);
         SL_AT("lvgl");
         uint64_t handler_started = sl_perf.name || dev_hud.bar ? sl_perf_now_us() : 0;
+        lv_timer_slowest_ms = 0;
+        lv_timer_slowest_cb = NULL;
         uint32_t wait = lv_timer_handler();
         if (handler_started)
         {
@@ -9419,8 +9641,8 @@ static void sloppy_run(void)
             if (lap_at - lap_start >= 500000 && stall_lines < 30)
             {
                 stall_lines++;
-                sl_log("stall: loop pass %u ms, mostly %s (%u ms)", (unsigned)((lap_at - lap_start) / 1000),
-                       lap_names[worst], (unsigned)(lap_us[worst] / 1000));
+                sl_log("stall: loop pass %u ms, mostly %s (%u ms); slowest timer %p (%u ms)", (unsigned)((lap_at - lap_start) / 1000),
+                       lap_names[worst], (unsigned)(lap_us[worst] / 1000), lv_timer_slowest_cb, (unsigned)lv_timer_slowest_ms);
             }
             else lag_pass((uint32_t)((lap_at - lap_start) / 1000), lap_names[worst], lap_us[worst] / 1000);
         }

@@ -5,11 +5,11 @@
 <a href="https://github.com/BlueDreams666/gabagoolOS/releases/latest">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png">
-  <img src="assets/hero-light.png" width="880" alt="gabagoolOS 1.1, Game on then. A neon sign reads: gabagool? ova haaaa! Your R1 just got made: fast, pretty new software for your HiBy R1. It runs from your SD card, and it's open source. Beside it, three R1s showing the Songs list, the lyrics picker for Here She Comes by Slowdive, and Now Playing with Say It Right by Nelly Furtado.">
+  <img src="assets/hero-light.png" width="880" alt="gabagoolOS. A neon sign reads: gabagool? ova haaaa! Your R1 just got made: fast, pretty new software for your HiBy R1. It runs from your SD card, and it's open source. Beside it, three R1s showing the Songs list, the lyrics picker for Here She Comes by Slowdive, and Now Playing with Say It Right by Nelly Furtado.">
 </picture>
 </a>
 
-**[Download 1.1](https://github.com/BlueDreams666/gabagoolOS/releases/latest)** &nbsp;·&nbsp;
+**[Download 1.2](https://github.com/BlueDreams666/gabagoolOS/releases/latest)** &nbsp;·&nbsp;
 [How to install](#no-funny-business) &nbsp;·&nbsp;
 [Questions](#you-got-questions)
 
@@ -44,9 +44,9 @@ even Doom and Game Boy. Not your thing? Hide them with one tap.
 
 ## today's specials
 
-New in 1.1: swipe through songs like a dating app and it learns your taste.
-Plus podcasts, e-books, a picture of the whole song you can tap to jump
-around, and your phone as a remote.
+New in 1.2: it updates itself over Wi-Fi, so this is the last time you
+install by hand. Plus the Arcade held sideways, a smoother Snake and
+steadier Bluetooth.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/case-new-dark.png">
@@ -88,10 +88,10 @@ has a step-by-step guide, so give it a read first. The short version:
 
 1. **Get ready.** Charge your R1, back up your card, and download HiBy's own
    firmware from their website. That's your safety net.
-2. **Add the boot menu (once).** Copy `GabagoolOS-1.1-boot-menu.upt` to your
+2. **Add the boot menu (once).** Copy `GabagoolOS-1.2-boot-menu.upt` to your
    card, rename it `r1.upt`, then on the R1 go to
    System > Firmware update > Via SD card.
-3. **Add GabagoolOS.** Unzip `GabagoolOS-1.1-HiBy-R1.zip` onto your card and
+3. **Add GabagoolOS.** Unzip `GabagoolOS-1.2-HiBy-R1.zip` onto your card and
    restart.
 
 That's it! Your R1 now starts in GabagoolOS. Want the HiBy software instead?
@@ -115,11 +115,10 @@ brand new touch interface on top, made for the R1.
 </details>
 
 <details>
-<summary><b>Was it made with AI?</b></summary>
+<summary><b>Was AI used to help build this?</b></summary>
 <br>
 
-Yes, a lot of it. We planned it, checked it and use it every day on our own
-R1s. We'd rather just tell you. Here's how we make sure it works:
+Yes. Here's how we make sure it works:
 
 - **Every screen, checked.** All 32,256 combinations of screen, theme,
   language and text size, so nothing's cut off or too small to tap.

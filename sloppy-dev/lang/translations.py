@@ -2417,6 +2417,16 @@ T = [
 ('Not enough memory to open this right now.', 'No hay memoria suficiente para abrir esto ahora.', 'Mémoire insuffisante pour ouvrir ceci maintenant.', 'Nicht genug Speicher, um das jetzt zu öffnen.', 'אין מספיק זיכרון כדי לפתוח את זה כרגע.'),
 ('Hold sideways', 'Sujetar de lado', "Tenir à l'horizontale", 'Quer halten', 'החזקה לרוחב'),
 ('The volume keys are left and right. Play is A, Next is B.', 'Las teclas de volumen son izquierda y derecha. Reproducir es A, Siguiente es B.', 'Les touches de volume font gauche et droite. Lecture est A, Suivant est B.', 'Die Lautstärketasten sind links und rechts. Wiedergabe ist A, Weiter ist B.', 'מקשי עוצמת הקול הם שמאלה וימינה. הפעלה היא A, הבא הוא B.'),
+('Online', 'En línea', 'En ligne', 'Online', 'מקוון'),
+('Checking online…', 'Buscando en línea…', 'Vérification en ligne…', 'Suche online…', 'בודק ברשת…'),
+('GabagoolOS %s is available', 'GabagoolOS %s está disponible', 'GabagoolOS %s est disponible', 'GabagoolOS %s ist verfügbar', 'GabagoolOS %s זמין'),
+('You have the newest version.', 'Tienes la versión más reciente.', 'Vous avez la version la plus récente.', 'Du hast die neueste Version.', 'יש לכם את הגרסה החדשה ביותר.'),
+('Check for updates', 'Buscar actualizaciones', 'Rechercher des mises à jour', 'Nach Updates suchen', 'בדיקת עדכונים'),
+("Couldn't reach the update server", 'No se pudo contactar con el servidor de actualizaciones', 'Impossible de joindre le serveur de mises à jour', 'Der Update-Server war nicht erreichbar', 'לא הצלחנו להגיע לשרת העדכונים'),
+('Connect to Wi-Fi to check for updates online.', 'Conéctate al Wi-Fi para buscar actualizaciones en línea.', 'Connectez-vous au Wi-Fi pour rechercher des mises à jour en ligne.', 'Verbinde dich mit dem WLAN, um online nach Updates zu suchen.', 'התחברו ל-Wi-Fi כדי לבדוק עדכונים ברשת.'),
+('Or copy a .gbupdate file to the top of the card, or send it from the phone remote (Wi-Fi > Phone remote).', 'O copia un archivo .gbupdate en la raíz de la tarjeta, o envíalo desde el mando del teléfono (Wi-Fi > Mando del teléfono).', 'Ou copiez un fichier .gbupdate à la racine de la carte, ou envoyez-le depuis la télécommande sur téléphone (Wi-Fi > Télécommande sur téléphone).', 'Oder kopiere eine .gbupdate-Datei in die oberste Ebene der Karte oder sende sie mit der Handy-Fernbedienung (WLAN > Handy-Fernbedienung).', 'או העתיקו קובץ .gbupdate לתיקייה הראשית של הכרטיס, או שלחו אותו מהשלט בטלפון (Wi-Fi > שלט מהטלפון).'),
+('Update available', 'Actualización disponible', 'Mise à jour disponible', 'Update verfügbar', 'עדכון זמין'),
+('Along the top from the power key: Left, B, A, Right. Tap right of the game for A.', 'Por arriba desde el botón de encendido: Izquierda, B, A, Derecha. Toca a la derecha del juego para A.', 'En haut depuis le bouton marche : Gauche, B, A, Droite. Touchez à droite du jeu pour A.', 'Oben ab der Ein-Taste: Links, B, A, Rechts. Tippe rechts neben das Spiel für A.', 'לאורך הצד העליון מכפתור ההפעלה: שמאלה, B, A, ימינה. הקישו מימין למשחק בשביל A.'),
 ]
 
 

@@ -19,6 +19,10 @@
  *
  ****************************************************************************/
 #include "config.h"
+#if defined(HIBY_R1) && !defined(SIMULATOR) && !defined(BOOTLOADER)
+#include <unistd.h>
+#include "flash-run.h"
+#endif
 #ifdef HAVE_SLOPPY_UI
 #include "sloppy/sloppy.h"
 #define SLOPPY_MARK(n) sloppy_boot_mark(n)
@@ -184,6 +188,13 @@ int main(int argc, char *argv[])
 int main(void) INIT_ATTR MAIN_NORETURN_ATTR;
 int main(void)
 {
+#endif
+#if defined(HIBY_R1) && !defined(SIMULATOR) && !defined(BOOTLOADER)
+    /* before anything is opened: carry on from the R1's flash when this
+     * build's copy is there, and give /tmp's 13 MB of RAM back (flash-run.c).
+     * An empty file run-from-tmp in the card's .rockbox/sloppy turns it off. */
+    if (access("/data/mnt/sd_0/.rockbox/sloppy/run-from-tmp", F_OK))
+        flash_run_boot(FLASH_RUN_SRC, FLASH_RUN_DIR);
 #endif
     CHART(">init");
     init();

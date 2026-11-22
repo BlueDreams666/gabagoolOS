@@ -192,6 +192,9 @@ target/hosted/hiby/powermgmt-axp2101.c
 target/hosted/hiby/usb-dac-hiby.c
 target/hosted/hiby/hibylinux_codec.c
 target/hosted/netlink-monitor.c
+#ifdef HIBY_R1
+target/hosted/hiby/flash-run.c
+#endif
 #endif
 
 #if defined(AGPTEK_ROCKER) && !defined(SIMULATOR)

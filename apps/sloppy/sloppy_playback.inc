@@ -1048,6 +1048,16 @@ static lv_obj_t *uq_row(int idx, int k, const char *path, bool now)
     return r;
 }
 
+/* a row's file name, timed: with the card's cache cold (memory short over
+ * Bluetooth) these reads were most of a 411 ms build (a test R1, Nov 12) */
+static uint32_t uq_names_ms;
+static int uq_track_info(int idx, struct playlist_track_info *info)
+{
+    uint32_t t0 = sl_ms();
+    int r = playlist_get_track_info(NULL, idx, info);
+    uq_names_ms += sl_ms() - t0;
+    return r;
+}
 static bool uq_snapshot_valid(void);
 static void uq_more(int n)
 {
@@ -1057,7 +1067,7 @@ static void uq_more(int n)
     for (; uq_queue_k <= uq_queue_run && uq_queue_count < UQ_QMAX && uq_queue_count > 0 && n > 0; uq_queue_k++)
     {
         int idx = (uq_snapshot_current + uq_queue_k) % uq_snapshot_amount;
-        if (playlist_get_track_info(NULL, idx, &info) < 0) continue;
+        if (uq_track_info(idx, &info) < 0) continue;
         int at = (int)lv_obj_get_index(uq_queue_rows[uq_queue_count - 1]) + 1;
         lv_obj_t *r = uq_row(idx, uq_queue_k, info.filename, false);
         lv_obj_move_to_index(r, at);
@@ -1069,7 +1079,7 @@ static void uq_more(int n)
     for (; uq_next_k <= uq_next_ahead && uq_next_count < 60 && n > 0; uq_next_k++)
     {
         int idx = (uq_snapshot_current + uq_next_k) % uq_snapshot_amount;
-        if (playlist_get_track_info(NULL, idx, &info) < 0) continue;
+        if (uq_track_info(idx, &info) < 0) continue;
         uq_next_indexes[uq_next_count] = idx;
         uq_next_rows[uq_next_count++] = uq_row(idx, uq_next_k, info.filename, false);
         n--;
@@ -1092,6 +1102,7 @@ static lv_obj_t *txt_btn(lv_obj_t *parent, const char *label, lv_event_cb_t cb);
 static void uq_build(void)
 {
     uint32_t started = sl_ms();
+    uq_names_ms = 0;
     /* A rebuild replaces every row, so no drag can survive it: reset the
      * drag state so a lost release can't strand the list unscrollable. */
     uq_dragging = false;
@@ -1101,8 +1112,8 @@ static void uq_build(void)
     /* Rows that were translated or shadowed during a drag can leave pixels
      * outside the rebuilt rows' areas; repaint the whole sheet once. */
     if (uq) lv_obj_invalidate(uq);
-    sl_log("up next built: %d tracks, %d queued rows, %d next rows, %lu ms",
-           playlist_amount(), uq_queue_count, uq_next_count, (unsigned long)(sl_ms() - started));
+    sl_log("up next built: %d tracks, %d queued rows, %d next rows, %lu ms (%lu reading names)",
+           playlist_amount(), uq_queue_count, uq_next_count, (unsigned long)(sl_ms() - started), (unsigned long)uq_names_ms);
 }
 #include "sloppy_history_state.h"     /* SL_HIST_VALID_CLOCK */
 static int hist_recent_when(int *out, uint32_t *when, int max);   /* sloppy_history.inc */
@@ -1270,12 +1281,16 @@ static void uq_build_rows(void)
     int earlier[UQ_EARLIER], n_earlier, shown_earlier = 0;
     uint32_t when[UQ_EARLIER], now = hist_clock();
     n_earlier = hist_recent_when(earlier, when, UQ_EARLIER);
+    /* the song playing, read once: asked of the card again for each of the
+     * sixteen rows above it, it was most of the wait with the cache cold */
+    bool playing = amount > 0 && uq_track_info(cur, &info) >= 0;
+    char now_path[MAX_PATH] = "";
+    if (playing) strlcpy(now_path, info.filename, sizeof now_path);
     char day[64] = "";
     for (int k = n_earlier - 1; k >= 0; k--)
     {
         int t = earlier[k];
-        if (t < 0 || t >= sl_lib.n_tracks || (amount > 0 && playlist_get_track_info(NULL, cur, &info) >= 0 &&
-                                               sl_track_path_is(t, info.filename))) continue;
+        if (t < 0 || t >= sl_lib.n_tracks || (playing && sl_track_path_is(t, now_path))) continue;
         char head[64];
         uq_day_label(head, sizeof head, when[k], now);
         if (strcmp(head, day)) { strlcpy(day, head, sizeof day); section(uq_list, day); }
@@ -1312,10 +1327,10 @@ static void uq_build_rows(void)
     }
     lv_obj_t *s = section(uq_list, "NOW PLAYING");
     (void)s;
-    if (amount > 0 && playlist_get_track_info(NULL, cur, &info) >= 0)
+    if (playing)
     {
-        strlcpy(uq_snapshot_path, info.filename, sizeof uq_snapshot_path);
-        uq_row(cur, 0, info.filename, true);
+        strlcpy(uq_snapshot_path, now_path, sizeof uq_snapshot_path);
+        uq_row(cur, 0, now_path, true);
     }
 
     /* Rows in play order: the queued run (sloppy_queue.h keeps it whole,
@@ -1344,7 +1359,7 @@ static void uq_build_rows(void)
     for (kq = 1; kq <= queued && uq_queue_count < want_q; kq++)
     {
         int idx = (cur + kq) % amount;
-        if (playlist_get_track_info(NULL, idx, &info) >= 0)
+        if (uq_track_info(idx, &info) >= 0)
         {
             uq_queue_indexes[uq_queue_count] = idx;
             uq_queue_rows[uq_queue_count++] = uq_row(idx, kq, info.filename, false);
@@ -1378,7 +1393,7 @@ static void uq_build_rows(void)
     for (k = queued + 1; k <= ahead && rest < want; k++)
     {
         int idx = (cur + k) % amount;
-        if (playlist_get_track_info(NULL, idx, &info) >= 0)
+        if (uq_track_info(idx, &info) >= 0)
         {
             uq_next_indexes[uq_next_count] = idx;
             uq_next_rows[uq_next_count++] = uq_row(idx, k, info.filename, false);

@@ -365,10 +365,13 @@ int button_status(void) { return BUTTON_NONE; }
 static int test_events;
 static int test_lib_frees, test_lib_begins, test_lib_begin_state = SL_LIB_READY, test_usb_lib_frees = -1, test_usb_dirs_open = -1;
 static int test_usb_fds = -1, test_usb_screens;
+static bool test_usb_new_build;   /* a new rockbox.r1 copied while the card was the computer's: check_bootfile asks */
+static bool test_usb_boot_taken;
 static int test_open_fds(void) { int n = 0; for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) != -1) n++; return n; }
 long default_event_handler(long event) {
     test_events++; if (event == SYS_PHONE_UNPLUGGED) audio_pause();
-    if (event == SYS_USB_CONNECTED) { test_usb_lib_frees = test_lib_frees; test_usb_dirs_open = fake_dirs_open; test_usb_fds = test_open_fds(); test_usb_screens++; test_usb_bl_tmo = test_bl_tmo; test_usb_bl_tmo_plugged = test_bl_tmo_plugged; test_usb_bl_off = test_bl_off; }   /* what had let go when Rockbox took the card */
+    if (event == SYS_USB_CONNECTED) { test_usb_lib_frees = test_lib_frees; test_usb_dirs_open = fake_dirs_open; test_usb_fds = test_open_fds(); test_usb_screens++; test_usb_bl_tmo = test_bl_tmo; test_usb_bl_tmo_plugged = test_bl_tmo_plugged; test_usb_bl_off = test_bl_off;
+        if (test_usb_new_build) test_usb_boot_taken = sloppy_boot_changed(); }   /* what had let go when Rockbox took the card */
     return event;
 }
 struct viewport *lcd_set_viewport(struct viewport *vp) { return vp; }
@@ -619,7 +622,8 @@ int sl_art_big_poll(int album, uint16_t **px, int *w, int *h) {
     int s = 452; *px = malloc((size_t)s * s * 2); if (!*px) return -1;
     test_cover(album, s, *px); *w = *h = s; test_big_album = -1; return 1; }
 size_t lv_image_cache_get_used_size(void) { return 0; }
-void system_reboot(void) {}
+static int test_reboots;
+void system_reboot(void) { test_reboots++; }
 /* a tag database with three genres: track i has genre i % 3 */
 static bool tc_usable = true;
 static const char *const tc_genres[] = { "Hard Rock", "Pop", "<Untagged>" };
@@ -649,8 +653,11 @@ struct tm *get_time(void) { static struct tm t = {.tm_year=126,.tm_mon=8,.tm_mda
 static long rtc_added;   /* the clock moved on by the tests, seconds (within the day) */
 static void rtc_add(long s) { struct tm *t=get_time(); long v=t->tm_hour*3600L+t->tm_min*60+t->tm_sec+s; rtc_added+=s;
     t->tm_hour=(int)(v/3600%24); t->tm_min=(int)(v/60%60); t->tm_sec=(int)(v%60); }
-int playback_current_aa_hid(int slot) { (void)slot;return 1; }
+static int test_aa_hid = 1;
+int playback_current_aa_hid(int slot) { (void)slot;return test_aa_hid; }
 ssize_t bufgetdata(int h, size_t n, void **out) {(void)h;(void)n;*out=&test_bitmap;return sizeof(test_bitmap);}
+static void test_slow_timer(lv_timer_t *t) { (void)t; test_tick += 40; }   /* 40 ms of work */
+static void test_quick_timer(lv_timer_t *t) { (void)t; test_tick += 2; }
 static uint32_t ticks(void) { return test_tick; }
 static long flushed_px;   /* pixels sent to the panel, for the idle benchmark */
 static uint64_t flush_ns;  /* CPU time in the flush, for SLOPPY_PERF */
@@ -1034,6 +1041,24 @@ static const char *test_folder_cover;
 bool search_albumart_files(const struct mp3entry *id3, const char *size_string, char *buf, int buflen)
 { (void)id3; (void)size_string; if (!test_folder_cover) return false; strlcpy(buf, test_folder_cover, buflen); return true; }
 bool sl_art_apply_scaled(lv_obj_t *c, int a, int size) {return test_cover_attach(c,a,size);}
+/* the live tiles' covers come a little later, as from sloppy_art.c's reader thread: 100 ms on */
+static struct { lv_obj_t *box; int a, size; } test_sc[8];
+static int test_sc_n, test_sc_made;
+static lv_timer_t *test_sc_timer;
+static void test_sc_gone(lv_event_t *e) { lv_obj_t *o=lv_event_get_target(e); for(int i=0;i<test_sc_n;i++) if(test_sc[i].box==o) test_sc[i].box=NULL; }
+static void test_sc_tick(lv_timer_t *t) {
+    (void)t;
+    for(int i=0;i<test_sc_n;i++) if(test_sc[i].box){lv_obj_remove_event_cb(test_sc[i].box,test_sc_gone);test_cover_attach(test_sc[i].box,test_sc[i].a,test_sc[i].size);test_sc_made++;}
+    test_sc_n=0;
+}
+bool sl_art_apply_scaled_async(lv_obj_t *c, int a, int size) {
+    if(a<0) return false;
+    if(test_sc_n==8) return test_cover_attach(c,a,size);   /* all busy: at once, as the real one does */
+    test_sc[test_sc_n].box=c;test_sc[test_sc_n].a=a;test_sc[test_sc_n].size=size;test_sc_n++;
+    lv_obj_add_event_cb(c,test_sc_gone,LV_EVENT_DELETE,NULL);
+    if(!test_sc_timer) test_sc_timer=lv_timer_create(test_sc_tick,100,NULL);
+    return true;
+}
 unsigned sl_art_made;
 bool sl_art_busy(void) { return false; }
 bool sl_art_no_cover(int a) {(void)a;return false;}
@@ -1993,54 +2018,84 @@ static void b9_tests(void) {
             for(int i=0;i<10;i++)frame(17);assert(arc.frames==f0);
             arc_save_cb(NULL);frame(300);assert(arc_has_state(arc_roms[k].path,".state"));
             for(int i=0;i<4;i++)frame(17);assert(!arc.sheet && !arc.paused);
-            {   /* Held sideways: the picture turned a quarter in the middle, the four side keys along the top (the
-                 * volume keys left and right, Play and Next still A and B), up, down, Start and Select on the screen
-                 * either side; with the screen set upside down it turns the other way; paused, the volume keys are
-                 * the volume's again; upright again, everything is back */
+            {   /* Held sideways, as a tester holds it: the side keys along the top with the power key at the left end,
+                 * and nothing on the screen but the game. Along the top they are Left, B, A, Right (Volume up, Volume
+                 * down, Play, Next); right of the picture is A, left of it Up and Down; Start and Select in the menu.
+                 * Turned on from the menu as on the R1, where closing the menu left the game paused for good */
                 static uint16_t up[ARC_PIC_W*ARC_PIC_H];
-                assert(!arc_opt.side && arc_opt.fx==ARC_FX_NONE);
-                arc_pause(true);arc_blit();memcpy(up,arc.px,sizeof up);
-                arc_opt.side=1;arc_layout();frame(50);
-                assert(lv_obj_has_flag(arc.pad,LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(arc.side,LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(sb,LV_OBJ_FLAG_HIDDEN));
+                #define ARC_ROW(txt) ({lv_obj_t *r_=NULL;for(uint32_t i_=0;i_<lv_obj_get_child_count(acts);i_++){lv_obj_t *c_=lv_obj_get_child(acts,i_);if(has_text(c_,txt))r_=c_;}r_;})
+                assert(!arc_opt.side && arc_opt.fx==ARC_FX_NONE && !arc.paused && !arc.sheet);
+                arc_screen_cb(NULL);frame(300);assert(arc.sheet && acts_open_now && !ARC_ROW("START"));
+                lv_obj_t *row=ARC_ROW("Hold sideways");assert(row);lv_obj_send_event(row,LV_EVENT_CLICKED,NULL);frame(50);frame(50);
+                assert(arc_opt.side && arc.sheet && acts_open_now && ARC_ROW("START") && ARC_ROW("SELECT"));
+                row=ARC_ROW("Resume");assert(row);lv_obj_send_event(row,LV_EVENT_CLICKED,NULL);
+                for(int i=0;i<40;i++)frame(17);                      /* the menu slides off a frame at a time, as on the R1 */
+                {uint32_t f0=arc.frames;for(int i=0;i<30;i++)frame(17);assert(!arc.sheet && !arc.paused && arc.frames>f0+10);}
+                /* the game is the whole screen: nothing drawn beside it, no status bar */
+                assert(lv_obj_has_flag(arc.pad,LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(arc.side,LV_OBJ_FLAG_HIDDEN) &&
+                       lv_obj_get_child_count(arc.side)==0 && lv_obj_has_flag(sb,LV_OBJ_FLAG_HIDDEN));
                 assert(lv_obj_get_x(arc.screen)==24 && lv_obj_get_y(arc.screen)==160 && lv_obj_get_width(arc.screen)==ARC_PIC_H && lv_obj_get_height(arc.screen)==ARC_PIC_W);
+                arc_pause(true);arc_opt.side=0;arc_blit();memcpy(up,arc.px,sizeof up);arc_opt.side=1;arc_blit();
                 for(int Y=0;Y<ARC_PIC_H;Y++)for(int X=0;X<ARC_PIC_W;X++)assert(arc.px[X*ARC_PIC_H+(ARC_PIC_H-1-Y)]==up[Y*ARC_PIC_W+X]);
                 shot("arcade-sideways.ppm");
-                /* the keys' edge is the top: left of the picture up, down, Select from there; right of it A, B, Start */
-                assert(arc_side_keys_at(400,80)==GB_UP && arc_side_keys_at(200,80)==GB_DOWN && arc_side_keys_at(60,80)==GB_SELECT &&
-                       arc_side_keys_at(400,700)==GB_A && arc_side_keys_at(200,700)==GB_B && arc_side_keys_at(60,700)==GB_START &&
-                       arc_side_keys_at(240,400)==0);
+                /* the screen, unseen: left of the picture Up (the half by the keys) and Down; right of it A, all of it */
+                assert(arc_side_keys_at(400,80)==GB_UP && arc_side_keys_at(60,80)==GB_DOWN && arc_side_keys_at(400,700)==GB_A &&
+                       arc_side_keys_at(60,700)==GB_A && arc_side_keys_at(240,650)==GB_A && arc_side_keys_at(240,630)==0 && arc_side_keys_at(240,400)==0);
                 /* a thumb sliding down from the top edge is the game's, not a pull on the Control Center */
                 arc_pause(false);touch_at(400,10,true);touch_at(400,50,true);touch_at(400,110,true);
-                assert(g_state==G_LVGL && arc.touch==GB_UP && !overlay_visible());touch_at(400,110,false);assert(!arc.touch);arc_pause(true);
-                arc_opt.side=0;arc_blit();memcpy(up,arc.px,sizeof up);arc_opt.side=1;arc_blit();   /* the game ran on: the picture to hold the turns to, again */
-                /* one rocker's two ends may not go down together: B held on the screen, A on its key */
-                arc_pause(false);arc.touch=arc_side_keys_at(200,700);assert(arcade_key(BUTTON_LEFT,false) && (arc.touch|arc.keys)==(GB_A|GB_B));
-                arcade_key(BUTTON_LEFT,true);arc.touch=0;arc_pause(true);
-                assert(!arcade_key(BUTTON_UP,false) && !arc.keys);            /* paused: the volume's */
-                arc_pause(false);
-                assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_LEFT && arcade_key(BUTTON_LEFT,false) && arc.keys==(GB_LEFT|GB_A));   /* running and jumping */
-                assert(arcade_key(BUTTON_UP,true) && arcade_key(BUTTON_DOWN,false) && arcade_key(BUTTON_RIGHT,false) && arc.keys==(GB_RIGHT|GB_A|GB_B));
-                arcade_key(BUTTON_DOWN,true);arcade_key(BUTTON_LEFT,true);arcade_key(BUTTON_RIGHT,true);assert(!arc.keys);
-                arc.touch=GB_UP;arc_show_keys();assert(lv_obj_has_state(arc.side_btn[0],LV_STATE_PRESSED));arc.touch=0;arc_show_keys();
-                assert(!lv_obj_has_state(arc.side_btn[0],LV_STATE_PRESSED));
+                assert(g_state==G_LVGL && arc.touch==GB_UP && !overlay_visible());touch_at(400,110,false);assert(!arc.touch);
+                /* the keys, along the top from the power key: Left, B, A, Right */
+                assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_LEFT);arcade_key(BUTTON_UP,true);
+                assert(arcade_key(BUTTON_DOWN,false) && arc.keys==GB_B);arcade_key(BUTTON_DOWN,true);
+                assert(arcade_key(BUTTON_LEFT,false) && arc.keys==GB_A);arcade_key(BUTTON_LEFT,true);
+                assert(arcade_key(BUTTON_RIGHT,false) && arc.keys==GB_RIGHT);
+                /* Right has a line of its own: with A (jump right) or B (run right) */
+                assert(arcade_key(BUTTON_LEFT,false) && arc.keys==(GB_RIGHT|GB_A));arcade_key(BUTTON_LEFT,true);
+                assert(arcade_key(BUTTON_DOWN,false) && arc.keys==(GB_RIGHT|GB_B));arcade_key(BUTTON_DOWN,true);arcade_key(BUTTON_RIGHT,true);
+                /* Left shares the ADC with A and B: its jump is the screen's */
+                assert(arcade_key(BUTTON_UP,false));arc.touch=arc_side_keys_at(240,700);assert((arc.touch|arc.keys)==(GB_LEFT|GB_A));
+                arc.touch=0;arcade_key(BUTTON_UP,true);assert(!arc.keys);
+                /* paused (the menu up): the volume keys are the volume's, Play and Next do nothing */
                 arc_pause(true);
+                assert(!arcade_key(BUTTON_UP,false) && !arcade_key(BUTTON_DOWN,false) && arcade_key(BUTTON_LEFT,false) && arcade_key(BUTTON_RIGHT,false) && !arc.keys);
+                arcade_key(BUTTON_LEFT,true);arcade_key(BUTTON_RIGHT,true);
+                /* the screen set upside down: the power key at the right end, the same places the other way round
+                 * (the volume keys come in swapped, sl_flip_key) */
+                arc_opt.side=0;arc_blit();memcpy(up,arc.px,sizeof up);arc_opt.side=1;   /* paused: the picture as it is now */
                 sl_flipped=true;arc_blit();
                 for(int Y=0;Y<ARC_PIC_H;Y++)for(int X=0;X<ARC_PIC_W;X++)assert(arc.px[(ARC_PIC_W-1-X)*ARC_PIC_H+Y]==up[Y*ARC_PIC_W+X]);
-                assert(arc_side_keys_at(80,720)==GB_UP && arc_side_keys_at(280,720)==GB_DOWN && arc_side_keys_at(420,720)==GB_SELECT &&
-                       arc_side_keys_at(80,100)==GB_A && arc_side_keys_at(420,100)==GB_START);
-                arc_pause(false);assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_RIGHT);arcade_key(BUTTON_UP,true);arc_pause(true);
-                sl_flipped=false;
+                assert(arc_side_keys_at(80,720)==GB_UP && arc_side_keys_at(400,720)==GB_DOWN && arc_side_keys_at(80,100)==GB_A);
+                arc_pause(false);
+                assert(arcade_key(BUTTON_RIGHT,false) && arc.keys==GB_LEFT);arcade_key(BUTTON_RIGHT,true);      /* Next */
+                assert(arcade_key(BUTTON_LEFT,false) && arc.keys==GB_B);arcade_key(BUTTON_LEFT,true);          /* Play */
+                assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_A);arcade_key(BUTTON_UP,true);              /* Volume down */
+                assert(arcade_key(BUTTON_DOWN,false) && arc.keys==GB_RIGHT);arcade_key(BUTTON_DOWN,true);      /* Volume up */
+                sl_flipped=false;arc_blit();
+                /* Start, pressed once from the menu as the game goes on */
+                for(int i=0;i<10;i++)frame(17);
+                arc_screen_cb(NULL);frame(300);row=ARC_ROW("START");assert(row);lv_obj_send_event(row,LV_EVENT_CLICKED,NULL);
+                for(int i=0;i<60;i++)frame(17);
+                assert(!arc.sheet && !arc.paused && arc.pulse==GB_START && arc.pulse_frames==0);
+                /* back from Now Playing pulled up over it (a panel): paused, and the menu says so */
+                np_show();for(int i=0;i<20;i++)frame(30);assert(arc.paused && arc.held);
+                np_hide(0);for(int i=0;i<30;i++)frame(17);
+                assert(arc.paused && arc.sheet && acts_open_now && ARC_ROW("Resume"));
+                row=ARC_ROW("Resume");lv_obj_send_event(row,LV_EVENT_CLICKED,NULL);for(int i=0;i<40;i++)frame(17);
+                {uint32_t f0=arc.frames;for(int i=0;i<30;i++)frame(17);assert(!arc.paused && !arc.sheet && arc.frames>f0+10);}
+                #undef ARC_ROW
                 arc_cfg_save();{char want[40];snprintf(want,sizeof want,"ARCADE1 %d %d %d %d 1\n",arc_opt.pal,arc_opt.fx,arc_opt.cc,arc_opt.sound);assert(fake_has(ARC_CFG,want));}
+                arc_pause(true);arc_opt.side=0;arc_blit();memcpy(up,arc.px,sizeof up);arc_opt.side=1;arc_blit();
                 arc_opt.side=0;arc_layout();frame(50);
                 assert(!lv_obj_has_flag(arc.pad,LV_OBJ_FLAG_HIDDEN) && lv_obj_has_flag(arc.side,LV_OBJ_FLAG_HIDDEN) && !lv_obj_has_flag(sb,LV_OBJ_FLAG_HIDDEN));
                 assert(lv_obj_get_x(arc.screen)==0 && lv_obj_get_y(arc.screen)==ARC_PIC_Y && !memcmp(up,arc.px,sizeof up));
                 arc_cfg_save();arc_pause(false);
-                static const char *const words[]={"Hold sideways","The volume keys are left and right. Play is A, Next is B.","Not enough memory to open this right now."};
+                static const char *const words[]={"Hold sideways","Along the top from the power key: Left, B, A, Right. Tap right of the game for A.",
+                                                  "Not enough memory to open this right now."};
                 int l0=global_settings.sloppy_language;
                 for(int l=1;l<=SL_LANG_LAST;l++){global_settings.sloppy_language=l;
                     for(unsigned q=0;q<ARRAYLEN(words);q++)assert(strcmp(sl_tr(words[q]),words[q])!=0);}
                 global_settings.sloppy_language=l0;
-                printf("PASS: Arcade held sideways: the picture a quarter turn, the side keys left, right, A and B, the screen's six, both ways up.\n");
+                printf("PASS: Arcade held sideways: turned on from the menu it plays on; the keys along the top Left, B, A, Right; A right of the game, Up and Down left of it, nothing drawn; Start from the menu; both ways up.\n");
             }
             /* leaving keeps the place, the picture and the battery save (Up held as it goes) */
             arc.touch=GB_UP;for(int i=0;i<4;i++)frame(17);
@@ -2674,6 +2729,12 @@ int main(void) {
     global_settings.stereo_width=100;global_settings.channel_config=SOUND_CHAN_STEREO;
     global_settings.sloppy_notifications=1;   /* the history and banners most checks below are about; toasts are tested on their own */
     lv_init();lv_tick_set_cb(ticks);disp=lv_display_create(W,H);
+    {   /* the lag lines name the slowest timer of a pass: a 40 ms one, over a quick one after it */
+        lv_timer_t *slow=lv_timer_create(test_slow_timer,0,NULL),*quick=lv_timer_create(test_quick_timer,0,NULL);
+        lv_timer_slowest_ms=0;lv_timer_slowest_cb=NULL;lv_timer_handler();
+        assert(lv_timer_slowest_cb==(void*)test_slow_timer && lv_timer_slowest_ms==40);
+        lv_timer_delete(slow);lv_timer_delete(quick);
+    }
     static uint16_t buffer[W*100] __attribute__((aligned(64)));   /* LVGL asserts (and spins) on a misaligned draw buffer */
     lv_display_set_color_format(disp,LV_COLOR_FORMAT_RGB565);
     lv_display_set_buffers(disp,buffer,NULL,sizeof(buffer),LV_DISPLAY_RENDER_MODE_PARTIAL);lv_display_set_flush_cb(disp,render);
@@ -4739,6 +4800,20 @@ int main(void) {
         assert(access(DB_USB_NOTE,F_OK)==0&&db_update_state==dbu);
         unlink(DB_USB_NOTE);test_lib_begin_state=SL_LIB_READY;lib_state=saved;
     }
+    {   /* 13 Nov: a new build copied over USB. Rockbox's "reboot now?" never
+         * showed over GabagoolOS and the player sat on the USB screen until
+         * the power key; now it restarts into the new build itself, once the
+         * USB screen has gone and the log is back on the card */
+        bool running=sl_power_running;int reboots=test_reboots;
+        sl_power_running=true;test_usb_new_build=true;
+        handle_button(SYS_USB_CONNECTED);unlink(DB_USB_NOTE);
+        assert(test_usb_boot_taken&&test_reboots==reboots+1&&lbf_log_has("usb: a new build came over USB: restarting into it"));
+        test_usb_new_build=false;handle_button(SYS_USB_CONNECTED);unlink(DB_USB_NOTE);
+        assert(test_reboots==reboots+1);                                    /* nothing new: no restart */
+        sl_power_running=false;test_usb_new_build=true;test_usb_boot_taken=true;
+        assert(!sloppy_boot_changed());                                     /* the classic UI's: Rockbox asks */
+        test_usb_new_build=false;sl_power_running=running;
+    }
     {   /* 5 Nov: the USB screen stayed lit for as long as the Mac was
          * attached. It goes dark after our sleep time, even when the user's
          * own timeouts are "always on", and ours (0, the UI's idle policy)
@@ -4827,6 +4902,16 @@ int main(void) {
     {int hx=snake_state.x[0];snake_tick(NULL);assert(snake_state.x[0]==hx);}
     lv_obj_send_event(lv_obj_get_parent(snake_pause_label),LV_EVENT_CLICKED,NULL);
     assert(!snake_paused);
+    {   /* the screen keeps up with the board, only the tiles that changed handed over */
+        for(int i=0;i<25;i++)frame(16);
+        lv_refr_now(NULL);   /* the board may have moved after this frame's refresh */
+        lv_area_t a;lv_obj_get_coords(snake_board,&a);long bad=0;int bx0=W,by0=H,bx1=0,by1=0;
+        for(int y=0;y<SNAKE_BOARD;y++)for(int x=0;x<SNAKE_BOARD;x++)
+            if(pixels[(a.y1+y)*W+a.x1+x]!=snake_px[y*SNAKE_BOARD+x]){bad++;
+                if(x<bx0)bx0=x;if(y<by0)by0=y;if(x>bx1)bx1=x;if(y>by1)by1=y;}
+        if(bad)printf("snake screen: %ld pixels not the board's, in %d,%d-%d,%d\n",bad,bx0,by0,bx1,by1);
+        assert(bad==0);
+    }
     assert(snake_key(BUTTON_UP) && snake_state.next_dy==-1 && snake_started);
     snake_state.food_x=snake_state.x[0]+snake_state.next_dx;snake_state.food_y=snake_state.y[0]+snake_state.next_dy;
     snake_tick(NULL);assert(sfx_last==SFX_SNAKE_EAT);
@@ -4888,6 +4973,18 @@ int main(void) {
         assert(st->next_dx==1 && st->next_dy==0);
         snake_swipe_move(241,522);
         assert(st->has_queued_turn && st->queued_dx==0 && st->queued_dy==1);
+        /* a short or slanted flick still turns at the lift; a tap does not */
+        snake_reset(false);snake_steer(0,-1);snk_step_at=snk_now()-period/2;
+        snake_swipe_begin(200,500);snake_swipe_move(210,503);assert(st->next_dx==0);
+        snake_swipe_end(211,504);assert(st->next_dx==1 && st->next_dy==0);
+        snake_reset(false);snake_steer(0,-1);snk_step_at=snk_now()-period/2;
+        snake_swipe_begin(200,500);snake_swipe_move(214,512);assert(st->next_dx==0);
+        snake_swipe_end(214,512);assert(st->next_dx==1 && st->next_dy==0);
+        snake_reset(false);snake_steer(0,-1);snk_step_at=snk_now()-period/2;
+        snake_swipe_begin(200,500);snake_swipe_end(204,503);assert(st->next_dx==0 && st->next_dy==-1);
+        snake_reset(false);snake_steer(0,-1);snk_step_at=snk_now()-period/2;
+        snake_swipe_begin(200,500);snake_swipe_move(220,501);snake_swipe_end(222,509);
+        assert(st->next_dx==1 && !st->has_queued_turn);
         /* a U-turn is refused */
         snake_reset(false);snake_steer(0,-1);assert(snake_started);
         snk_step_at=snk_now()-period/2;snake_steer(0,1);assert(st->next_dy==-1 && !st->has_queued_turn);
@@ -5588,6 +5685,15 @@ int main(void) {
         for(int i=0;i<100&&uq_next_count<60;i++)frame(100);
         lv_obj_scroll_to_y(uq_list,20*UQ_ROW_H,LV_ANIM_OFF);int at=lv_obj_get_scroll_y(uq_list);uq_build();   /* scrolled down: the place is kept */
         assert(uq_next_count==UQ_FIRST+at/UQ_ROW_H && lv_obj_get_scroll_y(uq_list)==at);
+        {   /* sixteen songs played earlier are sixteen rows above, not sixteen more reads of the playing song's
+             * name from the card (with its cache cold over Bluetooth they were most of a 411 ms open on the R1) */
+            int was_n=hist_recent_n,was[HIST_RECENT];memcpy(was,hist_recent_t,sizeof was);
+            uint32_t now=hist_clock(),wasw[HIST_RECENT];memcpy(wasw,hist_recent_w,sizeof wasw);
+            hist_recent_n=0;for(int k=0;k<UQ_EARLIER;k++)hist_recent_push(200+k,now-60*(k+1));
+            lv_obj_scroll_to_y(uq_list,0,LV_ANIM_OFF);reads=track_info_reads;uq_build();
+            assert(uq_next_count==UQ_FIRST && track_info_reads-reads<=1+uq_queue_count+UQ_FIRST+4 && lbf_log_has("reading names)"));
+            hist_recent_n=was_n;memcpy(hist_recent_t,was,sizeof was);memcpy(hist_recent_w,wasw,sizeof wasw);uq_build();
+        }
         uq_close();frame(300);started=was_started;global_settings.repeat_mode=was_repeat;
     }
     started=-1;insert_fail=2;assert(!play_list(sl_lib.songs_by_title,100,0,false));
@@ -5807,8 +5913,22 @@ int main(void) {
         np_img_album=-1;hidden_if_changed(np_art_img,true);   /* the test's covers go with it */
         strlcpy(test_track.path,p0,sizeof test_track.path);np_update(true);frame(300);
     }
+    {   /* 18 Nov, a test R1: a song's own tags not read yet when it started, and Now Playing kept
+         * its file's name and "Unknown artist" for the whole song. The library's tags (the same
+         * file's) stand in, and the file's own show when they come */
+        int t=sl_lib_find_path(test_track.path);assert(t>=0);
+        const char *t0=test_track.title,*a0=test_track.artist,*aa0=test_track.albumartist;
+        test_track.title=NULL;test_track.artist=NULL;test_track.albumartist=NULL;np_update(false);frame(100);
+        assert(!strcmp(lv_label_get_text(np_title),sl_lib.tracks[t].title)&&strcmp(lv_label_get_text(np_artist),"Unknown artist"));
+        assert(!strcmp(lv_label_get_text(np_artist),sl_zune()?lv_label_get_text(np_artist):sl_track_artist(t)));
+        test_track.title="Tags Came Late";test_track.artist="The Late Tags";np_update(false);frame(100);   /* not a new song: only its tags */
+        assert(!strcmp(lv_label_get_text(np_title),"Tags Came Late")&&strstr(lv_label_get_text(np_artist),sl_zune()?"LATE":"The Late Tags"));
+        test_track.title=t0;test_track.artist=a0;test_track.albumartist=aa0;np_update(true);frame(100);
+    }
     {   /* the edge cases: no tags, no bit rate, no list place; very long names; shuffle shown on the button */
         const char *t0=test_track.title,*a0=test_track.artist;unsigned long br=test_track.bitrate;
+        char path0[MAX_PATH];strlcpy(path0,test_track.path,sizeof path0);
+        strlcpy(test_track.path,"/Music/Loose/untagged song.mp3",sizeof test_track.path);   /* not in the library either: no tags anywhere */
         char want[64];const char *slash=strrchr(test_track.path,'/');strlcpy(want,slash?slash+1:test_track.path,sizeof want);
         char *dot=strrchr(want,'.');if(dot)*dot=0;
         test_track.title=NULL;test_track.artist=NULL;test_track.albumartist=NULL;test_track.bitrate=0;
@@ -5842,7 +5962,7 @@ int main(void) {
           lv_obj_remove_flag(lyr_btn,LV_OBJ_FLAG_HIDDEN);np_update(false);lv_obj_update_layout(np);assert(lv_obj_get_x(np_queue)+56+8==lv_obj_get_x(lyr_btn));
           lv_obj_add_flag(lyr_btn,LV_OBJ_FLAG_HIDDEN);np_update(false);lv_obj_update_layout(np);assert(lv_obj_get_x(np_queue)==W-8-56);
           lv_obj_update_flag(lyr_btn,LV_OBJ_FLAG_HIDDEN,lh);np_update(false); }
-        test_track.title=t0;test_track.artist=a0;test_track.bitrate=br;np_update(true);frame(100);
+        test_track.title=t0;test_track.artist=a0;test_track.bitrate=br;strlcpy(test_track.path,path0,sizeof test_track.path);np_update(true);frame(100);
     }
     {   /* vinyl mode: a turntable instead of the cover; the label turns, the arm follows the song, drag to scratch */
         SFX_RESET();
@@ -6020,6 +6140,15 @@ int main(void) {
         sl_power.mode=SL_POWER_LOCKED;sl_power_apply();frame(100);
         assert(lp_card && !lv_obj_has_flag(lp_card,LV_OBJ_FLAG_HIDDEN) && lp_art_ready);
         assert(!strcmp(lv_label_get_text(lp_title),"Blue Hours"));
+        {   /* quick skips: the song before's picture came first, the new one is taken when it lands */
+            static uint16_t other_px[300*300];
+            for(int i=0;i<300*300;i++) other_px[i]=0xf800;
+            uint16_t before=lp_art_buf[0];
+            test_bitmap.data=(void*)other_px;test_aa_hid=2;lp_refresh();
+            assert(lp_art_buf[0]!=before && lp_art_buf[0]==0xf800 && np_img_hid==2);
+            test_bitmap.data=(void*)art_px;test_aa_hid=1;lp_refresh();
+            assert(lp_art_buf[0]==before && np_img_hid==1);
+        }
         lv_obj_update_layout(lp_card);
         lv_area_t pp;lv_obj_get_coords(lp_btn[1],&pp);
         int cx=(pp.x1+pp.x2)/2,cy=(pp.y1+pp.y2)/2;
@@ -10506,6 +10635,19 @@ int main(void) {
             page_pop();for(int i=0;i<20;i++)pf_frame(16);}
         pf_end();
         }
+        if(!only||!strcmp(only,"snakew")){   /* the painter alone on a 28-long snake turning at every cell (turns cost ~4x a straight cell) */
+        snake_page();for(int i=0;i<10;i++)frame(16);
+        snake_reset(false);struct sl_snake_state *ss=&snake_state;struct sl_snake_state keep=*ss;int n=0;
+        for(int k=27;k>=0;k--){ss->x[n]=1+(k+1)/2;ss->y[n++]=k/2;}
+        ss->len=n;ss->dx=ss->next_dx=1;ss->dy=ss->next_dy=0;ss->alive=true;
+        uint32_t t=snk_now();snake_draw(t);
+        struct timespec ta,tb;clock_gettime(CLOCK_THREAD_CPUTIME_ID,&ta);
+        for(int i=0;i<60*reps;i++){snk_step_at=t-(uint32_t)(i*7%120);snake_draw(t);}
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID,&tb);
+        uint32_t h=2166136261u;for(int i=0;i<SNAKE_BOARD*SNAKE_BOARD;i++)h=(h^snake_px[i])*16777619u;
+        printf("perf snake winding: painter R1 est %.1f ms a frame (hash %08x)\n",((tb.tv_sec-ta.tv_sec)*1e9+(tb.tv_nsec-ta.tv_nsec))/(60e6*reps)*PF_K,h);
+        *ss=keep;page_pop();for(int i=0;i<20;i++)frame(16);
+        }
         if(!only||!strcmp(only,"quiz")){   /* the quiz menu, then a music game's first question */
         pf_begin("quiz open");
         for(int r=0;r<reps;r++){lib_state=SL_LIB_READY;quiz_page();for(int i=0;i<40;i++)pf_frame(16);
@@ -10693,6 +10835,14 @@ int main(void) {
         pf_begin("home intro");
         for(int r=0;r<reps/4+1;r++){home_intro_ms=60;appearance_reload((void*)2);for(int i=0;i<70;i++)pf_frame(16);home_intro_ms=0;while(npages>1){page_pop();frame(400);}}
         pf_end();devhud_show(true);}
+        if(only&&!strcmp(only,"homeidle")){   /* PROBE: home left alone for a minute after a start */
+            while(npages>1){page_pop();frame(400);}for(int i=0;i<60;i++)frame(16);
+            pf_begin("home idle");
+            for(int i=0;i<(getenv("IDLELONG")?40000:3750);i++){long px0=flushed_px;struct timespec a,b;clock_gettime(CLOCK_THREAD_CPUTIME_ID,&a);pf_frame(16);clock_gettime(CLOCK_THREAD_CPUTIME_ID,&b);
+                long px=flushed_px-px0;double us=(b.tv_sec-a.tv_sec)*1e6+(b.tv_nsec-a.tv_nsec)/1e3;
+                if(px||us*PF_K/1000>20)fprintf(stderr,"IDLE t=%6.2fs est %6.1f ms px %7ld\n",i*0.016,us*PF_K/1000,px);}
+            pf_end();
+        }
         if(!only||!strcmp(only,"home")){
         pf_begin("home scroll");
         for(int r=0;r<5*reps;r++)for(int dir=0;dir<2;dir++){

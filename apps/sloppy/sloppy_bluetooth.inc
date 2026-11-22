@@ -587,9 +587,21 @@ static void sl_bt_job_cb(lv_timer_t *timer)
     /* A quiet re-check only redraws the page when something changed. */
     bool changed = true;
     if (result.job == SL_BT_JOB_REFRESH && sl_bt_known)
-        changed = memcmp(&sl_bt_state, &result.state, sizeof result.state) ||
-                  sl_bt_count != result.count ||
-                  memcmp(sl_bt_found, result.devices, sl_bt_count * sizeof sl_bt_found[0]);
+    {
+        bool st = memcmp(&sl_bt_state, &result.state, sizeof result.state) != 0;
+        bool n = sl_bt_count != result.count;
+        bool list = !n && memcmp(sl_bt_found, result.devices, sl_bt_count * sizeof sl_bt_found[0]) != 0;
+        changed = st || n || list;
+        /* each change redraws the whole page (130 ms on the R1, every 4 s
+         * at times, Nov 13): say which, now and then */
+        static uint32_t said;
+        if (changed && (!said || lv_tick_elaps(said) > 60000))
+        {
+            said = lv_tick_get();
+            sl_log("bluetooth: page redrawn after a look:%s%s%s (%d devices, was %d)", st ? " the state" : "",
+                   n ? " how many devices" : "", list ? " the devices or their order" : "", result.count, sl_bt_count);
+        }
+    }
     const char *message = NULL;
     switch (result.job)
     {
@@ -1283,7 +1295,19 @@ static void sl_bt_watch_cb(lv_timer_t *timer)
     if (!sl_bt_page_obj || pages[npages - 1] != sl_bt_page_obj || sl_power_hides_ui()) return;
     struct hiby_bt_aap a;
     sl_bt_aap_status(&a);
-    if (memcmp(&a, &sl_bt_aap_shown, sizeof a)) sl_bt_refresh_soon();   /* AirPods said something new */
+    /* AirPods said something new: field by field, the padding is no news */
+    const struct hiby_bt_aap *o = &sl_bt_aap_shown;
+    if (a.up != o->up || a.left != o->left || a.right != o->right || a.box != o->box || a.left_charging != o->left_charging ||
+        a.right_charging != o->right_charging || a.box_charging != o->box_charging || a.in_ear != o->in_ear || a.noise != o->noise)
+    {
+        static uint32_t said;
+        if (!said || lv_tick_elaps(said) > 60000)
+        {
+            said = lv_tick_get();
+            sl_log("bluetooth: page redrawn: AirPods say up %d, %d/%d/%d%%, in ear %d, noise %d", a.up, a.left, a.right, a.box, a.in_ear, a.noise);
+        }
+        sl_bt_refresh_soon();
+    }
     if (!sl_bt_busy && !sl_bt_scanning && !sl_bt_silent) sl_bt_begin(SL_BT_JOB_REFRESH, "");
 }
 static void sl_bt_deleted(lv_event_t *e)
@@ -1298,6 +1322,10 @@ static void sl_bt_rebuild(void)
 {
     if (!sl_bt_page_obj || !sl_bt_body) return;
     int previous_scroll = lv_obj_get_scroll_y(sl_bt_body);
+    /* what the AirPods said, as of this build, connected or not: kept only
+     * by their rows, it stayed empty with nothing connected and every look
+     * every 4 s found it "changed" and built the page again (19 Nov) */
+    sl_bt_aap_status(&sl_bt_aap_shown);
     lv_obj_clean(sl_bt_body);
     sl_bt_busy_label = sl_bt_scan_label = NULL;
     sl_bt_switch = NULL;

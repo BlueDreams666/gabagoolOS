@@ -103,7 +103,7 @@ static void ota_p(char *b, size_t n, const char *rel) { snprintf(b, n, "%s/%s", 
 static const unsigned char *ota_key(void)
 {
 #if defined(SIMULATOR) || defined(SLOPPY_NET_TEST)
-    if (sl_ota_test_key_set) return sl_ota_test_key;
+    return sl_ota_test_key_set ? sl_ota_test_key : NULL;   /* the tests' own pair only: never the release key */
 #endif
     if (!SL_OTA_KEY_SET) return NULL;
     for (int i = 0; i < 32; i++) if (ota_key_slot[i]) return ota_key_slot;
@@ -1628,7 +1628,7 @@ void sl_ota_hold(bool hold)
 }
 
 /* ------------------------------------------------------------ the upload */
-int sl_ota_upload_begin(uint64_t len)
+static int upload_begin_as(uint64_t len, bool from_net)
 {
     pthread_mutex_lock(&ota_lock);
     int code = 0;
@@ -1649,6 +1649,8 @@ int sl_ota_upload_begin(uint64_t len)
             ota.up_got = 0; ota.up_len = len;
             ota.st.rx = 0; ota.st.rx_total = len;
             ota.st.state = SL_OTA_RECEIVING; ota.st.why = SL_OTA_OK;
+            ota.st.from_net = from_net;
+            if (from_net) ota.st.net = SL_OTA_NET_DOWNLOADING;
             ota.found[0] = '\0';
         }
     }
@@ -1657,6 +1659,7 @@ int sl_ota_upload_begin(uint64_t len)
     pthread_mutex_unlock(&ota_lock);
     return code;
 }
+int sl_ota_upload_begin(uint64_t len) { return upload_begin_as(len, false); }
 bool sl_ota_upload_write(const void *b, size_t n)
 {
     pthread_mutex_lock(&ota_lock);
@@ -1693,17 +1696,168 @@ void sl_ota_upload_end(bool complete)
     pthread_mutex_unlock(&ota_lock);
 }
 
+/* ------------------------------------------------------------ online */
+static struct { bool up, want_download; volatile bool stop; } on;
+static bool feed_name_ok(const char *f)
+{
+    size_t n = strlen(f), e = strlen(SL_OTA_EXT);
+    if (n <= e || n > 80 || strcmp(f + n - e, SL_OTA_EXT) || f[0] == '.' || strstr(f, "..")) return false;
+    for (const char *c = f; *c; c++) if (!isalnum((unsigned char)*c) && !strchr("._-", *c)) return false;
+    return true;
+}
+bool sl_ota_feed_parse(const char *t, char *ver, size_t vn, char *file, size_t fn, uint64_t *size)
+{
+    ver[0] = file[0] = '\0';
+    *size = 0;
+    if (strncmp(t, "GBFEED1", 7) || (t[7] != '\n' && t[7] != '\r')) return false;
+    for (const char *l = t; *l; )
+    {
+        size_t n = strcspn(l, "\r\n");
+        if (n > 8 && !strncmp(l, "version ", 8) && n - 8 < vn) snprintf(ver, vn, "%.*s", (int)(n - 8), l + 8);
+        else if (n > 5 && !strncmp(l, "file ", 5) && n - 5 < fn) snprintf(file, fn, "%.*s", (int)(n - 5), l + 5);
+        else if (n > 5 && !strncmp(l, "size ", 5)) *size = strtoull(l + 5, NULL, 10);
+        l += n;
+        while (*l == '\r' || *l == '\n') l++;
+    }
+    bool v = ver[0] && isdigit((unsigned char)ver[0]);
+    for (const char *c = ver; *c && v; c++) v = isdigit((unsigned char)*c) || *c == '.';
+    return v && feed_name_ok(file) && *size > 0 && *size <= (1ull << 31);
+}
+static char on_file[96];
+static bool net_sink(void *ctx, const char *d, size_t n)
+{
+    uint64_t *got = ctx;
+    if (on.stop || !sl_ota_upload_write(d, n)) return false;
+    *got += n;
+    return true;
+}
+static void *net_loop(void *unused)
+{
+    (void)unused;
+    char ua[32], url[300], file[96];
+    snprintf(ua, sizeof ua, "GabagoolOS/%s", OTA_RUNNING);
+    pthread_mutex_lock(&ota_lock);
+    bool dl = on.want_download;
+    on.want_download = false;
+    snprintf(file, sizeof file, "%s", on_file);
+    uint64_t size = ota.st.net_size;
+    pthread_mutex_unlock(&ota_lock);
+    if (!dl)
+    {
+        static char t[1024];
+        char ver[16], f[96];
+        uint64_t sz;
+        snprintf(url, sizeof url, "%s%s", SL_OTA_FEED_BASE, SL_OTA_FEED_NAME);
+        int status = sl_net_http_get(url, ua, t, sizeof t, NULL, 20000);
+        bool ok = status == 200 && sl_ota_feed_parse(t, ver, sizeof ver, f, sizeof f, &sz);
+        pthread_mutex_lock(&ota_lock);
+        if (on.stop) ota.st.net = SL_OTA_NET_IDLE;
+        else if (!ok) ota.st.net = SL_OTA_NET_FAILED;
+        else
+        {
+            snprintf(ota.st.net_version, sizeof ota.st.net_version, "%s", ver);
+            ota.st.net_size = sz;
+            snprintf(on_file, sizeof on_file, "%s", f);
+            ota.st.net = ver_cmp(ver, OTA_RUNNING) > 0 ? SL_OTA_NET_NEWER : SL_OTA_NET_LATEST;
+        }
+        sl_log("update: online: %s (HTTP %d)", !ok ? "no answer that makes sense" : ota.st.net == SL_OTA_NET_NEWER ? "a newer release" : "this is the newest", status);
+        pthread_mutex_unlock(&ota_lock);
+    }
+    else
+    {
+        int code = upload_begin_as(size, true);
+        if (code)
+        {
+            pthread_mutex_lock(&ota_lock);
+            if (code == 507) { ota.st.state = SL_OTA_REJECTED; ota.st.why = SL_OTA_E_SPACE; ota.st.net = SL_OTA_NET_NEWER; }
+            else if (code == 503) { ota.st.state = SL_OTA_REJECTED; ota.st.why = SL_OTA_E_USB; ota.st.net = SL_OTA_NET_NEWER; }
+            else ota.st.net = SL_OTA_NET_FAILED;
+            sl_log("update: download not started (%d)", code);
+            pthread_mutex_unlock(&ota_lock);
+        }
+        else
+        {
+            uint64_t got = 0;
+            snprintf(url, sizeof url, "%s%s", SL_OTA_FEED_BASE, file);
+            int status = sl_net_http_stream(url, ua, 30000, net_sink, &got, &on.stop);
+            bool stopped = on.stop, complete = status == 200 && got == size && !stopped;
+            sl_ota_upload_end(complete);
+            pthread_mutex_lock(&ota_lock);
+            if (complete) ota.st.net = SL_OTA_NET_IDLE;   /* the updater has it now: LOOKING, then FOUND */
+            else if (!ota.hold)
+            {
+                /* nothing kept; said as not reaching it, not as a bad file */
+                ota.st.state = SL_OTA_NONE;
+                ota.st.why = SL_OTA_OK;
+                ota.st.from_net = false;
+                ota.st.net = stopped ? SL_OTA_NET_NEWER : SL_OTA_NET_FAILED;
+            }
+            else ota.st.net = SL_OTA_NET_NEWER;
+            sl_log("update: download of %s: %llu of %llu bytes, HTTP %d%s", file, (unsigned long long)got, (unsigned long long)size, status,
+                   complete ? "" : stopped ? ", stopped" : ", not kept");
+            pthread_mutex_unlock(&ota_lock);
+        }
+    }
+    pthread_mutex_lock(&ota_lock);
+    on.up = false;
+    ota_bump();
+    pthread_mutex_unlock(&ota_lock);
+    return NULL;
+}
+static bool net_start(void)                /* locked */
+{
+    pthread_t th;
+    pthread_attr_t a;
+    if (pthread_attr_init(&a)) return false;
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    on.up = pthread_create(&th, &a, net_loop, NULL) == 0;
+    pthread_attr_destroy(&a);
+    return on.up;
+}
+void sl_ota_check_online(void)
+{
+    pthread_mutex_lock(&ota_lock);
+    if (!on.up && !ota.hold && ota_key() && ota.up_fd < 0 && ota.st.state != SL_OTA_WORKING)
+    {
+        on.stop = false;
+        on.want_download = false;
+        ota.st.net = SL_OTA_NET_CHECKING;
+        if (!net_start()) ota.st.net = SL_OTA_NET_FAILED;
+        ota_bump();
+    }
+    pthread_mutex_unlock(&ota_lock);
+}
+bool sl_ota_download(void)
+{
+    pthread_mutex_lock(&ota_lock);
+    bool ok = !on.up && !ota.hold && ota_key() && ota.st.net == SL_OTA_NET_NEWER && ota.up_fd < 0 &&
+              ota.st.state != SL_OTA_WORKING && ota.st.state != SL_OTA_RECEIVING;
+    if (ok)
+    {
+        on.stop = false;
+        on.want_download = true;
+        ota.st.net = SL_OTA_NET_DOWNLOADING;
+        ok = net_start();
+        if (!ok) ota.st.net = SL_OTA_NET_NEWER;
+        ota_bump();
+    }
+    pthread_mutex_unlock(&ota_lock);
+    return ok;
+}
+void sl_ota_net_cancel(void) { on.stop = true; }
+
 #if defined(SIMULATOR) || defined(SLOPPY_NET_TEST)
 size_t sl_ota_test_static_bytes(void) { return sizeof ota + sizeof cr; }
 void sl_ota_test_reset(void)
 {
     pthread_mutex_lock(&ota_lock);
     ota.stop = true;
+    on.stop = true;
     pthread_mutex_unlock(&ota_lock);
     for (;;)
     {
         pthread_mutex_lock(&ota_lock);
-        bool up = ota.up;
+        bool up = ota.up || on.up;
         pthread_mutex_unlock(&ota_lock);
         if (!up) break;
         usleep(2000);

@@ -432,12 +432,39 @@ void queue_post(struct event_queue *q, long id, intptr_t data)
     /* overflow protect - unblock any thread waiting at this index */
     queue_do_unblock_sender(q->send, wr);
 
+#ifdef HAVE_TICK_LOCK
+    if (kernel_off_thread())
+    {
+        corelock_unlock(&q->cl);
+        restore_irq(oldlevel);
+        kernel_wake_later(q);           /* the scheduler's thread wakes the waiter */
+        return;
+    }
+#endif
     /* Wakeup a waiting thread if any */
     queue_wake_waiter(q);
 
     corelock_unlock(&q->cl);
     restore_irq(oldlevel);
 }
+
+#ifdef HAVE_TICK_LOCK
+/* On the scheduler's thread: wake whoever waits on a queue that another OS
+ * thread posted to (kernel_wake_later) */
+void queue_wake_deferred(void)
+{
+    struct event_queue *q;
+    while ((q = kernel_wake_take()) != NULL)
+    {
+        int oldlevel = disable_irq_save();
+        corelock_lock(&q->cl);
+        if (q->read != q->write)
+            queue_wake_waiter(q);
+        corelock_unlock(&q->cl);
+        restore_irq(oldlevel);
+    }
+}
+#endif
 
 #ifdef HAVE_EXTENDED_MESSAGING_AND_NAME
 /* IRQ handlers are not allowed use of this function - we only aim to

@@ -49,6 +49,9 @@ struct snk_prim {
     float cx, cy, uax, uay, ubx, uby, sweep, sg;   /* arc: centre, end directions */
     float p0, p1;                   /* path parameter at a and at b, in cells */
     float gx0, gy0, gx1, gy1;       /* the piece itself, unpadded: it lies inside */
+    float tax, tay, tbx, tby;       /* which way the path runs at a and at b */
+    bool ok, jp, jn;                /* a true segment or quarter; joined at a to a true piece
+                                       before, at b to a true piece after (snk_beyond) */
     int x0, y0, x1, y1;             /* pixel box, clipped */
 };
 
@@ -375,6 +378,29 @@ static void snk_build_path(void)
             snk_nprim++;
         }
     }
+    for (int i = 0; i < snk_nprim; i++)
+    {
+        struct snk_prim *g = &snk_prim[i];
+        if (!g->arc)
+        {
+            float k = sqrtf(g->il2);
+            g->ok = g->il2 > 0;
+            g->tax = g->tbx = g->dx * k; g->tay = g->tby = g->dy * k;
+        }
+        else
+        {
+            g->ok = g->sweep > 1e-4f && g->sweep < 1.5718f &&
+                    fabsf(g->uax * g->uax + g->uay * g->uay - 1) < 1e-3f && fabsf(g->ubx * g->ubx + g->uby * g->uby - 1) < 1e-3f;
+            g->tax = -g->sg * g->uay; g->tay = g->sg * g->uax;
+            g->tbx = -g->sg * g->uby; g->tby = g->sg * g->ubx;
+        }
+    }
+    for (int i = 0; i < snk_nprim; i++)
+    {
+        struct snk_prim *g = &snk_prim[i], *p = i ? g - 1 : NULL, *n = i + 1 < snk_nprim ? g + 1 : NULL;
+        g->jp = g->ok && p && p->ok && p->bx == g->ax && p->by == g->ay;
+        g->jn = g->ok && n && n->ok && n->ax == g->bx && n->ay == g->by && n->p1 - n->p0 > 0.01f;
+    }
 }
 /* distance to a piece of path, the nearest point on it and its parameter */
 static inline float snk_prim_d(const struct snk_prim *g, float px, float py, float *qx, float *qy, float *prm)
@@ -440,9 +466,13 @@ static inline float snk_prim_far(const struct snk_prim *g, float px, float py)
  * those are asked. */
 static bool snk_owner_at(int i, float px, float py, float d, bool mid)
 {
-    for (int j = i - 2; j <= i + 2; j += mid ? 4 : 1)
+    /* the answer is the same in any order; by an end, the piece joined
+     * there is the one usually nearer, so it is asked first */
+    static const signed char order[2][4] = { { -1, 1, -2, 2 }, { -2, 2 } };
+    for (int o = 0; o < (mid ? 2 : 4); o++)
     {
-        if (j == i || j < 0 || j >= snk_nprim) continue;
+        int j = i + order[mid][o];
+        if (j < 0 || j >= snk_nprim) continue;
         /* outside a neighbour's box by 4 px, it is RMAX + 4 away at least:
          * farther than any pixel either pass draws (RMAX + 3), so it can't
          * be the nearer one. The exact distance cost four of every five
@@ -580,10 +610,43 @@ static float snk_widest(const struct snk_prim *g, const struct snk_paint *q)
 {
     return SNAKE_R + 1.8f * fmaxf(0, 1 - (g->p0 - snk_ph) * SNAKE_CELL / 22) + q->gulp_amp;
 }
+/* Past an end of its piece, where snk_prim_d measures from that end, a
+ * pixel is nearer the piece joined there when that piece runs on toward
+ * it: a step along it from the shared end comes nearer. snk_owner_at would
+ * say no (by a tie, too, behind the first end: the earlier piece wins it).
+ * About half of a turn's box is such pixels, each costing two roots and up
+ * to four neighbours' distances to throw away. Kept to clear cases: whole
+ * pieces, joined exactly, the pixel a quarter pixel or more on the far
+ * side (on the grid, half a pixel), so that the nearer piece is nearer by
+ * far more than a rounding. */
+static inline bool snk_beyond(int i, const struct snk_prim *g, float px, float py)
+{
+    bool at_a;
+    if (!g->jp && !g->jn) return false;
+    if (!g->arc)
+    {
+        float h = ((px - g->ax) * g->dx + (py - g->ay) * g->dy) * g->il2;
+        if (h < 0) at_a = true;
+        else if (h > 1) at_a = false;
+        else return false;
+    }
+    else
+    {
+        float vx = px - g->cx, vy = py - g->cy, l2 = vx * vx + vy * vy;
+        if (l2 <= 1e-6f) return false;
+        if (g->sg * (g->uax * vy - g->uay * vx) >= 0 && g->sg * (vx * g->uby - vy * g->ubx) >= 0) return false;
+        float ax = px - g->ax, ay = py - g->ay, bx = px - g->bx, by = py - g->by;
+        at_a = ax * ax + ay * ay <= bx * bx + by * by;
+    }
+    if (at_a)
+        return g->jp && (px - g->ax) * snk_prim[i - 1].tbx + (py - g->ay) * snk_prim[i - 1].tby < -0.25f;
+    return g->jn && (px - g->bx) * snk_prim[i + 1].tax + (py - g->by) * snk_prim[i + 1].tay > 0.25f;
+}
 /* one pixel of a piece's shadow, dropped 4 px: the plain way, any piece */
 static inline void snk_shadow_px(int i, const struct snk_prim *g, int x, int y, const struct snk_paint *q, bool mid)
 {
     float px = x + 0.5f, py = y + 0.5f - 4, qx, qy, prm;
+    if (!mid && snk_beyond(i, g, px, py)) return;
     float d = snk_prim_d(g, px, py, &qx, &qy, &prm);
     if (d > SNAKE_RMAX + 3) return;
     float r = snk_radius((prm - snk_ph) * SNAKE_CELL, q->gulp_s, q->gulp_amp);
@@ -595,6 +658,7 @@ static inline void snk_shadow_px(int i, const struct snk_prim *g, int x, int y, 
 static inline void snk_body_px(int i, const struct snk_prim *g, int x, int y, const struct snk_paint *q, bool mid, bool flat)
 {
     float px = x + 0.5f, py = y + 0.5f, qx, qy, prm;
+    if (!mid && snk_beyond(i, g, px, py)) return;
     float d = snk_prim_d(g, px, py, &qx, &qy, &prm);
     if (d > SNAKE_RMAX) return;
     float s = (prm - snk_ph) * SNAKE_CELL;
@@ -901,6 +965,52 @@ static float snk_u(uint32_t now)
     uint32_t at = snake_paused ? snk_pause_at : now;
     return snk_clamp01((int32_t)(at - snk_step_at) / (float)sl_snake_period(&snake_state));
 }
+/* What LVGL was last handed, to hand it only the tiles that differ: the
+ * box around everything redrawn spans head to tail, but along a gliding
+ * body the pixels come out the same, and flushing them was most of a
+ * frame on the R1 (60-80 ms a frame, 19 Nov). Up to SNK_RECTS boxes, so
+ * LVGL's list of areas never overflows into a whole-screen redraw. */
+#define SNK_TILE 24
+#define SNK_RECTS 12
+static uint16_t snk_given[SNAKE_BOARD * SNAKE_BOARD];
+static void snk_invalidate(int u0, int v0, int u1, int v1)
+{
+    int r[SNK_RECTS][4], n = 0;
+    bool over = false;
+    for (int ty = v0 / SNK_TILE * SNK_TILE; ty < v1; ty += SNK_TILE)
+    {
+        int y0 = ty < v0 ? v0 : ty, y1 = ty + SNK_TILE < v1 ? ty + SNK_TILE : v1;
+        int run0 = -1, run1 = -1;
+        for (int tx = u0 / SNK_TILE * SNK_TILE; tx < u1 + SNK_TILE; tx += SNK_TILE)
+        {
+            int x0 = tx < u0 ? u0 : tx, x1 = tx + SNK_TILE < u1 ? tx + SNK_TILE : u1;
+            bool diff = false;
+            for (int y = y0; x0 < x1 && y < y1 && !diff; y++)
+                diff = memcmp(&snake_px[y * SNAKE_BOARD + x0], &snk_given[y * SNAKE_BOARD + x0], (x1 - x0) * 2) != 0;
+            if (diff)
+            {
+                for (int y = y0; y < y1; y++)
+                    memcpy(&snk_given[y * SNAKE_BOARD + x0], &snake_px[y * SNAKE_BOARD + x0], (x1 - x0) * 2);
+                if (run0 < 0) run0 = x0;
+                run1 = x1;
+            }
+            else if (run0 >= 0)          /* a run of changed tiles ends: one box */
+            {
+                if (n < SNK_RECTS) { r[n][0] = run0; r[n][1] = y0; r[n][2] = run1; r[n][3] = y1; n++; }
+                else over = true;
+                run0 = -1;
+            }
+        }
+    }
+    lv_area_t b;
+    lv_obj_get_coords(snake_board, &b);
+    if (over) { n = 1; r[0][0] = u0; r[0][1] = v0; r[0][2] = u1; r[0][3] = v1; }
+    for (int i = 0; i < n; i++)
+    {
+        lv_area_t a = { b.x1 + r[i][0], b.y1 + r[i][1], b.x1 + r[i][2] - 1, b.y1 + r[i][3] - 1 };
+        lv_obj_invalidate_area(snake_board, &a);
+    }
+}
 static void snake_draw(uint32_t now)
 {
     if (!snake_board) return;
@@ -1045,14 +1155,7 @@ static void snake_draw(uint32_t now)
         if (snk_prev[3] > v1) v1 = snk_prev[3];
     }
     memcpy(snk_prev, snk_dirty, sizeof snk_prev);
-    if (u0 < u1 && v0 < v1)
-    {
-        lv_area_t a;
-        lv_obj_get_coords(snake_board, &a);
-        a.x2 = a.x1 + u1 - 1; a.y2 = a.y1 + v1 - 1;
-        a.x1 += u0; a.y1 += v0;
-        lv_obj_invalidate_area(snake_board, &a);
-    }
+    if (u0 < u1 && v0 < v1) snk_invalidate(u0, v0, u1, v1);
 }
 
 /* ---- words around the board ------------------------------------------------ */
@@ -1138,7 +1241,11 @@ static void snake_animate(uint32_t now)
     uint32_t t = now - snk_bump_at;
     int scale = 256;
     if (snk_bump_at && t < 320) scale = 256 + (int)(80 * sinf(t / 320.0f * 3.14159f) * (1 - t / 320.0f));
-    lv_obj_set_style_transform_scale(snake_score, scale, 0);
+    /* set only on a change: LVGL redraws an object for any style set, the
+     * same value or not (the shake alone redrew the whole board twice a
+     * frame) */
+    if (lv_obj_get_style_transform_scale_x(snake_score, 0) != scale)
+        lv_obj_set_style_transform_scale(snake_score, scale, 0);
     if (snk_bump_at && t < 700)
     {
         float k = t / 700.0f;
@@ -1147,14 +1254,15 @@ static void snake_animate(uint32_t now)
                        SNAKE_BY + snk_eaten_y * SNAKE_CELL - 12 - (int)(30 * snk_smooth(k)));
         lv_obj_set_style_opa(snake_plus, (lv_opa_t)(255 * (1 - k * k)), 0);
     }
-    else lv_obj_add_flag(snake_plus, LV_OBJ_FLAG_HIDDEN);
+    else hidden_if_changed(snake_plus, true);
     int shake = 0;
     if (!snake_state.alive && !snake_state.won && snk_die_at)
     {
         int32_t d = (int32_t)(now - snk_die_at) - 120;
         if (d > 0 && d < 480) shake = (int)(7 * sinf(d * 0.075f) * exp(-d / 140.0f));
     }
-    lv_obj_set_style_translate_x(snake_board, shake, 0);
+    if (lv_obj_get_style_translate_x(snake_board, 0) != shake)
+        lv_obj_set_style_translate_x(snake_board, shake, 0);
 }
 
 /* ---- rules ------------------------------------------------------------------ */
@@ -1399,6 +1507,18 @@ static void snake_swipe_move(int x, int y)
     snk_swipe_dir = dir;
     snk_ax = x; snk_ay = y;
 }
+/* A flick too short or too slanted to have turned by the lift still turns,
+ * the way it leaned most: a swipe is never dropped. A tap is not one. */
+#define SNK_FLICK_PX 8
+static void snake_swipe_end(int x, int y)
+{
+    int dx = x - snk_ax, dy = y - snk_ay, adx = abs(dx), ady = abs(dy);
+    if (snk_swipe_dir >= 0 || (adx > ady ? adx : ady) < SNK_FLICK_PX || adx == ady) return;
+    static const int sx[] = {0, 1, 0, -1}, sy[] = {-1, 0, 1, 0};
+    int dir = adx > ady ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0);
+    snk_swipe_dir = dir;
+    snake_steer(sx[dir], sy[dir]);
+}
 /* The swipes come from the driver's trail, every sample in order, not from
  * the one point touch_read sees each frame: a game frame on the R1 takes
  * 50-90 ms and a quick flick could start and end inside one, never seen
@@ -1425,7 +1545,11 @@ static void snake_trail_feed(void)
             snk_trail_ok = snake_takes_swipe(y);
             if (snk_trail_ok) snake_swipe_begin(x, y);
         }
-        else if (snk_trail_ok && snk_trail_down) snake_swipe_move(x, y);
+        else if (snk_trail_ok && snk_trail_down)
+        {
+            snake_swipe_move(x, y);
+            if (!down) snake_swipe_end(x, y);
+        }
         snk_trail_down = down;
         if (!snake_trail_live()) { snake_trail_skip(); return; }   /* it died or paused on that turn */
     }

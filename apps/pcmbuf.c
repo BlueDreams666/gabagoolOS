@@ -79,6 +79,11 @@ void pcm_alsa_output_flush(void);
 
 /* Number of bytes played per second */
 #define BYTERATE            (pcmbuf_sampr * PCMBUF_SAMPLE_SIZE)
+/* SloppyOS: the least music left to fade over. A manual skip fades out
+   whatever is left, down to a tenth of a second: skipped again before the
+   buffer had refilled, with less than half a second left, the song cut off
+   instead of fading (a tester, 20 Nov). */
+#define CROSSFADE_MIN(auto_skip) ((auto_skip) ? DATA_LEVEL(2) : BYTERATE / 10)
 
 #if MEMORYSIZE > 2
 /* Keep watermark high for large memory target - at least (2s) */
@@ -756,7 +761,7 @@ void pcmbuf_start_track_change(enum pcm_track_change_type type)
 
         if ((crossfade_status == CROSSFADE_INACTIVE ||
              (!auto_skip && crossfade_status == CROSSFADE_START)) &&
-            pcmbuf_unplayed_bytes() >= DATA_LEVEL(2) &&
+            pcmbuf_unplayed_bytes() >= CROSSFADE_MIN(auto_skip) &&
             !low_latency_mode && !manual_cut)
         {
             switch (crossfade_setting)
@@ -1213,8 +1218,8 @@ static void crossfade_start(void)
      * has not yet been sent to the DMA */
     size_t unplayed = pcmbuf_unplayed_bytes();
 
-    /* Reject crossfade if less than .5s of data */
-    if (unplayed < DATA_LEVEL(2))
+    /* Reject crossfade if less than .5s of data (a tenth on a manual skip) */
+    if (unplayed < CROSSFADE_MIN(crossfade_auto_skip))
     {
         logf("crossfade rejected");
         crossfade_cancel();
