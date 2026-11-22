@@ -5,7 +5,7 @@
 <a href="https://github.com/BlueDreams666/gabagoolOS/releases/latest">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.png">
-  <img src="assets/hero-light.png" width="880" alt="gabagoolOS 1.2, Capicola. A neon sign reads: gabagool? ova haaaa! Your R1 just got made: fast, pretty new software for your HiBy R1. It runs from your SD card, and it's open source. Beside it, three R1s: the Songs list, Now Playing with Umbrella by Rihanna, and the lyrics picker for Here She Comes by Slowdive.">
+  <img src="assets/hero-light.png" width="880" alt="gabagoolOS 1.2, Capicola. A neon sign reads: gabagool? ova haaaa! Your R1 just got made: fast, pretty new software for your HiBy R1. It runs from your SD card, and it's open source. Beside it, three R1s: the Songs list, Now Playing with Umbrella by Rihanna, and the album Hit Me Hard and Soft by Billie Eilish.">
 </picture>
 </a>
 
@@ -83,19 +83,17 @@ We test every screen so you don't run into anything weird.
 
 ## no funny business
 
-It takes about ten minutes. Each [release](https://github.com/BlueDreams666/gabagoolOS/releases/latest)
-has a step-by-step guide, so give it a read first. The short version:
+Three steps, about ten minutes. Back up your card first, just in case.
 
-1. **Get ready.** Charge your R1, back up your card, and download HiBy's own
-   firmware from their website. That's your safety net.
-2. **Add the boot menu (once).** Copy `GabagoolOS-1.2-boot-menu.upt` to your
-   card, rename it `r1.upt`, then on the R1 go to
-   System > Firmware update > Via SD card.
-3. **Add GabagoolOS.** Unzip `GabagoolOS-1.2-HiBy-R1.zip` onto your card and
-   restart.
+1. **Download** `GabagoolOS-1.2-HiBy-R1.zip` and `GabagoolOS-1.2-boot-menu.upt`
+   from the [latest release](https://github.com/BlueDreams666/gabagoolOS/releases/latest).
+2. **Copy them to your card.** Unzip the zip onto the card. Put the `.upt` file
+   on the card too, and rename it `r1.upt`.
+3. **On the R1,** go to System > Firmware update > Via SD card.
 
-That's it! Your R1 now starts in GabagoolOS. Want the HiBy software instead?
-**Hold Volume Down while you turn it on.**
+Done! Your R1 now starts in GabagoolOS, and from now on it updates itself
+over Wi-Fi. Want the HiBy software instead? **Hold Volume Down while you turn
+it on.** Stuck? The release has a longer guide.
 
 ### changed your mind? forget about it
 
