@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://bluedreams666.github.io/gabagoolOS/sitemap.xml

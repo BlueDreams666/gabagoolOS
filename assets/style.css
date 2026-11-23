@@ -2,9 +2,9 @@
    Type is the player's own: Source Sans 3, with Shrikhand saved for the
    house special. Colour is the player's teal, plus the R1's own rims. */
 
-@font-face { font-family: "Source Sans 3"; src: url("fonts/SourceSans3-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "Source Sans 3"; src: url("fonts/SourceSans3-Semibold.ttf") format("truetype"); font-weight: 600; font-display: swap; }
-@font-face { font-family: "Shrikhand"; src: url("fonts/Shrikhand-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Source Sans 3"; src: url("fonts/SourceSans3-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Source Sans 3"; src: url("fonts/SourceSans3-Semibold.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Shrikhand"; src: url("fonts/Shrikhand-Regular.woff2") format("woff2"); font-display: swap; }
 
 :root {
   --bg: #ffffff;
@@ -43,6 +43,8 @@ img { max-width: 100%; height: auto; display: block; }
 a { color: var(--accent); text-underline-offset: 3px; }
 h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; text-wrap: balance; margin: 0; }
 p { margin: 0 0 14px; }
+p, li, summary, figcaption, dd { text-wrap: pretty; }
+.nowrap { white-space: nowrap; }
 code { font: 500 .88em/1 ui-monospace, "SF Mono", Menlo, monospace; background: var(--band); padding: .18em .4em; border-radius: 6px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
 .wrap { width: min(1080px, 100%); margin-inline: auto;
@@ -120,10 +122,11 @@ body { position: relative; z-index: 0; }
 @keyframes push-out { from { transform: none; filter: none; } to { transform: translateX(-28%); filter: brightness(.55); } }
 .try-bar { display: flex; align-items: center; gap: 12px; margin-top: 22px; font-size: 15px; color: var(--sub); min-height: 24px; }
 .try-name { font-weight: 600; color: var(--text); }
-.dots { display: flex; gap: 6px; }
-.dots button { all: unset; width: 7px; height: 7px; border-radius: 50%; background: var(--line); cursor: pointer; transition: background .2s ease, transform .2s ease; }
-.dots button[aria-current="true"] { background: var(--accent); transform: scale(1.25); }
-.dots button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.dots { display: flex; gap: 0; margin-inline: -9px; }
+.dots button { all: unset; position: relative; width: 24px; height: 24px; cursor: pointer; }
+.dots button::before { content: ""; position: absolute; inset: 8.5px; border-radius: 50%; background: var(--line); transition: background .2s ease, transform .2s ease; }
+.dots button[aria-current="true"]::before { background: var(--accent); transform: scale(1.25); }
+.dots button:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: 50%; }
 .try-hint { font-size: 14px; color: var(--dim); transition: opacity .4s ease; }
 .tried .try-hint { opacity: 0; }
 @media (hover: hover) { .try .r1:hover { --shadow: 0 34px 64px -28px rgba(22, 32, 42, .42); } }
@@ -195,14 +198,12 @@ nav a.opt:hover::after { transform: scaleX(1); }
   border-radius: 999px; padding: 2px 12px; margin-bottom: 14px; }
 
 /* the house special: the one loud moment */
-.special { padding: 72px 0; }
-.special-card { display: grid; grid-template-columns: 1.2fr .8fr; gap: 40px; align-items: center; padding: 56px;
-  border-radius: 28px; color: #2a1416;
+.special { padding: 72px 0;
   background-color: #ffffff;
   background-image: linear-gradient(90deg, rgba(214, 64, 78, .30) 50%, transparent 0), linear-gradient(rgba(214, 64, 78, .30) 50%, transparent 0);
   background-size: 40px 40px; }
-.special-copy { background: #ffffff; border-radius: 22px; padding: 36px 38px; box-shadow: 0 24px 50px -28px rgba(90, 20, 30, .5); }
-.special .tag { font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #a3243a; margin-bottom: 10px; }
+.special-card { display: grid; grid-template-columns: 1.2fr .8fr; gap: 40px; align-items: center; padding: 48px 56px;
+  border-radius: 28px; color: #2a1416; background: #ffffff; box-shadow: 0 24px 50px -28px rgba(90, 20, 30, .5); }
 .special h2 { font: 400 clamp(38px, 4.4vw, 56px)/1.05 var(--fun); color: #8e1f2f; letter-spacing: 0; margin-bottom: 18px; }
 .special-copy p { color: #4e3a34; font-size: 19px; }
 .special .fine { font-size: 16px; color: #6c5850; margin: 0; }
@@ -243,7 +244,7 @@ nav a.opt:hover::after { transform: scaleX(1); }
 .download .more { font-size: 16px; }
 
 footer { padding: 48px 0 64px; color: var(--sub); font-size: 16px; }
-footer .small { font-size: 14px; color: var(--dim); max-width: 76ch; }
+footer .small { font-size: 14px; color: var(--dim); max-width: 62ch; }
 
 @media (max-width: 860px) {
   body { font-size: 17px; }
@@ -258,8 +259,8 @@ footer .small { font-size: 14px; color: var(--dim); max-width: 76ch; }
   .feature .shot.pair .r1 { width: 46%; }
   .r1 { border-radius: 26px; padding: 12px 11px 40px; border-width: 4px; }
   .r1::after { border-radius: 22px; }
-  .special-card { padding: 22px; background-size: 28px 28px; }
-  .special-copy { padding: 26px 24px; }
+  .special { background-size: 28px 28px; padding: 48px 0; }
+  .special-card { padding: 28px 24px 36px; }
   .safe ul, .install ol { grid-template-columns: 1fr; gap: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } .pre { transform: none; opacity: 1; } .feature .r1 { transform: none; } }
