@@ -263,3 +263,12 @@ footer .small { font-size: 14px; color: var(--dim); max-width: 76ch; }
   .safe ul, .install ol { grid-template-columns: 1fr; gap: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } .pre { transform: none; opacity: 1; } .feature .r1 { transform: none; } }
+
+/* Cover Flow, held sideways: the R1 on its side */
+/* turned a quarter clockwise: the chin to the left, the side keys along the bottom */
+.r1.landscape { width: 480px; padding: 15px 16px 15px 54px; }
+.r1.landscape img { aspect-ratio: 800 / 480; }
+.r1.landscape::before { right: auto; top: auto; bottom: -9px; left: 58%; width: 14%; height: 4px; border-radius: 0 0 3px 3px;
+  box-shadow: -64px 0 0 var(--rim), -100px 0 0 var(--rim); }
+.feature.wide .wrap { grid-template-columns: .8fr 1.2fr; }
+@media (max-width: 860px) { .r1.landscape { width: 100%; padding: 10px 10px 10px 36px; } .feature.wide .wrap { grid-template-columns: 1fr; } }
