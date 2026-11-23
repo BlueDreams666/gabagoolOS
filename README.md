@@ -140,15 +140,9 @@ brand new touch interface on top, made for the R1.
 <summary><b>Was AI used to help build this?</b></summary>
 <br>
 
-Yes.
-</details>
-
-<details>
-<summary><b>Why "gabagool"?</b></summary>
-<br>
-
-It's how they say "capicola" in *The Sopranos*. Find the house special tile on
-your home screen and give it a tap. Ova haaaa!
+Yes. We test it a lot: every screen, in every language and text size, plus
+thousands of random taps hunting for crashes. And the code is open for anyone
+to read.
 </details>
 
 <details>
@@ -162,12 +156,27 @@ back. Just keep HiBy's firmware file somewhere safe, like with any update.
 </details>
 
 <details>
+<summary><b>How do I go back to the original?</b></summary>
+<br>
+
+Copy HiBy's own firmware to your card as `r1.upt`, hold Volume Down while you
+turn the R1 on, and run the update from the HiBy menu. Delete the `.rockbox`
+folder if you want the space back. No hard feelings.
+</details>
+
+<details>
 <summary><b>Which players does it work on?</b></summary>
 <br>
 
-Just the HiBy R1 for now. Got one of the newest R1s? Some have a different
-Wi-Fi chip we haven't tried yet. Everything should work, but please tell us
-how it goes!
+Just the HiBy R1 for now. Everything is made for its screen and buttons.
+</details>
+
+<details>
+<summary><b>My R1 is brand new. Will Wi-Fi work?</b></summary>
+<br>
+
+The newest R1s have a different Wi-Fi chip we haven't tried yet. It should
+work, and music plays either way, but please tell us how it goes!
 </details>
 
 <details>
@@ -180,12 +189,20 @@ or album covers. The full list is in [NOTICE.md](NOTICE.md).
 </details>
 
 <details>
+<summary><b>Why "gabagool"?</b></summary>
+<br>
+
+It's how they say "capicola" in *The Sopranos*. Find the house special tile on
+your home screen and give it a tap. Ova haaaa!
+</details>
+
+<details>
 <summary><b>Something broke. Now what?</b></summary>
 <br>
 
-Sorry about that! [Tell us here](https://github.com/BlueDreams666/gabagoolOS/issues/new/choose).
-It helps a lot if you attach the log file from your card:
-`.rockbox/sloppy/sloppy.log`.
+Sorry about that! [Tell us on GitHub](https://github.com/BlueDreams666/gabagoolOS/issues/new/choose),
+and attach the log file from your card (`.rockbox/sloppy/sloppy.log`). It
+helps a lot.
 </details>
 
 ## the family
