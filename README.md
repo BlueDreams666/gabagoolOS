@@ -21,6 +21,28 @@ library, lyrics that follow the song, a real equalizer, radio, podcasts,
 audiobooks and more. It lives on your SD card, never touches your music, and
 the original HiBy software is always one button away.
 
+## the main course
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/main-queue-dark.png">
+  <img src="assets/main-queue-light.png" width="880" alt="Line up what's next. Add a song, an album or a whole playlist to the queue, then drag to reorder or swipe to drop one. On the R1: Up next, with The Grants by Lana Del Rey playing and the songs after it.">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/main-crossfade-dark.png">
+  <img src="assets/main-crossfade-light.png" width="880" alt="Songs that melt together. Crossfade blends the end of one song into the next, up to twelve seconds, and can fade on skips too. On the R1: the crossfade setting at six seconds, two sound waves blending.">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/main-coverflow-dark.png">
+  <img src="assets/main-coverflow-light.png" width="880" alt="Turn it sideways. Cover Flow fills the screen with your albums: flick through the sleeves, tap one and it plays. On the R1, held sideways: album covers in a row.">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/main-games-dark.png">
+  <img src="assets/main-games-light.png" width="880" alt="Games, built in. Chess, Snake, 2048, Sudoku, a music quiz and a tiny pet, and your own Game Boy games and Doom. Hide them all with one tap. On the R1: a game of chess under way.">
+</picture>
+
 ## made fresh daily
 
 Everything you'd want from a music player, and it's quick.
