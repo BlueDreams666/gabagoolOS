@@ -10,8 +10,10 @@
 </a>
 
 **[Download 1.2](https://github.com/BlueDreams666/gabagoolOS/releases/latest)** &nbsp;·&nbsp;
+[Website](https://bluedreams666.github.io/gabagoolOS/) &nbsp;·&nbsp;
 [How to install](#no-funny-business) &nbsp;·&nbsp;
-[Questions](#you-got-questions)
+[Questions](#you-got-questions) &nbsp;·&nbsp;
+[r/GabagoolOS](https://www.reddit.com/r/GabagoolOS/)
 
 The HiBy R1 is a lovely little music player. Tiny, colourful, sounds great.
 The software? Not so much. So we made new software for it.
