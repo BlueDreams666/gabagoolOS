@@ -442,6 +442,7 @@ struct user_settings
 {
 #ifdef HAVE_SLOPPY_UI
     bool sloppy_skull_icon;
+    bool sloppy_usb_classic;     /* USB mode: Rockbox's plug, not the dog */
     int sloppy_theme;            /* 0 dark, 1 light, 2 true dark, 3 Zune */
     int sloppy_home_style;       /* 0 cards, 1 tiles, 2 list */
     int sloppy_accent_color;

@@ -4092,9 +4092,15 @@ struct mp3entry * audio_next_track(void)
 }
 
 /* Start playback at the specified elapsed time or offset */
+/* GabagoolOS: a quiet library check gives way before the audio thread is
+ * asked to start (it shares the one OS thread, and the start waited behind
+ * it for half a minute) */
+extern void sl_before_play(void) __attribute__((weak));
+
 void audio_play(unsigned long elapsed, unsigned long offset)
 {
     logf("audio_play");
+    if (sl_before_play) sl_before_play();
 
 #ifdef PLAYBACK_VOICE
     /* Truncate any existing voice output so we don't have spelling

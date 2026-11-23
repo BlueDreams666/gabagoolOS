@@ -45,6 +45,11 @@
 #include "icons.h"
 
 #include "bitmaps/usblogo.h"
+#ifdef HIBY_R1
+#include "bitmaps/usbclassic.h"
+/* the photo, or (Customization) Rockbox's plug in the middle */
+#define USB_CLASSIC (global_settings.sloppy_usb_classic)
+#endif
 
 #ifdef HAVE_REMOTE_LCD
 #include "bitmaps/remote_usblogo.h"
@@ -197,6 +202,9 @@ static void usb_screen_fix_viewports(struct screen *screen,
     {
         logo_width = BMPWIDTH_usblogo;
         logo_height = BMPHEIGHT_usblogo;
+#ifdef HIBY_R1
+        if (USB_CLASSIC) { logo_width = BMPWIDTH_usbclassic; logo_height = BMPHEIGHT_usbclassic; }
+#endif
     }
 
 #ifdef HIBY_R1
@@ -300,7 +308,9 @@ static void usb_screens_draw(struct usb_screen_vps_t *usb_screen_vps_ar)
 #ifdef HIBY_R1
         /* The full-screen photo: when a status bar takes the top of the
          * screen, lose the top of the photo, not "USB mode" at its foot. */
-        if (i == SCREEN_MAIN && BMPHEIGHT_usblogo > logo->height)
+        if (i == SCREEN_MAIN && USB_CLASSIC)
+            screen->bmp(&bm_usbclassic, 0, 0);
+        else if (i == SCREEN_MAIN && BMPHEIGHT_usblogo > logo->height)
             screen->bmp_part(logos[i], 0, BMPHEIGHT_usblogo - logo->height, 0, 0,
                              logo->width, logo->height);
         else

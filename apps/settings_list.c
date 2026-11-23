@@ -1122,6 +1122,8 @@ const struct settings_list settings[] = {
 #ifdef HAVE_SLOPPY_UI
     BOOL_SETTING(0, sloppy_skull_icon, LANG_SLOPPY_SKULL_ICON, false,
                  "sloppy skull icon", off_on, LANG_SET_BOOL_YES, LANG_SET_BOOL_NO, NULL),
+    BOOL_SETTING(0, sloppy_usb_classic, LANG_SLOPPY_USB_CLASSIC, false,
+                 "sloppy usb classic", off_on, LANG_SET_BOOL_YES, LANG_SET_BOOL_NO, NULL),
     TABLE_SETTING(F_BANFROMQS, sloppy_theme, -1, 0, "sloppy theme",
                   "dark,light,true dark,zune", UNIT_INT, NULL, NULL, NULL, 4, 0, 1, 2, 3),
     TABLE_SETTING(F_BANFROMQS, sloppy_home_style, -1, 0, "sloppy home style",

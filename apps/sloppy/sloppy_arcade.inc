@@ -444,6 +444,10 @@ static struct {
     bool paused, sheet, hidden_saved, music_was_on;
     uint32_t t0, frames;
     unsigned touch, keys, shown;
+    /* between two frames: keys pressed (each reaches the game for a frame
+     * at least, however short the press), keys let go, and keys let go and
+     * pressed again (the game is shown them up for a frame first) */
+    unsigned latch, released, gap, seen;
     uint32_t stat_at, stat_frames, stat_cost_us, stat_worst_us;
 } arc;
 
@@ -732,6 +736,7 @@ static void arc_show_keys(void)
         }
 }
 static void arc_menu_open(void);
+static void arc_pressed(unsigned now_held, unsigned was_held);
 static void arc_pad_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
@@ -745,9 +750,12 @@ static void arc_pad_cb(lv_event_t *e)
             arc_menu_open();
             return;
         }
-        arc.touch = arc_keys_at(pt.x, pt.y);
+        unsigned t = arc_keys_at(pt.x, pt.y);
+        arc_pressed(t, arc.touch);
+        arc.released |= arc.touch & ~t;
+        arc.touch = t;
     }
-    else arc.touch = 0;                    /* released, or the press was taken */
+    else { arc.released |= arc.touch; arc.touch = 0; }   /* released, or the press was taken */
     arc_show_keys();
 }
 static void arc_side_cb(lv_event_t *e)
@@ -757,14 +765,18 @@ static void arc_side_cb(lv_event_t *e)
     {
         lv_point_t pt;
         lv_indev_get_point(lv_indev_active(), &pt);
-        arc.touch = arc_side_keys_at(pt.x, pt.y);
+        unsigned t = arc_side_keys_at(pt.x, pt.y);
+        arc_pressed(t, arc.touch);
+        arc.released |= arc.touch & ~t;
+        arc.touch = t;
     }
-    else arc.touch = 0;
+    else { arc.released |= arc.touch; arc.touch = 0; }
     arc_show_keys();
 }
 /* Sideways, a side key by where it is: down the R1's side from the power
  * key they are Volume up, Volume down, Play and Next; along the top from
- * the power key's end that is Left, B, A, Right. Turned the other way (the
+ * the power key's end that is Left, A, B, Right (Volume down jumps,
+ * Play takes B; Next, on a line of its own, runs or jumps with either). Turned the other way (the
  * screen set upside down) the power key is at the right end, so the same
  * places read the other way round. b comes after sl_flip_key, which swaps
  * the volume keys when the screen is upside down. */
@@ -774,23 +786,52 @@ static unsigned arc_side_key_of(int b)
     bool vol_down = sl_flipped ? b == BUTTON_UP : b == BUTTON_DOWN;
     int from_power = vol_up ? 0 : vol_down ? 1 : b == BUTTON_LEFT ? 2 : b == BUTTON_RIGHT ? 3 : -1;
     if (from_power < 0) return 0;
-    static const unsigned along_top[4] = { GB_LEFT, GB_B, GB_A, GB_RIGHT };
+    static const unsigned along_top[4] = { GB_LEFT, GB_A, GB_B, GB_RIGHT };
     return along_top[arc_side_cw() ? 3 - from_power : from_power];
+}
+/* every key held in b: Rockbox reports two held together as one code
+ * (Right and A, to run and jump), which matched none of the single keys
+ * and was dropped */
+static unsigned arc_keys_of(int b)
+{
+    static const int one[4] = { BUTTON_UP, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT };
+    unsigned k = 0;
+    for (int i = 0; i < 4; i++)
+        if (b & one[i])
+            k |= arc_opt.side ? arc_side_key_of(one[i]) :
+                 one[i] == BUTTON_LEFT ? GB_A : one[i] == BUTTON_RIGHT ? GB_B : 0;
+    return k;
+}
+/* a new press, by key or by touch: it reaches the game whatever happens
+ * before the next frame */
+static void arc_pressed(unsigned now_held, unsigned was_held)
+{
+    unsigned fresh = now_held & ~was_held;
+    arc.gap |= fresh & arc.released & arc.seen;   /* up and down again since the game last looked */
+    arc.latch |= fresh;
 }
 /* the R1's keys: Play is A, Next is B (their press and their release);
  * sideways, all four are the game's while it runs (arc_side_key_of).
- * Paused, the menu open, the volume keys are the volume's. */
+ * Paused, the menu open, the volume keys are the volume's. A press reports
+ * every key held, a release the keys let go. */
 static bool arcade_key(int b, bool rel)
 {
     if (!arc_on_top()) return false;
-    unsigned k = b == BUTTON_LEFT ? GB_A : b == BUTTON_RIGHT ? GB_B : 0;
-    if (arc_opt.side)
-    {
-        if (arc.paused) return b == BUTTON_LEFT || b == BUTTON_RIGHT || b == BUTTON_PLAY || b == BUTTON_NEXT || b == BUTTON_PREV;
-        k = arc_side_key_of(b);
-    }
+    if (arc_opt.side && arc.paused)
+        return (b & (BUTTON_LEFT | BUTTON_RIGHT)) || b == BUTTON_PLAY || b == BUTTON_NEXT || b == BUTTON_PREV;
+    unsigned k = arc_keys_of(b);
     if (!k) return b == BUTTON_PLAY || b == BUTTON_NEXT || b == BUTTON_PREV;   /* a headset's keys do nothing here */
-    if (rel) arc.keys &= ~k; else arc.keys |= k;
+    if (rel)
+    {
+        arc.keys &= ~k;
+        arc.released |= k;
+    }
+    else
+    {
+        arc_pressed(k, arc.keys);
+        arc.released |= arc.keys & ~k;
+        arc.keys = k;                      /* all held now (one let go as another went down is in it) */
+    }
     arc_show_keys();
     return true;
 }
@@ -800,7 +841,7 @@ static void arc_pause(bool on)
 {
     if (on == arc.paused) return;
     arc.paused = on;
-    if (on) { arc_sound_stop(); arc.touch = arc.keys = 0; arc.pulse_frames = 0; arc_show_keys(); }
+    if (on) { arc_sound_stop(); arc.touch = arc.keys = arc.latch = arc.released = arc.gap = arc.seen = 0; arc.pulse_frames = 0; arc_show_keys(); }
     else
     {
         arc.t0 = lv_tick_get();
@@ -845,9 +886,13 @@ static void arc_tick(lv_timer_t *t)
     if (n <= 0) return;
     if (n > 4) { arc.t0 = now; arc.frames = 0; n = 1; }      /* far behind (a slow card write): start the clock again */
     uint64_t c0 = sl_perf_now_us();
-    unsigned keys = arc.touch | arc.keys;
     for (int i = 0; i < n; i++)
     {
+        unsigned keys = arc.touch | arc.keys | arc.latch;
+        if (arc.gap) { keys &= ~arc.gap; arc.gap = 0; }   /* let go first; the press next frame */
+        else arc.latch = 0;
+        arc.released = 0;
+        arc.seen = keys;
         gb_frame(keys | (arc.pulse_frames ? arc.pulse : 0), i == n - 1);
         if (arc.pulse_frames) arc.pulse_frames--;
         arc_sound_push();

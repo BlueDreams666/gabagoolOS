@@ -756,6 +756,7 @@ static const char *set_v_home(void)
 }
 static const char *set_v_set_layout(void) { return global_settings.sloppy_settings_tiles == 1 ? "Tiles" : "List"; }
 static const char *set_v_icon(void) { return global_settings.sloppy_skull_icon ? "Angular skull" : "Classic cog"; }
+static const char *set_v_usb(void) { return global_settings.sloppy_usb_classic ? "Classic" : "Gabagool"; }
 static const char *set_v_lock_player(void) { return global_settings.sloppy_lock_player ? "Small cover" : "Big cover"; }   /* the names on its page */
 static const char *set_v_np(void) { return global_settings.sloppy_np_style == 3 ? "Waveform" : global_settings.sloppy_np_style == 2 ? "Centred" : global_settings.sloppy_np_style ? "Classic" : "Glass"; }
 static const char *set_v_cf(void) { return global_settings.sloppy_cf_vertical ? "Vertical" : "Horizontal"; }
@@ -770,6 +771,7 @@ static const struct set_entry set_custom_entries[] = {
     { LV_SYMBOL_HOME, 0x1fb39a, "Home layout", set_v_home, 0x20009 },
     { LV_SYMBOL_LIST, 0x4f7fe0, "Settings layout", set_v_set_layout, 0x2001d },
     { LV_SYMBOL_SETTINGS, 0x66738a, "Settings icon", set_v_icon, 0x20008 },
+    { LV_SYMBOL_USB, 0x7a5bd6, "USB mode screen", set_v_usb, 0x2002c },
     { LV_SYMBOL_IMAGE, 0xd93fa0, "Home wallpaper", NULL, 0x20006 },
     { LV_SYMBOL_IMAGE, 0x2d7ff0, "Lock wallpaper", NULL, 0x20007 },
     { LV_SYMBOL_PLAY, 0xe8408a, "Lock screen player", set_v_lock_player, 0x2000b },
@@ -782,7 +784,7 @@ static const struct set_entry set_custom_entries[] = {
     { LV_SYMBOL_AUDIO, 0x8b6fd6, "Lyrics", lyr_v_now, 0x20011 },
 };
 static const struct set_section set_custom_sections[] = {
-    { "APPEARANCE", 0, 5 }, { "WALLPAPERS", 5, 6 }, { "TEXT", 11, 4 },
+    { "APPEARANCE", 0, 6 }, { "WALLPAPERS", 6, 6 }, { "TEXT", 12, 4 },
 };
 static const char *set_v_count(int n)
 {
@@ -2003,7 +2005,7 @@ static void buttons_page(void)
  * queue's rows are): the row lifts and follows the finger, the others make
  * room, the page scrolls on near an edge. Let go over another place and
  * moved(a, b) is told; settled, the card is filled again in its order. */
-#define SDL_MAX 18
+#define SDL_MAX 24                       /* the home's apps and games are 20 */
 struct sdl
 {
     lv_obj_t *body, *in, *rows[SDL_MAX], *drag;
@@ -2342,6 +2344,60 @@ static void mu_arrange_page(void)
         mua[k].in = set_group(body, k ? "MORE WAYS IN" : "TILES");
     }
     mua_fill();
+    page_push(p);
+}
+
+/* Arrange apps and games: the Cards home's list, dragged into order */
+static struct sdl haa;
+static void haa_fill(void);
+static void haa_move(struct sdl *d, int a, int b)
+{
+    (void)d;
+    if (a < 0 || a >= HA_N || b < 0 || b >= HA_N || a == b) return;
+    uint8_t id = ha_order[a];
+    if (a < b) for (int i = a; i < b; i++) ha_order[i] = ha_order[i + 1];
+    else for (int i = a; i > b; i--) ha_order[i] = ha_order[i - 1];
+    ha_order[b] = id;
+    ha_save();
+    ha_dirty = true;
+}
+static void haa_row(int id)
+{
+    int h = haa.row_h, lw = SET_INNER - SL_INSET - 52 - SL_SP_S;
+    lv_obj_t *r = haa.rows[haa.n++] = set_row_box(haa.in, h);
+    lv_obj_t *a = text(r, ha_defs[id].name, &ss_semibold_21, C_TEXT);
+    lv_obj_set_width(a, lw);
+    lv_label_set_long_mode(a, LV_LABEL_LONG_DOT);
+    set_align(a);
+    set_place(a, SL_INSET, (h - lv_font_get_line_height(&ss_semibold_21)) / 2, lw);
+    sdl_handle(r, &haa);
+    set_sep(haa.in, r, SL_INSET);
+}
+static void haa_fill(void)
+{
+    sdl_clean(&haa);
+    haa.n = 0;
+    for (int i = 0; i < HA_N; i++) haa_row(ha_order[i]);
+}
+static void haa_gone(lv_event_t *e)
+{
+    (void)e;
+    sdl_gone(&haa);
+    if (ha_dirty) lv_async_call(ha_refresh_async, NULL);
+}
+static void ha_arrange_page(void)
+{
+    ha_load();
+    lv_obj_t *p, *body = page_new("Arrange apps and games", &p);
+    lv_obj_add_event_cb(p, haa_gone, LV_EVENT_DELETE, NULL);
+    opt_note(body, "Drag one by its handle to move it. The home screen's list follows.");
+    haa.body = body;
+    haa.row_h = LV_MAX(SET_ROW_H, lv_font_get_line_height(&ss_semibold_21) + 2 * SET_PAD_V);
+    haa.drag = NULL;
+    haa.moved = haa_move;
+    haa.fill = haa_fill;
+    haa.in = set_group(body, "APPS & GAMES");
+    haa_fill();
     page_push(p);
 }
 

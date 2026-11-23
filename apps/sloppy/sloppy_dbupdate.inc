@@ -39,6 +39,18 @@ static long db_update_since;
 static int db_update_expect;          /* entries the last full scan saw, 0 unknown */
 static int db_last_entries, db_last_commit;
 static long db_progress_at;           /* last tick anything moved */
+/* The quiet check stops for music (again once it is over): before a song
+ * starts, as well as once it plays. Starting it waited behind the check's
+ * card reads for half a minute in a stress run on the R1 (23 Nov). */
+static void db_quiet_stop(const char *why)
+{
+    if (db_update_state != DBU_CHECKING || !db_check_quiet || db_check_stopped ||
+        tagcache_updates_done != db_check_done0) return;
+    tagcache_stop_scan();
+    db_check_stopped = true;
+    sl_log("database: the check stops (%s), again after", why);
+}
+void sl_before_play(void) { db_quiet_stop("a song starts"); }
 #define DB_SCAN_NOTE ROCKBOX_DIR "/sloppy/scan.txt"
 
 static lv_obj_t *dbu, *dbu_phase, *dbu_detail, *dbu_bar, *dbu_fill, *dbu_spin, *dbu_btn, *dbu_btn_txt;
@@ -465,13 +477,7 @@ static void db_update_poll(void)
             }
             break;
         case DBU_CHECKING:
-            if (db_check_quiet && !db_check_stopped && tagcache_updates_done == db_check_done0 &&
-                (db_music_playing() || td.page))
-            {
-                tagcache_stop_scan();
-                db_check_stopped = true;
-                sl_log("database: the check stops while music plays, again after");
-            }
+            if (db_music_playing() || td.page) db_quiet_stop(td.page ? "Your taste is open" : "music plays");
             if (tagcache_updates_done == db_check_done0)
             {
                 if (st->commit_delayed)        /* found new songs, but they can't be saved until a restart */

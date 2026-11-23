@@ -166,7 +166,7 @@ void sl_lib_cache_drop(void);         /* the next sl_lib_begin reads the databas
 /* The update's name: the Settings hero ("HiBy R1 · <name>") and its
  * footer ("GABAGOOLOS · <NAME> UPDATE", capitals made at run time). The
  * next rename is this one line. */
-#define SL_UPDATE_NAME "Game on then"
+#define SL_UPDATE_NAME "Capicola"
 
 #define SL_ART_GRID 219
 #define SL_ART_PAGE 170

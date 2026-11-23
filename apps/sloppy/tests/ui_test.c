@@ -2044,14 +2044,31 @@ static void b9_tests(void) {
                 /* a thumb sliding down from the top edge is the game's, not a pull on the Control Center */
                 arc_pause(false);touch_at(400,10,true);touch_at(400,50,true);touch_at(400,110,true);
                 assert(g_state==G_LVGL && arc.touch==GB_UP && !overlay_visible());touch_at(400,110,false);assert(!arc.touch);
-                /* the keys, along the top from the power key: Left, B, A, Right */
+                /* the keys, along the top from the power key: Left, A (Volume down jumps), B, Right */
                 assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_LEFT);arcade_key(BUTTON_UP,true);
-                assert(arcade_key(BUTTON_DOWN,false) && arc.keys==GB_B);arcade_key(BUTTON_DOWN,true);
-                assert(arcade_key(BUTTON_LEFT,false) && arc.keys==GB_A);arcade_key(BUTTON_LEFT,true);
+                assert(arcade_key(BUTTON_DOWN,false) && arc.keys==GB_A);arcade_key(BUTTON_DOWN,true);
+                assert(arcade_key(BUTTON_LEFT,false) && arc.keys==GB_B);arcade_key(BUTTON_LEFT,true);
                 assert(arcade_key(BUTTON_RIGHT,false) && arc.keys==GB_RIGHT);
                 /* Right has a line of its own: with A (jump right) or B (run right) */
-                assert(arcade_key(BUTTON_LEFT,false) && arc.keys==(GB_RIGHT|GB_A));arcade_key(BUTTON_LEFT,true);
-                assert(arcade_key(BUTTON_DOWN,false) && arc.keys==(GB_RIGHT|GB_B));arcade_key(BUTTON_DOWN,true);arcade_key(BUTTON_RIGHT,true);
+                /* (Rockbox sends the keys held together as one code: once dropped, so running and jumping never did) */
+                assert(arcade_key(BUTTON_RIGHT|BUTTON_DOWN,false) && arc.keys==(GB_RIGHT|GB_A));arcade_key(BUTTON_DOWN,true);assert(arc.keys==GB_RIGHT);
+                assert(arcade_key(BUTTON_RIGHT|BUTTON_LEFT,false) && arc.keys==(GB_RIGHT|GB_B));arcade_key(BUTTON_LEFT,true);arcade_key(BUTTON_RIGHT,true);
+                assert(!arc.keys);
+                {   /* a tap shorter than a frame still reaches the game, for one frame; let go and pressed
+                     * again between two frames, the game is shown it let go first */
+                    unsigned f0;
+                    #define ARC_NEXT_FRAME() do{f0=arc.frames;for(int i=0;i<40&&arc.frames==f0;i++)frame(9);assert(arc.frames!=f0);}while(0)
+                    ARC_NEXT_FRAME();
+                    arcade_key(BUTTON_DOWN,false);arcade_key(BUTTON_DOWN,true);assert(!arc.keys&&(arc.latch&GB_A));
+                    ARC_NEXT_FRAME();assert(arc.seen==GB_A);
+                    ARC_NEXT_FRAME();assert(arc.seen==0);
+                    arcade_key(BUTTON_DOWN,false);ARC_NEXT_FRAME();assert(arc.seen==GB_A);
+                    arcade_key(BUTTON_DOWN,true);arcade_key(BUTTON_DOWN,false);   /* a quick second jump */
+                    ARC_NEXT_FRAME();assert(arc.seen==0);
+                    ARC_NEXT_FRAME();assert(arc.seen==GB_A);
+                    arcade_key(BUTTON_DOWN,true);ARC_NEXT_FRAME();assert(arc.seen==0);
+                    #undef ARC_NEXT_FRAME
+                }
                 /* Left shares the ADC with A and B: its jump is the screen's */
                 assert(arcade_key(BUTTON_UP,false));arc.touch=arc_side_keys_at(240,700);assert((arc.touch|arc.keys)==(GB_LEFT|GB_A));
                 arc.touch=0;arcade_key(BUTTON_UP,true);assert(!arc.keys);
@@ -2067,8 +2084,8 @@ static void b9_tests(void) {
                 assert(arc_side_keys_at(80,720)==GB_UP && arc_side_keys_at(400,720)==GB_DOWN && arc_side_keys_at(80,100)==GB_A);
                 arc_pause(false);
                 assert(arcade_key(BUTTON_RIGHT,false) && arc.keys==GB_LEFT);arcade_key(BUTTON_RIGHT,true);      /* Next */
-                assert(arcade_key(BUTTON_LEFT,false) && arc.keys==GB_B);arcade_key(BUTTON_LEFT,true);          /* Play */
-                assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_A);arcade_key(BUTTON_UP,true);              /* Volume down */
+                assert(arcade_key(BUTTON_LEFT,false) && arc.keys==GB_A);arcade_key(BUTTON_LEFT,true);          /* Play */
+                assert(arcade_key(BUTTON_UP,false) && arc.keys==GB_B);arcade_key(BUTTON_UP,true);              /* Volume down */
                 assert(arcade_key(BUTTON_DOWN,false) && arc.keys==GB_RIGHT);arcade_key(BUTTON_DOWN,true);      /* Volume up */
                 sl_flipped=false;arc_blit();
                 /* Start, pressed once from the menu as the game goes on */
@@ -2783,6 +2800,14 @@ int main(void) {
     assert(sl_lib.n_dirs>=1&&!strcmp(TP(42),"/Music/song-42.flac")&&sl_track_path_is(42,"/Music/song-42.flac")&&!sl_track_path_is(42,"/Music/song-4.flac"));
     assert(sl_track_hist_hash(42)==sl_hist_hash("/Music/song-42.flac")&&sl_lib_find_path("/Music/song-42.flac")==42&&sl_track_same_file(42,42)&&!sl_track_same_file(42,43));
     home_page();mini_build();np_build();statusbar_build();statusbar_update();frame(0);frame(160);shot_now("home-intro.ppm");frame(300);shot("home.ppm");
+    if (getenv("SLOPPY_HOMELOOKS")) {   /* SLOPPY_HOMELOOKS=1: the Cards home on each wallpaper, both themes, then exit */
+        static const int walls[]={0,1,2,3,4,5,6,7,8};
+        for(int th=0;th<2;th++)for(unsigned w=0;w<sizeof walls/sizeof walls[0];w++){
+            global_settings.sloppy_theme=th;global_settings.sloppy_home_style=0;global_settings.sloppy_home_wallpaper=walls[w];
+            appearance_reload(NULL);frame(600);while(npages>1){page_pop();frame(300);}frame(900);
+            char n[64];snprintf(n,sizeof n,"homelook-%s-w%d.ppm",th?"light":"dark",walls[w]);shot(n);}
+        exit(0);
+    }
     if (getenv("SLOPPY_REAL_ART")) test_real_art = true;   /* shot modes with every album's generated cover */
     if (getenv("SLOPPY_GLYPH_SHEET")) {   /* SLOPPY_GLYPH_SHEET=<dir> SLOPPY_AUDIT_TAG=...: every symbol in use at 16/20/24/28/48, beside words, dark and light, then stop */
         static const char *const sy[] = { LV_SYMBOL_PLAY, LV_SYMBOL_PAUSE, LV_SYMBOL_STOP, LV_SYMBOL_PREV, LV_SYMBOL_NEXT, LV_SYMBOL_SHUFFLE,
@@ -6290,6 +6315,8 @@ int main(void) {
             sl_power_filter_button(BUTTON_UP);assert(sl_power_filter_button(BUTTON_POWER));assert(shot_taken==d0+3);
             sl_power_filter_button(BUTTON_POWER|BUTTON_REL);sl_power_filter_button(BUTTON_UP|BUTTON_REL);frame(100);
             assert(sl_power.mode==SL_POWER_ACTIVE&&!sl_power.power_down);
+            /* volume up let go together with another key (one code): not still held for the next Power (23 Nov) */
+            sl_power_filter_button(BUTTON_UP);sl_power_filter_button(BUTTON_UP|BUTTON_LEFT);sl_power_filter_button(BUTTON_UP|BUTTON_LEFT|BUTTON_REL);
             sl_power_filter_button(BUTTON_POWER);sl_power_filter_button(BUTTON_POWER|BUTTON_REL);assert(shot_taken==d0+3);   /* alone: the power key */
             assert(sl_power.mode==SL_POWER_DARK);
             for(int i=0;i<200&&sl_shot_busy();i++)usleep(10000);sl_shot_wait();
@@ -7705,6 +7732,7 @@ int main(void) {
             db_auto_poll();assert(db_update_state==DBU_IDLE && test_updates==ups && access(DB_USB_NOTE,F_OK)==0);
             test_status=AUDIO_STATUS_PLAY|AUDIO_STATUS_PAUSE;   /* paused: it runs */
             db_auto_poll();assert(db_update_state==DBU_CHECKING && test_updates==ups+1 && db_check_quiet);
+            sl_before_play();assert(test_stops==stops+1);   /* a song about to start: stopped before it (its start waited 30 s behind the check, 23 Nov) */
             test_status=AUDIO_STATUS_PLAY;
             db_update_poll();db_update_poll();assert(test_stops==stops+1 && db_update_state==DBU_CHECKING);   /* stopped, once */
             tagcache_updates_done++;db_update_poll();assert(db_update_state==DBU_IDLE);
@@ -10415,6 +10443,56 @@ int main(void) {
         assert(find_label(sq_body,"SONGS \xc2\xb7 BEST 300 OF 2000"));
         page_pop();frame(500);
     }
+    {   /* Customization > USB mode screen: the dog, or Rockbox's plug (23 Nov) */
+        while(npages>1){page_pop();frame(300);}
+        bool u0=global_settings.sloppy_usb_classic;
+        global_settings.sloppy_usb_classic=false;
+        usb_screen_page();frame(400);
+        lv_obj_t *c=find_label(pages[npages-1],"Classic");while(c&&!lv_obj_has_flag(c,LV_OBJ_FLAG_CLICKABLE))c=lv_obj_get_parent(c);
+        assert(c&&find_label(pages[npages-1],"Gabagool"));lv_obj_send_event(c,LV_EVENT_CLICKED,NULL);frame(200);
+        assert(global_settings.sloppy_usb_classic&&!strcmp(set_v_usb(),"Classic"));shot("usb-screen-choice.ppm");
+        page_pop();frame(400);global_settings.sloppy_usb_classic=u0;
+        printf("PASS: Customization: the USB mode screen, the dog or the classic plug.\n");
+    }
+    {   /* the Cards home's apps and games, put in order by dragging (23 Nov) */
+        while(npages>1){page_pop();frame(300);}
+        int st0=global_settings.sloppy_home_style;global_settings.sloppy_home_style=0;appearance_reload(NULL);frame(600);
+        while(npages>1){page_pop();frame(300);}
+        ha_load();uint8_t o0[HA_N];memcpy(o0,ha_order,sizeof o0);
+        ha_arrange_page();frame(400);assert(haa.n==HA_N);
+        haa_move(&haa,0,2);   /* the first (Files) third */
+        assert(ha_order[2]==o0[0]&&ha_order[0]==o0[1]&&ha_order[1]==o0[2]);
+        page_pop();frame(600);
+        /* the home's list follows (its rows in one card): the third is the one that was first */
+        #define HA_NTH(k) ({lv_obj_t *g_=lv_obj_get_child(ha_body,(int32_t)ha_first),*f_=NULL;int c_=0; \
+            for(uint32_t i_=0;g_&&i_<lv_obj_get_child_count(g_)&&!f_;i_++){lv_obj_t *r_=lv_obj_get_child(g_,(int32_t)i_); \
+                for(int d_=0;d_<HA_N;d_++)if(find_label(r_,ha_defs[d_].name)){if(c_++==(k))f_=r_;break;}} f_;})
+        assert(HA_NTH(2)&&find_label(HA_NTH(2),ha_defs[o0[0]].name)&&find_label(HA_NTH(0),ha_defs[o0[1]].name));
+        /* kept: read again from the card */
+        ha_read=false;memset(ha_order,0,sizeof ha_order);ha_load();assert(ha_order[2]==o0[0]);
+        memcpy(ha_order,o0,sizeof o0);ha_save();ha_dirty=true;ha_refresh_async(NULL);frame(300);
+        assert(find_label(HA_NTH(0),ha_defs[o0[0]].name));
+        #undef HA_NTH
+        global_settings.sloppy_home_style=st0;appearance_reload(NULL);frame(600);while(npages>1){page_pop();frame(300);}
+        printf("PASS: home: apps and games dragged into order, the list follows and the order is kept.\n");
+    }
+    {   /* torture (sloppy_torture.inc): the R1's self-run, here on the harness's clock;
+         * SLOPPY_TORTURE=<minutes> for a longer one (under ASan, say) */
+        while(npages>1){page_pop();frame(300);}
+        int st0=test_status;test_status=AUDIO_STATUS_PLAY;
+        int mins=getenv("SLOPPY_TORTURE")?atoi(getenv("SLOPPY_TORTURE")):0;   /* its clock is the wall's: 40 s by default */
+        memset(&tt,0,sizeof tt);tt.armed=true;tt.start_at=sl_ms();tt.end_at=sl_ms()+(mins?(uint32_t)mins*60000u:40000u);tt.rng=0x9e3779b9u;
+        int n0=audio_nexts,s0=audio_seeks;
+        while(tt.armed){sl_torture_poll();frame(50);}
+        printf("torture: %d minutes, %u steps, %d skips, %d seeks; %d pages open after\n",mins,(unsigned)tt.steps,audio_nexts-n0,audio_seeks-s0,npages);
+        assert(!tt.on && npages==1 && !acts_open_now && !overlay_visible() && tt.steps>10 && audio_nexts>n0);
+        if(sl_power_is_locked()||sl_power.mode==SL_POWER_DARK){sl_power_state_set(&sl_power,SL_POWER_ACTIVE,sl_ms());sl_power_apply();frame(600);}
+        /* and a person's pull still opens the panel after */
+        touch_at(240,4,true);for(int y=20;y<=500;y+=60)touch_at(240,y,true);touch_at(240,500,false);for(int i=0;i<5;i++)frame(100);
+        assert(qp_open);qp_close();for(int i=0;i<6;i++)frame(100);
+        test_status=st0;
+        printf("PASS: torture: skips, storms, seeks, pauses, the lists scrolled, Cover Flow, Now Playing, the panel, the quiz and the lock, and home again after.\n");
+    }
     if (getenv("SLOPPY_MEMTRACE")) {   /* the heap after each round of an ordinary session: growth is a leak */
         while(npages>1){page_pop();frame(300);}
         test_status=AUDIO_STATUS_PLAY;
@@ -11270,8 +11348,8 @@ int main(void) {
         system_page();frame(500);shot("settings-root.ppm");
         {int nt=sl_lib.n_tracks,na=sl_lib.n_albums;sl_lib.n_tracks=12345;sl_lib.n_albums=1234;page_pop();frame(500);system_page();frame(500);for(lv_obj_t *o=find_label(pages[npages-1],"GabagoolOS");o;o=lv_obj_get_parent(o))lv_obj_scroll_to_y(o,0,LV_ANIM_OFF);frame(100);shot("settings-hero-big.ppm");sl_lib.n_tracks=nt;sl_lib.n_albums=na;page_pop();frame(500);system_page();frame(500);}
         lv_obj_scroll_to_y(lv_obj_get_child(pages[npages-1],1),4000,LV_ANIM_OFF);frame(300);shot("settings-root-end.ppm");
-        assert(!strcmp(sl_update_footer(),"GABAGOOLOS \xc2\xb7 GAME ON THEN UPDATE"));
-        assert(find_label(pages[npages-1],"HiBy R1 \xc2\xb7 Game on then"));
+        assert(!strcmp(sl_update_footer(),"GABAGOOLOS \xc2\xb7 CAPICOLA UPDATE"));
+        assert(find_label(pages[npages-1],"HiBy R1 \xc2\xb7 Capicola"));
         assert(find_label(pages[npages-1],sl_update_footer()));page_pop();frame(500);
 
         /* shortcuts: up to 8 of 12, the control centre follows */
@@ -11585,8 +11663,10 @@ int main(void) {
             assert(wall_custom_px&&wallpaper_id(false)==WALL_CUSTOM&&wallpaper_id(true)==WALL_CUSTOM);
             shot("wallpaper-home-custom.ppm");
             {   /* the home screen shows it: the sun's colour where the sun is */
-                uint16_t c=pixels[310*W+160];   /* between the card rows */int r=c>>11,g=(c>>5)&63;printf("home on your picture: sun pixel %d,%d\n",r,g);
-                assert(r>=24&&g>=40); }
+                /* in the gap between the two columns of cards: the picture itself */
+                uint16_t c=pixels[310*W+W/2],want=wall_custom_px[310*W+W/2];
+                printf("home on your picture: gap pixel %04x, the picture's %04x\n",c,want);
+                assert(c==want&&c!=(uint16_t)lv_color_to_u16(lv_color_hex(C_BG))); }
             sl_power_overlay_show(true);frame(400);shot("wallpaper-lock-custom.ppm");sl_power_overlay_show(false);for(int i=0;i<6;i++)frame(100);
             wallpaper_page(true);frame(500);assert(find_label(pages[npages-1],"Your picture"));shot("wallpaper-page-custom.ppm");page_pop();frame(400);
             /* home only, from a picture in Files */

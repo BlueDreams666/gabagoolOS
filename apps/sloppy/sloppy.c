@@ -803,6 +803,8 @@ static bool mini_held_off(void);
 static void mini_update(void);
 static bool qp_is_visible(void);
 static void qp_drag_to(int dy);
+static void sl_torture_boot(void);                    /* sloppy_torture.inc */
+static void sl_torture_poll(void);
 static void qp_glass_early(void);
 static void qp_release(int dy, int vy);
 static bool qp_edge_grab(int y);
@@ -960,6 +962,7 @@ static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
     if (y < 0) y = 0;
     if (x >= W) x = W - 1;
     if (y >= H) y = H - 1;
+    if (down) sl_torture_stop("a touch");   /* a person: the run ends */
     cfm_touch_read(down, x, y);
     /* A whole tap between two reads (a slow frame: a game, a page being
      * built) left the panel up both times and was never seen. The driver's
@@ -6614,6 +6617,7 @@ static void card_row_open(intptr_t v)
     else if (v == 0x2000b) lock_player_page();
     else if (v == 0x20016) np_style_page();
     else if (v == 0x2001a) cf_style_page();
+    else if (v == 0x2002c) usb_screen_page();
     else if (v == 0x2000c) screen_sleep_page();
     else if (v == 0x2000d) sound_page();
     else if (v == 0x2000e) buttons_page();
@@ -6753,28 +6757,38 @@ static lv_obj_t *home_card(lv_obj_t *grid, int w)
     press_motion(c);
     return c;
 }
+/* Over a wallpaper the cards let a little of it through, as the stock
+ * player's squares do; on the plain background they stay solid */
+static void home_card_wall(lv_obj_t *c)
+{
+    /* white cards over a dark picture go grey sooner: more of them */
+    if (wallpaper_id(false) > 0) lv_obj_set_style_bg_opa(c, sl_theme() == 1 ? LV_OPA_90 : LV_OPA_80, 0);
+}
+/* a destination: a square-ish card, its icon over its name, both centred
+ * (the stock player's menu): the six fill the screen under Music */
+#define HOME_CELL_H (HOME_CARD_W * 4 / 5)
+#define HOME_CELL_ICON 64
 static void home_cell(lv_obj_t *grid, const char *sym, int icon, const char *label, uint32_t icbg, int k, int col, int row)
 {
     lv_obj_t *c = home_card(grid, HOME_CARD_W);
+    home_card_wall(c);
+    lv_obj_set_height(c, HOME_CELL_H);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(c, SL_SP_S + SL_SP_XS, 0);
-    lv_obj_t *ic = lit_square(c, icbg, HOME_ICON);   /* child 0: the icon rises after the card */
+    lv_obj_set_flex_align(c, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(c, SL_SP_S + SL_SP_XS + 2, 0);
+    lv_obj_t *ic = lit_square(c, icbg, HOME_CELL_ICON);   /* child 0: the icon rises after the card */
     if (k == ACT_SYSTEM)
     {
         home_settings_icon = ic;
         home_icon_small = true;
         settings_icon_fill(ic, global_settings.sloppy_skull_icon);
     }
-    else if (icon) lv_obj_center(sl_icon(ic, icon, 34, 0xffffff, icbg));
-    else lv_obj_center(text_light(ic, sym, &sl_sym_32));
+    else if (icon) lv_obj_center(sl_icon(ic, icon, 40, 0xffffff, icbg));
+    else lv_obj_center(text_light(ic, sym, &sl_sym_40));
     lv_obj_t *l = text(c, label, &ss_semibold_21, 0xffffff);
     lv_obj_set_width(l, lv_pct(100));
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     label_lines(l, 1);
-    if (sl_ui_rtl())   /* icon and name from the right edge */
-    {
-        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_style_margin_left(ic, HOME_CARD_W - 2 * SL_INSET - HOME_ICON, 0);
-    }
     on_click(c, tile_cb, (void *)(intptr_t)k);
     unsigned delay = home_intro_ms + (unsigned)(row * 30 + col * 15);
     home_rush_in(c, delay);
@@ -6785,6 +6799,7 @@ static void home_shuffle_cb(lv_event_t *e) { (void)e; action(ACT_SHUFFLE); }
 static void home_music_card(lv_obj_t *grid)
 {
     lv_obj_t *c = home_card(grid, W - 2 * SL_GUTTER);
+    home_card_wall(c);
     lv_obj_set_flex_flow(c, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(c, SL_GUTTER + 2, 0);
@@ -6911,6 +6926,97 @@ static void reset_all_settings_open_cb(lv_event_t *e)
     reset_all_settings_page();
 }
 
+/* The Cards home's apps and games: in the order the user put them
+ * (Arrange apps and games, the pencil by their heading), kept in apps.txt
+ * as their places in ha_defs; one added since comes at the end. */
+#define HA_FILE ROCKBOX_DIR "/sloppy/apps.txt"
+#define HA_N 20
+static const struct { const char *name, *sub; int act, icon; uint32_t tint; } ha_defs[HA_N] = {
+    { "Files", "Every folder on the card", ACT_FILES, IC_FILES, 0xa88a5c },
+    { "Tamagotchi", "A little friend, always growing", ACT_PET, IC_PET, 0xb57c8f },
+    { "Ragdoll", "Grab, toss and watch it tumble", ACT_RAGDOLL, IC_RAGDOLL, 0x6199a1 },
+    { "Snake", "Classic walls or level challenge", ACT_SNAKE, IC_SNAKE, 0x6aa87c },
+    { "2048", "Slide the tiles, join the twins", ACT_2048, IC_2048, 0xd9893b },
+    { "Sudoku", "Four levels, with notes and hints", ACT_SUDOKU, IC_SUDOKU, 0x4f7fe0 },
+    { "24 Points", "Make 24 from four cards", ACT_POINTS, IC_POINTS, 0xc2574a },
+    { "Flappy Bird", "Tap to flap through the pipes", ACT_FLAPPY, IC_FLAPPY, 0x4fb8c4 },
+    { "Sloppy FM", "Tap to tune and grow your station", ACT_RADIO, IC_RADIO, 0x6b9eaa },
+    { "Freaky Spoon", "Bounce up with a very strange spoon", ACT_SPOON, IC_SPOON, 0x947da7 },
+    { "Music Bip Bop Smarty", "Music, movies and TV trivia", ACT_QUIZ, IC_QUIZ, 0x738b7d },
+    { "Flip a Coin", "A quick call for heads or tails", ACT_COIN, IC_COIN, 0xba8957 },
+    { "Magic 8 Ball", "Ask a question and tap the ball", ACT_MAGIC, IC_MAGIC, 0x6d83ba },
+    { "Chess", "Play the computer or a friend", ACT_CHESS, IC_CHESS, 0x8a6a4a },
+    { "Clicker", "Count anything, one tap at a time", ACT_CLICKER, IC_CLICKER, 0x4e9e8f },
+    { "Metronome", "Keep time, 30 to 250 beats a minute", ACT_METRONOME, IC_METRONOME, 0xc4794a },
+    { "Arcade", "Game Boy games from your card, and Doom", ACT_ARCADE, IC_CARTRIDGE, 0x7a5bd6 },
+    { "Spectrum", "Full screen, sideways", ACT_SPECTRUM, IC_SPECTRUM, 0x8a4fc9 },
+    { "Visualizer", "Your music, painting the screen", ACT_VISUALIZER, IC_VISUALIZER, 0x4b6fd6 },
+    { "Spacey Lines", "Draw into a spinning tunnel", ACT_SPACEY, IC_SPACEY, 0xb5568a },
+};
+static uint8_t ha_order[HA_N];
+static bool ha_read, ha_dirty;
+static lv_obj_t *ha_body;               /* the home's list, its rows from ha_first on */
+static uint32_t ha_first;
+static void ha_load(void)
+{
+    if (ha_read) return;
+    ha_read = true;
+    for (int i = 0; i < HA_N; i++) ha_order[i] = (uint8_t)i;
+    char b[16 + HA_N * 4];
+    int fd = open(HA_FILE, O_RDONLY);
+    ssize_t got = fd >= 0 ? read(fd, b, sizeof b - 1) : -1;
+    if (fd >= 0) close(fd);
+    if (got < 5 || strncmp(b, "SLA1\n", 5)) return;
+    b[got] = '\0';
+    bool seen[HA_N] = { false };
+    uint8_t order[HA_N];
+    int n = 0;
+    for (char *q = b + 5; *q && n < HA_N; )
+    {
+        char *end;
+        long id = strtol(q, &end, 10);
+        if (end == q) break;
+        q = end;
+        if (id < 0 || id >= HA_N || seen[id]) continue;
+        seen[id] = true;
+        order[n++] = (uint8_t)id;
+    }
+    for (int i = 0; i < HA_N; i++) if (!seen[i]) order[n++] = (uint8_t)i;
+    memcpy(ha_order, order, sizeof ha_order);
+}
+static void ha_save(void)
+{
+    char b[16 + HA_N * 4];
+    int len = snprintf(b, sizeof b, "SLA1\n");
+    for (int i = 0; i < HA_N; i++) len += snprintf(b + len, sizeof b - len, "%d\n", ha_order[i]);
+    mkdir(ROCKBOX_DIR "/sloppy");
+    int fd = open(HA_FILE ".tmp", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return;
+    bool ok = write(fd, b, len) == len;
+    if (ok) ok = fsync(fd) == 0;
+    if (close(fd) < 0) ok = false;
+    if (!ok || rename(HA_FILE ".tmp", HA_FILE) < 0) remove(HA_FILE ".tmp");
+}
+static void ha_rows(void)
+{
+    for (int i = 0; i < HA_N; i++)
+    {
+        int d = ha_order[i];
+        sl_app_row(ha_body, ha_defs[d].name, ha_defs[d].sub, ha_defs[d].act, ha_defs[d].icon, ha_defs[d].tint);
+    }
+}
+/* back from Arrange: the home's rows again, in the new order (only they) */
+static void ha_refresh_async(void *unused)
+{
+    (void)unused;
+    if (!ha_dirty || !ha_body || !npages || ha_body != lv_obj_get_child(pages[0], 0)) { ha_dirty = false; return; }
+    ha_dirty = false;
+    while (lv_obj_get_child_count(ha_body) > ha_first) lv_obj_delete(lv_obj_get_child(ha_body, (int32_t)ha_first));
+    ha_rows();
+}
+static void ha_arrange_page(void);   /* sloppy_settings.inc */
+static void ha_arrange_cb(lv_event_t *e) { (void)e; ha_arrange_page(); }
+
 static void home_page(void)
 {
     if (sl_home_tiles()) { metro_home_page(); return; }
@@ -6950,31 +7056,23 @@ static void home_page(void)
     home_cell(g, NULL, IC_PLAYROOM, "Playroom", 0xc47d70, ACT_GAMES, 1, 1);
     home_cell(g, LV_SYMBOL_BLUETOOTH, IC_NONE, "Bluetooth", 0x4e999f, ACT_BLUETOOTH, 0, 2);
     home_cell(g, LV_SYMBOL_SETTINGS, IC_NONE, "Settings", 0x657b93, ACT_SYSTEM, 1, 2);
-    lv_obj_t *head = section(body, "APPS & GAMES");
+    /* the heading, and its pencil: Arrange apps and games */
+    lv_obj_t *hr = box(body);
+    lv_obj_set_size(hr, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(hr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    if (sl_ui_rtl()) lv_obj_set_style_base_dir(hr, LV_BASE_DIR_RTL, 0);
+    lv_obj_t *head = section(hr, "APPS & GAMES");
     lv_obj_set_style_pad_top(head, SL_GUTTER + SL_SP_S, 0);
+    lv_obj_t *pen = icon_btn(hr, LV_SYMBOL_EDIT, 44, ha_arrange_cb, NULL);
+    if (wallpaper_id(false) >= 5) lv_obj_set_style_text_color(lv_obj_get_child(pen, 0), lv_color_hex(0xdde3ea), 0);
     /* it sits on the wallpaper, not a card: on the photos (all dark) it
      * goes white like the status bar, or the light theme's grey vanishes */
     if (wallpaper_id(false) >= 5) lv_obj_set_style_text_color(head, lv_color_hex(0xdde3ea), 0);
-    sl_app_row(body, "Files", "Every folder on the card", ACT_FILES, IC_FILES, 0xa88a5c);
-    sl_app_row(body, "Tamagotchi", "A little friend, always growing", ACT_PET, IC_PET, 0xb57c8f);
-    sl_app_row(body, "Ragdoll", "Grab, toss and watch it tumble", ACT_RAGDOLL, IC_RAGDOLL, 0x6199a1);
-    sl_app_row(body, "Snake", "Classic walls or level challenge", ACT_SNAKE, IC_SNAKE, 0x6aa87c);
-    sl_app_row(body, "2048", "Slide the tiles, join the twins", ACT_2048, IC_2048, 0xd9893b);
-    sl_app_row(body, "Sudoku", "Four levels, with notes and hints", ACT_SUDOKU, IC_SUDOKU, 0x4f7fe0);
-    sl_app_row(body, "24 Points", "Make 24 from four cards", ACT_POINTS, IC_POINTS, 0xc2574a);
-    sl_app_row(body, "Flappy Bird", "Tap to flap through the pipes", ACT_FLAPPY, IC_FLAPPY, 0x4fb8c4);
-    sl_app_row(body, "Sloppy FM", "Tap to tune and grow your station", ACT_RADIO, IC_RADIO, 0x6b9eaa);
-    sl_app_row(body, "Freaky Spoon", "Bounce up with a very strange spoon", ACT_SPOON, IC_SPOON, 0x947da7);
-    sl_app_row(body, "Music Bip Bop Smarty", "Music, movies and TV trivia", ACT_QUIZ, IC_QUIZ, 0x738b7d);
-    sl_app_row(body, "Flip a Coin", "A quick call for heads or tails", ACT_COIN, IC_COIN, 0xba8957);
-    sl_app_row(body, "Magic 8 Ball", "Ask a question and tap the ball", ACT_MAGIC, IC_MAGIC, 0x6d83ba);
-    sl_app_row(body, "Chess", "Play the computer or a friend", ACT_CHESS, IC_CHESS, 0x8a6a4a);
-    sl_app_row(body, "Clicker", "Count anything, one tap at a time", ACT_CLICKER, IC_CLICKER, 0x4e9e8f);
-    sl_app_row(body, "Metronome", "Keep time, 30 to 250 beats a minute", ACT_METRONOME, IC_METRONOME, 0xc4794a);
-    sl_app_row(body, "Arcade", "Game Boy games from your card, and Doom", ACT_ARCADE, IC_CARTRIDGE, 0x7a5bd6);
-    sl_app_row(body, "Spectrum", "Full screen, sideways", ACT_SPECTRUM, IC_SPECTRUM, 0x8a4fc9);
-    sl_app_row(body, "Visualizer", "Your music, painting the screen", ACT_VISUALIZER, IC_VISUALIZER, 0x4b6fd6);
-    sl_app_row(body, "Spacey Lines", "Draw into a spinning tunnel", ACT_SPACEY, IC_SPACEY, 0xb5568a);
+    ha_load();
+    ha_body = body;
+    ha_first = lv_obj_get_child_count(body);
+    ha_rows();
     ptr_attach(p, body, wallpaper_id(false) >= 5 ? 0xffffff : C_TEXT);
     pages[npages++] = p;
 }
@@ -8572,6 +8670,7 @@ static void log_boot_times(void)
         prev = marks[i].ms;
     }
     sl_log("boot: home screen %lums after the splash", (unsigned long)(sl_ms() - boot_ms0));
+    sl_torture_boot();
 }
 
 #if defined(HIBY_R1) && !defined(SIMULATOR)
@@ -8999,6 +9098,7 @@ static void sl_mem_on_dark(void)
 }
 
 #include "sloppy_report.inc"
+#include "sloppy_torture.inc"
 /* Underruns are heard as clicks or gaps: note them on the card at most
  * once a minute, with the output and rate they happened on. */
 /* A finger held still for seconds: once a second, what was under it and
@@ -9042,6 +9142,7 @@ static void periodic(lv_timer_t *t)
     if (t) lv_timer_set_period(t, wallpaper_screen_dark ? 1000 : 250);
     bl_tick();
     sl_kernel_misuse_note();       /* dark too: a screen-off freeze is where it was seen */
+    sl_torture_poll();                   /* a run asked for on the card (sloppy_torture.inc) */
 #if defined(HIBY_R1) && !defined(SIMULATOR)
     usb_trace_flush();                   /* a plug that did not become USB mode, say: onto the card */
 #endif

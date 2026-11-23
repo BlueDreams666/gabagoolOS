@@ -1271,6 +1271,36 @@ static void cf_style_cb(lv_event_t *e)
     if (settings_save() != 0) toast_warn("Could not save Cover Flow settings");
 }
 
+/* Customization > USB mode screen: the dog saying "USB mode", or Rockbox's
+ * own plug in the middle (for those who want no dog) */
+static void usb_screen_cb(lv_event_t *e)
+{
+    global_settings.sloppy_usb_classic = (int)(intptr_t)lv_event_get_user_data(e) != 0;
+    set_check_mark(lv_event_get_current_target(e));
+    if (settings_save() != 0) toast_warn("Could not save the USB mode screen");
+}
+static void usb_screen_sketch(lv_obj_t *pic, bool classic)
+{
+    lv_obj_t *s = set_pic_screen(pic, SET_PIC_W, SET_PIC_H, classic ? 0x000000 : 0x8a6a48);
+    lv_obj_t *m = box(s);
+    lv_obj_set_size(m, classic ? 44 : 50, classic ? 12 : 20);
+    lv_obj_set_pos(m, (SET_PIC_W - (classic ? 44 : 50)) / 2, classic ? (SET_PIC_H - 12) / 2 : SET_PIC_H - 30);
+    lv_obj_set_style_radius(m, classic ? SL_R_MINI : SL_R_FULL, 0);
+    lv_obj_set_style_bg_color(m, lv_color_hex(classic ? 0x9aa3ad : 0xeeeeee), 0);
+    lv_obj_set_style_bg_opa(m, LV_OPA_COVER, 0);
+}
+static void usb_screen_page(void)
+{
+    static const char *const names[] = { "Gabagool", "Classic" };
+    static const char *const notes[] = { "The dog, saying USB mode", "Rockbox's own USB plug, no dog" };
+    lv_obj_t *p, *body = page_new("USB mode screen", &p);
+    int choice = global_settings.sloppy_usb_classic ? 1 : 0;
+    lv_obj_t *g = set_group(body, "While the player is on a computer");
+    for (int i = 0; i < 2; i++)
+        usb_screen_sketch(lv_obj_get_child(set_pick(g, names[i], notes[i], i == choice, usb_screen_cb, (void *)(intptr_t)i), 2), i == 1);
+    page_push(p);
+}
+
 /* Customization > Cover Flow: the player on its side, or upright. */
 static void cf_style_page(void)
 {

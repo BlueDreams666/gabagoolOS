@@ -20203,3 +20203,17 @@
     *: "Skull settings icon"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_SLOPPY_USB_CLASSIC
+  desc: GabagoolOS USB mode screen: the classic Rockbox plug instead of the photo
+  user: core
+  <source>
+    *: "Classic USB mode screen"
+  </source>
+  <dest>
+    *: "Classic USB mode screen"
+  </dest>
+  <voice>
+    *: "Classic USB mode screen"
+  </voice>
+</phrase>

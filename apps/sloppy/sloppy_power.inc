@@ -609,9 +609,11 @@ static void sl_keys_lock_toggle(void)
     sl_log("keys: %s", sl_keys_locked ? "locked" : "unlocked");
     sl_keys_note(sl_keys_locked ? "Buttons locked" : "Buttons unlocked");
 }
+static void sl_torture_stop(const char *why);     /* sloppy_torture.inc */
 static bool sl_power_filter_button(long btn)
 {
     if (!sl_power_running || sl_power_suspended) return false;
+    if (btn != BUTTON_NONE) sl_torture_stop("a key");   /* a person: the run ends */
     bool released = (btn & BUTTON_REL) != 0;
     bool repeated = (btn & BUTTON_REPEAT) != 0;
     unsigned key = btn & ~(BUTTON_REL | BUTTON_REPEAT);
@@ -621,8 +623,16 @@ static bool sl_power_filter_button(long btn)
     /* Volume up held, then Power: the same, in Sonix's order. The power
      * press is taken as a hold already used, so its release does nothing */
     static bool up_down, down_down, down_combo;
-    if (key == BUTTON_UP) up_down = !released;
-    if (key == BUTTON_DOWN) down_down = !released;
+    /* which volume keys are down, from every key event: a press reports all
+     * the keys held, a release the ones let go. Only Volume up's own codes
+     * once counted, so it let go together with another key (a game's keys,
+     * sideways) stayed down here, and every press of Power after took a
+     * screenshot (23 Nov). The power key's own events leave it be. */
+    if (key & (BUTTON_UP | BUTTON_DOWN | BUTTON_LEFT | BUTTON_RIGHT))
+    {
+        if (!released) { up_down = (key & BUTTON_UP) != 0; down_down = (key & BUTTON_DOWN) != 0; }
+        else { if (key & BUTTON_UP) up_down = false; if (key & BUTTON_DOWN) down_down = false; }
+    }
     if (key == BUTTON_POWER && down_down && !released && !repeated && !sl_power.power_down && !po_is_open())
     {
         sl_power.power_down = sl_power.power_fired = true;
