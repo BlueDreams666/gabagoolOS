@@ -484,6 +484,12 @@ static int sb_count_files(const char *dir)
     if (f) { if (fscanf(f, "%d", &n) != 1) n = 0; pclose(f); }
     return n;
 }
+static bool sb_never(void) { return false; }
+static bool sb_ahead_done(void)
+{
+    return sb_idle() && sub_ses.pl_n == 1 + SL_SUB_AHEAD && queued == 1 + SL_SUB_AHEAD &&
+           sb_count_files(SB_FOLDER) == 1 + SL_SUB_AHEAD;
+}
 static void sb_setup(void)
 {
     sb_start();
@@ -715,7 +721,11 @@ static void sb_tests(void)
         struct playlist_track_info inf;
         assert(playlist_get_track_info(NULL, 0, &inf) >= 0 && !strcmp(inf.filename, rb));
     }
-    sb_wait(sb_idle, 8000);
+    /* idle alone is not enough: between two songs the worker rests until
+     * the next tick asks for the next one. Then hold on: none further may
+     * come (the whole album once did, after the few ahead were in) */
+    sb_wait(sb_ahead_done, 8000);
+    sb_wait(sb_never, 1500);
     /* read ahead: the one playing and three more, no further */
     assert(sb_count_files(SB_FOLDER) == 1 + SL_SUB_AHEAD && sub_ses.pl_n == 1 + SL_SUB_AHEAD && queued == 1 + SL_SUB_AHEAD);
     {

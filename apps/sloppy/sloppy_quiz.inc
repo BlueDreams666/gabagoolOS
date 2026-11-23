@@ -179,9 +179,14 @@ static void quiz_restore_clip(void)
                          (quiz.clip.hushed || (status & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE)));
     /* Stop before touching the queue: with crossfade enabled Rockbox would
      * otherwise blend the clip into the restored song for seconds. */
+    /* each step timed: leaving Your taste held the screen for a second
+     * here on the R1 (22 Nov), and which step is not known yet */
+    uint32_t t0 = sl_ms();
     if (still_on_clip && !quiz.clip.hushed)
         audio_stop();
+    uint32_t t1 = sl_ms();
     playlist_delete(NULL, quiz.clip.sample_index);
+    uint32_t t2 = sl_ms();
     if (!still_on_clip)
     { sl_log("quiz: user moved on during clip; removed temporary item only"); return; }
     if (!quiz.clip.was_playing)
@@ -201,7 +206,8 @@ static void quiz_restore_clip(void)
      * crossfade), and the MP3 codec prefers it over the elapsed time. */
     playlist_start(quiz.clip.index, quiz.clip.elapsed, 0);
     if (quiz.clip.was_paused) audio_pause();
-    sl_log("quiz: restored track %d at %lu ms (clock %lu)", quiz.clip.index, quiz.clip.elapsed, (unsigned long)sl_ms());
+    sl_log("quiz: restored track %d at %lu ms (clock %lu); stop %u ms, remove %u ms, start %u ms", quiz.clip.index,
+           quiz.clip.elapsed, (unsigned long)sl_ms(), (unsigned)(t1 - t0), (unsigned)(t2 - t1), (unsigned)(sl_ms() - t2));
 }
 /* Silence the clip now (an answer, or its 3 s are up) and bring the user's
  * song back a moment later, once the answer's sound has played: restarting

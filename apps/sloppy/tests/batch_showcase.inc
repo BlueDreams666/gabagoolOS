@@ -92,6 +92,12 @@ static const struct sc_album { const char *title, *artist, *genre; int year, n; 
     { "Fetch the Bolt Cutters", "Fiona Apple", "Rock", 2020, 6,
       { "I Want You to Love Me", "Shameika", "Fetch the Bolt Cutters", "Under the Table", "Relay", "Rack of His" },
       { 237, 248, 298, 201, 289, 222 }, { 1, 2, 3, 4, 5, 6 } },
+    /* last, so the earlier covers keep their numbers; one song, so the Songs
+     * pages still find a run of rows clear of the songs the shots play */
+    { "Good Girl Gone Bad: Reloaded", "Rihanna", "Pop", 2008, 1, { "Umbrella" }, { 275 }, { 1 } },
+    { "Hit Me Hard and Soft", "Billie Eilish", "Pop", 2024, 8,
+      { "SKINNY", "LUNCH", "CHIHIRO", "BIRDS OF A FEATHER", "WILDFLOWER", "THE GREATEST", "L'AMOUR DE MA VIE", "THE DINER" },
+      { 219, 180, 303, 210, 261, 293, 333, 186 }, { 1, 2, 3, 4, 5, 6, 7, 8 } },
 };
 #define SC_NA ((int)(sizeof sc_albums / sizeof sc_albums[0]))   /* at most SC_N, and 8 songs each */
 
@@ -255,6 +261,19 @@ static int sc_pick(int not_album, int *next)
             return t;
         }
     }
+    /* every album playing already (the feature shots came on top): a song not
+     * yet shown, from any album but the one on the screen */
+    for (int a = 0; a < SC_NA; a++)
+    {
+        if (a == not_album) continue;
+        for (int k = sc_al[a].n_tracks - 1; k >= 0; k--)
+        {
+            int t = sc_al[a].tracks[k];
+            if (sc_listed(t) || sc_song_used[t]) continue;
+            sc_song_used[t] = true;
+            return t;
+        }
+    }
     fprintf(stderr, "showcase: no song left to play\n"); assert(0); return -1;
 }
 static void showcase_shots(const char *covers, const char *out)
@@ -271,7 +290,14 @@ static void showcase_shots(const char *covers, const char *out)
         { "control-centre-dark", "control-centre", 0 },   /* before the equalizer's shot turns it on */
         { "tiles-home-dark", "home", 2 }, { "cards-home-dark", "home", 0 }, { "list-home-zule", "home", 6 },
         { "music-zule", "music", 6 },
-        { "now-playing-dark", "now-playing", 0, "Child Psychology" }, { "now-playing-nelly-dark", "now-playing", 0, "Say It Right" },
+        { "now-playing-dark", "now-playing", 0, "Child Psychology" }, { "now-playing-nelly-dark", "now-playing", 0, "Say It Right" }, { "now-playing-umbrella-dark", "now-playing", 0, "Umbrella" },
+        { "album-hmhas-dark", "album", 0, "BIRDS OF A FEATHER" },
+        /* the front page's main features: the queue, crossfade, Cover Flow held sideways, the games */
+        { "queue-dark", "queue", 0, "The Grants" },
+        { "crossfade-dark", "settings-playback", 0, "Teardrop" },
+        { "coverflow-landscape-dark", "coverflow", 0, "Here Comes Your Man" },
+        { "playroom-dark", "playroom", 0, "Karma Police" }, { "chess-dark", "chess", 0, "Let Down" },
+        { "2048-dark", "2048", 0, "Green Light" },
         { "album-dark", "album", 0 },
         { "eq-autoeq-dark", "settings-eq-autoeq", 0 },
         { "taste-dark", "taste", 0, NULL, "Kintsugi" },
@@ -296,7 +322,13 @@ static void showcase_shots(const char *covers, const char *out)
     int play[NS], next = 1;
     for (int i = 0; i < NS; i++)
     {
-        if (shots[i].play) { int t = sc_song(shots[i].play); sc_album_used[sc_tr[t].album] = sc_song_used[t] = true; }
+        /* the hero's Now Playing (Umbrella) may show in Songs too: next to it is
+         * where it belongs, and the Songs pages had no run clear of it */
+        /* (and the main features' shots, made on top of the rest) */
+        if (shots[i].play && (strstr(" now-playing-umbrella-dark album-hmhas-dark queue-dark crossfade-dark coverflow-landscape-dark playroom-dark chess-dark 2048-dark ",
+                                     shots[i].file) != NULL))
+            sc_album_used[sc_tr[sc_song(shots[i].play)].album] = true;
+        else if (shots[i].play) { int t = sc_song(shots[i].play); sc_album_used[sc_tr[t].album] = sc_song_used[t] = true; }
         if (shots[i].card) sc_song_used[sc_song(shots[i].card)] = true;
     }
     for (int k = 0; k < 4; k++) sc_song_used[sc_al[0].tracks[k]] = true;
@@ -309,16 +341,39 @@ static void showcase_shots(const char *covers, const char *out)
     }
     for (int t = 0; t < sl_lib.n_tracks; t++) assert(!(sc_song_used[t] && sc_listed(t)));
     for (int i = 0; i < NS; i++)
-        play[i] = !strcmp(shots[i].screen, "coverflow") ? sc_al[0].tracks[0] :
+        play[i] = !strcmp(shots[i].screen, "coverflow") && !shots[i].play ? sc_al[0].tracks[0] :
                   shots[i].play ? sc_song(shots[i].play) : sc_pick(shots[i].card ? sc_tr[sc_song(shots[i].card)].album : -1, &next);
     for (int i = 0; i < NS; i++)
     {
         if (getenv("SLOPPY_AUDIT_ONLY") && !strstr(shots[i].file, getenv("SLOPPY_AUDIT_ONLY"))) continue;
         au_apply(shots[i].look, 0, 0);
         sc_play(sc_tr[play[i]].title);
-        global_settings.sloppy_cf_vertical = !strcmp(shots[i].screen, "coverflow");   /* upright, as the page's phone is */
+        /* upright, as the page's phone is; the landscape one as Cover Flow is held */
+        global_settings.sloppy_cf_vertical = !strcmp(shots[i].screen, "coverflow") && !strstr(shots[i].file, "landscape");
         if (!strcmp(shots[i].screen, "home")) au_open_home(AU_HOME);
-        else { test_status = AUDIO_STATUS_PLAY; mini_update(); global_settings.sloppy_notifications = 0; au_open(au_find(shots[i].screen)); au_settle(); }
+        else
+        {
+            if (!strcmp(shots[i].file, "crossfade-dark")) xf_apply(6, true);   /* on: six seconds, skips too */
+            test_status = AUDIO_STATUS_PLAY; mini_update(); global_settings.sloppy_notifications = 0; au_open(au_find(shots[i].screen)); au_settle();
+        }
+        if (!strcmp(shots[i].file, "chess-dark"))   /* a game under way, not the new-game sheet */
+        {
+            chess_start(0, 0, 1); chess_sheet_close_now(false); frame(300);
+            /* the Italian: 1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6, white to move */
+            static const int mv[][4] = { {4,1,4,3}, {4,6,4,4}, {6,0,5,2}, {1,7,2,5}, {5,0,2,3}, {6,7,5,5} };
+            for (int k = 0; k < 6; k++)
+            {
+                struct sl_chess_move all[256];
+                int n = sl_chess_legal(&chess.pos, all, false), found = -1;
+                for (int j = 0; j < n; j++)
+                    if (all[j].from == CH_SQ(mv[k][0], mv[k][1]) && all[j].to == CH_SQ(mv[k][2], mv[k][3])) found = j;
+                assert(found >= 0);
+                chess_play_move(&all[found], false); frame(200);
+            }
+            au_settle();
+        }
+        if (!strcmp(shots[i].file, "album-hmhas-dark"))   /* the hero's album page: its own album, not the first */
+        { page_pop(); frame(400); album_page(sc_tr[play[i]].album); au_settle(); }
         if (!strncmp(shots[i].screen, "now-playing", 11)) { np_glow_refresh(true); frame(300); }   /* the glass, made from this cover, not the last one */
         if (!strcmp(shots[i].screen, "lyrics-picker")) { sc_rel = play[i]; sc_play(sc_tr[play[i]].title); sc_relabel(lv_screen_active()); sc_relabel(lv_layer_top()); frame(100); }
         if (shots[i].card && td.n)   /* the top card: this song */
@@ -336,6 +391,7 @@ static void showcase_shots(const char *covers, const char *out)
         sc_seen(lv_screen_active(), i, names); sc_seen(lv_layer_top(), i, names);
         if (shots[i].card) sc_mark(sc_song(shots[i].card), i, names);   /* drawn as a picture: no label to find */
         printf("showcase: %-22s %s - %s\n", shots[i].file, test_track.title, test_track.artist);
+        if (!strcmp(shots[i].file, "crossfade-dark")) xf_apply(0, false);
         snprintf(p, sizeof p, "%s/%s.ppm", out, shots[i].file); shot_now(p);
         au_reset(); au_empty(false);
     }

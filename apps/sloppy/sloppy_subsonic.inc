@@ -1140,6 +1140,9 @@ static void sub_ses_tick(void)
         char path[300];
         if (!sl_sub_cached(sub_ses.l.server, sl_sub_s(&sub_ses.l, it->id), path, sizeof path))
         {
+            /* enough queued after the one playing: no more until it moves on
+             * (asking here once the few ahead were in fetched the whole album) */
+            if (sub_ses.pl_n && sub_ses.pl_n - 1 - (cur > 0 ? cur : 0) >= SL_SUB_AHEAD) break;
             /* not coming (gone from the server, no room, offline): the next one instead */
             bool coming = sub_st.queued || sub_st.dl_id[0];
             if (sub_ses.fetched > sub_ses.cursor && !coming && sub_st.dl_seq != sub_ses.dl_seq0 && sl_ms() - sub_ses.asked_ms > 500)

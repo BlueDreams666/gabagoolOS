@@ -1834,14 +1834,29 @@ static bool mt_on_screen(lv_obj_t *o)
     lv_obj_get_coords(o, &a);
     return a.y2 > SB_H && a.y1 < H;
 }
+/* A step of the tick that held the UI (on the R1, 50-230 ms every few
+ * seconds on the idle start screen, 22 Nov, where the Mac takes 11 ms at
+ * most): named in the log, at most once a minute, to find which. */
+static uint32_t mt_step_at;
+static void mt_step(const char *what, int id)
+{
+    uint32_t now = sl_ms(), took = now - mt_step_at;
+    mt_step_at = now;
+    static uint32_t said;
+    if (took < 40 || (said && now - said < 60000)) return;
+    said = now;
+    if (id >= 0) sl_log("start: %s of tile %d took %u ms", what, id, (unsigned)took);
+    else sl_log("start: %s took %u ms", what, (unsigned)took);
+}
 static void mt_tick(lv_timer_t *t)
 {
     (void)t;
+    mt_step_at = sl_ms();
     if (mt.dragging && !(touch && lv_indev_get_state(touch) == LV_INDEV_STATE_PRESSED)) mt_drop();
     if (!mt.page || npages > 1 || overlay_visible() || sl_power_hides_ui()) return;   /* only while seen */
     mt.ticks++;
     struct tm *tm = get_time();
-    if (tm->tm_min != mt.last_min) mt_clock_update();
+    if (tm->tm_min != mt.last_min) { mt_clock_update(); mt_step("the clock", -1); }
     struct mp3entry *id3 = something_playing() ? audio_current_track() : NULL;
     bool changed = (id3 != NULL) != mt.music_state || (id3 && strcmp(id3->path, mt.music_path));
     if (changed) mt_music_front();
@@ -1850,11 +1865,14 @@ static void mt_tick(lv_timer_t *t)
         mt_fill(&mt.slot[np]);
     mt.music_state = id3 != NULL;           /* remembered even with no Music tile */
     strlcpy(mt.music_path, id3 ? id3->path : "", sizeof mt.music_path);
+    mt_step("the music tiles", -1);
     mt_queue_update();
     int un = mt_find(TL_UPNEXT);
     if (un >= 0 && mt.slot[un].size != SZ_SMALL && (mt.slot[un].live & 1) && mt_upnext_now() != mt.upnext_key)
         mt_fill(&mt.slot[un]);               /* the widget follows the queue */
+    mt_step("the queue", -1);
     mt_lib_update();
+    mt_step("the library tiles", -1);
     if (sl_lib.n_albums && !mt.had_albums)
     {
         /* the library arrived after start was built: now there are covers */
@@ -1884,7 +1902,10 @@ static void mt_tick(lv_timer_t *t)
     if (mt.ticks % 6 == 1)
         for (int k = 0; k < mt.n; k++)
             if (!mt.slot[k].faces && mt.slot[k].back && mt_on_screen(mt.slot[k].obj))
+            {
                 mt_mosaic_swap(mt.slot[k].back);
+                mt_step("a cover swap", mt.slot[k].id);
+            }
     /* A live tile on screen peeks at its back face, taking turns: tiles
      * scrolled away do not use up turns. The back is made a second before
      * the peek, while it is out of sight, so its cover has come from the
@@ -1896,9 +1917,11 @@ static void mt_tick(lv_timer_t *t)
         {
             int at = mt.peek_turn++ % mt.n;
             struct mt_slot *s = &mt.slot[at];
-            if (!s->faces || s->down_at || lv_anim_get(s->faces, mt_set_face) || !mt_on_screen(s->obj) ||
-                !mt_back(s))
+            if (!s->faces || s->down_at || lv_anim_get(s->faces, mt_set_face) || !mt_on_screen(s->obj))
                 continue;
+            bool made = mt_back(s);
+            mt_step("the back", s->id);
+            if (!made) continue;
             mt.peek_next = at + 1;
             break;
         }
@@ -1911,6 +1934,7 @@ static void mt_tick(lv_timer_t *t)
     struct mt_slot *s = &mt.slot[at];
     if (!s->faces || s->down_at || lv_anim_get(s->faces, mt_set_face) || !mt_on_screen(s->obj)) return;
     mt_peek(s->faces, mt_px(mt_span_h(s->size)));
+    mt_step("the peek", s->id);
     s->down_at = mt.ticks + 4;
 }
 
