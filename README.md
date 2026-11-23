@@ -140,15 +140,7 @@ brand new touch interface on top, made for the R1.
 <summary><b>Was AI used to help build this?</b></summary>
 <br>
 
-Yes. Here's how we make sure it works:
-
-- **Every screen, checked.** All 32,256 combinations of screen, theme,
-  language and text size, so nothing's cut off or too small to tap.
-- **Monkey tests.** Thousands of random taps and swipes, hunting for crashes.
-- **Memory checks.** Hidden bugs get caught on a computer, not on your player.
-- **Sound checks.** The equalizer is tested to sound exactly right.
-
-All the code will be here for anyone to read.
+Yes.
 </details>
 
 <details>
