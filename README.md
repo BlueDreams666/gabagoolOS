@@ -9,7 +9,7 @@
 </picture>
 </a>
 
-**[Download 1.2](https://github.com/BlueDreams666/gabagoolOS/releases/latest)** &nbsp;·&nbsp;
+**[Download 1.2.1](https://github.com/BlueDreams666/gabagoolOS/releases/latest)** &nbsp;·&nbsp;
 [Website](https://bluedreams666.github.io/gabagoolOS/) &nbsp;·&nbsp;
 [How to install](#no-funny-business) &nbsp;·&nbsp;
 [Questions](#you-got-questions) &nbsp;·&nbsp;
@@ -109,7 +109,7 @@ We test every screen so you don't run into anything weird.
 
 Three steps, about ten minutes. Back up your card first, just in case.
 
-1. **Download** `GabagoolOS-1.2-HiBy-R1.zip` and `GabagoolOS-1.2-boot-menu.upt`
+1. **Download** `GabagoolOS-1.2.1-HiBy-R1.zip` and `GabagoolOS-1.2.1-boot-menu.upt`
    from the [latest release](https://github.com/BlueDreams666/gabagoolOS/releases/latest).
 2. **Copy them to your card.** Unzip the zip onto the card. Put the `.upt` file
    on the card too, and rename it `r1.upt`.

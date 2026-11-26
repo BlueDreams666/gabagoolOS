@@ -130,15 +130,14 @@ static void wave_tests(void)
         assert(wv_hash(test_track.path, 0, 2166136261u) != wv_hash(test_track.path, 1, 2166136261u));
         printf("PASS: the second play shows the whole waveform at once, read back from the card.\n");
     }
-    {   /* a tap at x seeks there, exactly as the thin bar did */
+    {   /* a tap on it seeks nothing (only a drag does, 25 Nov), as on the thin bar */
         frame(300);
         lv_area_t sb; lv_obj_get_coords(np_seek, &sb);
         int w = lv_area_get_width(&sb), x = sb.x1 + w / 4, y = (sb.y1 + sb.y2) / 2;
         int seeks = audio_seeks;
         touch_at(x, y, true); touch_at(x, y, true); touch_at(x, y, false); frame(100);
-        long want = (long)test_track.length / 4, got = (long)test_track.elapsed;
-        assert(audio_seeks == seeks + 1);
-        assert(labs(got - want) <= (long)test_track.length / w + (long)test_track.length / 1000);
+        assert(audio_seeks == seeks);
+        (void)w;
         /* a drag: the time follows the finger, the seek waits for the release */
         seeks = audio_seeks;
         touch_at(x, y, true);
@@ -148,7 +147,7 @@ static void wave_tests(void)
         assert(!strcmp(lv_label_get_text(np_t0), b));
         touch_at(x + 160, y, false); frame(100);
         assert(audio_seeks == seeks + 1 && labs((long)test_track.elapsed - (long)((int64_t)(w / 4 + 160) * test_track.length / w)) <= (long)test_track.length / 100);
-        printf("PASS: a tap on the waveform seeks to that point; a drag shows its time and seeks on release.\n");
+        printf("PASS: a tap on the waveform seeks nothing; a drag shows its time and seeks on release.\n");
     }
     {   /* paused: nothing is added; a seek is not heard as the columns between */
         uint8_t before[WV_N];

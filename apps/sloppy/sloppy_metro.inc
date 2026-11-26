@@ -90,8 +90,6 @@ static void mt_open(int act)
     }
 }
 /* the apps list: the same apps as the cards home, alphabetical */
-static const uint8_t mt_apps[] = { TL_CHESS, TL_CLICKER, TL_COVERFLOW, TL_FILES, TL_COIN, TL_SPOON, TL_MAGIC,
-                                   TL_QUIZ, TL_RAGDOLL, TL_RADIO, TL_SNAKE, TL_PET };
 
 /* back: a live tile's back face, or the cover mosaic of a tile that swaps
  * covers in place instead of peeking. live: bit 0 is the live face; the
@@ -178,7 +176,7 @@ static uint32_t mt_tile_shade(int id)
 
 /* Type straight on the page: white over the photo wallpapers, which are
  * all dark, whatever the theme. */
-static uint32_t mt_page_ink(void) { return wallpaper_id(false) >= 5 ? 0xffffff : C_TEXT; }
+static uint32_t mt_page_ink(void) { return wallpaper_dark(wallpaper_id(false)) ? 0xffffff : C_TEXT; }
 
 static lv_obj_t *mt_label(lv_obj_t *parent, const char *s, const lv_font_t *f, lv_opa_t opa)
 {
@@ -674,12 +672,23 @@ static void mt_cover_back(struct mt_slot *s, int album, const char *kicker, cons
 }
 
 /* Music's back face: covers from the library behind its counts. */
+/* Made once: each peek after swaps one cover and says the counts again.
+ * Built afresh at every peek it held the start screen 60-120 ms every few
+ * seconds (R1 logs, 23-25 Nov). The library read again builds it anew. */
+static unsigned mt_music_built;          /* lib_epoch + 1 it was built for; 0 none */
 static void mt_music_back(struct mt_slot *s)
 {
     lv_obj_t *b = s->back;
     int w = mt_px(mt_span_w(s->size)), h = mt_px(mt_span_h(s->size));
-    lv_obj_clean(b);
     bool art = sl_lib.n_albums > 0;
+    if (lv_obj_get_child_count(b) && mt_music_built == lib_epoch + 1 && mt.lib_count && lv_obj_get_parent(mt.lib_count) == b)
+    {
+        if (art) mt_mosaic_swap(lv_obj_get_child(b, 0));
+        mt_lib_update();
+        return;
+    }
+    mt_music_built = lib_epoch + 1;
+    lv_obj_clean(b);
     if (art)
     {
         mt_mosaic(b, w, h);
@@ -1988,6 +1997,35 @@ static void mt_app(lv_obj_t *body, int id)
     lv_obj_add_event_cb(r, mt_app_event, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)id);
 }
 
+/* an app of the home's list (ha_defs d): its tile's row where it has a
+ * tile (held, it pins), else the same row with its own icon */
+static void mt_app_act_cb(lv_event_t *e)
+{
+    if (!g_dragged) mt_open(ha_defs[(int)(intptr_t)lv_event_get_user_data(e)].act);
+}
+static void mt_app_act(lv_obj_t *body, int d)
+{
+    for (int id = 0; id < (int)(sizeof mt_defs / sizeof mt_defs[0]); id++)
+        if (mt_defs[id].action == ha_defs[d].act) { mt_app(body, id); return; }
+    lv_obj_t *r = box(body);
+    lv_obj_set_size(r, lv_pct(100), 78);
+    lv_obj_set_style_pad_left(r, MT_M, 0);
+    lv_obj_t *ic = box(r);
+    lv_obj_set_size(ic, 58, 58);
+    lv_obj_align(ic, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_color(ic, lv_color_hex(mt_tile_color()), 0);
+    lv_obj_set_style_bg_opa(ic, LV_OPA_COVER, 0);
+    lv_obj_center(sl_icon(ic, ha_defs[d].icon, 36, mt.ink, mt_tile_color()));
+    lv_obj_t *l = mt_label(r, sl_tr(ha_defs[d].name), &ss_regular_34, LV_OPA_COVER);
+    lv_obj_set_style_text_color(l, lv_color_hex(mt_page_ink()), 0);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 76, -2);
+    lv_obj_set_style_text_opa(l, 150, LV_STATE_PRESSED);
+    lv_obj_set_style_translate_x(r, 4, LV_STATE_PRESSED);
+    press_motion(r);
+    lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(r, mt_app_act_cb, LV_EVENT_CLICKED, (void *)(intptr_t)d);
+}
+
 /* a tap on the empty part of the page ends editing */
 static void mt_page_click(lv_event_t *e) { (void)e; if (!g_dragged) mt_edit_exit(); }
 
@@ -2034,15 +2072,23 @@ static void metro_home_page(void)
     mt_layout(false);
     mt_queue_update();
 
-    /* apps: the same list as the cards home, alphabetical */
-    lv_obj_t *h = mt_label(body, "apps", &ss_regular_60, LV_OPA_COVER);
+    /* apps: the same list as every home, in the order it was arranged;
+     * the pencil by the heading arranges it (an app held pins it) */
+    lv_obj_t *hr = box(body);
+    lv_obj_set_size(hr, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(hr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_margin_top(hr, 22, 0);
+    lv_obj_set_style_margin_bottom(hr, 6, 0);
+    lv_obj_set_style_pad_right(hr, MT_M, 0);
+    lv_obj_t *h = mt_label(hr, "apps", &ss_regular_60, LV_OPA_COVER);
     lv_obj_set_style_text_color(h, lv_color_hex(mt_page_ink()), 0);
     lv_obj_set_style_pad_left(h, MT_M - 3, 0);
-    lv_obj_set_style_margin_top(h, 22, 0);
-    lv_obj_set_style_margin_bottom(h, 6, 0);
     mt_turnstile(h, 260);
-    for (unsigned i = 0; i < sizeof mt_apps; i++)
-        mt_app(body, mt_apps[i]);
+    lv_obj_t *pen = icon_btn(hr, LV_SYMBOL_EDIT, 44, ha_arrange_cb, NULL);
+    lv_obj_set_style_text_color(lv_obj_get_child(pen, 0), lv_color_hex(mt_page_ink()), 0);
+    ha_load();
+    for (int i = 0; i < HA_N; i++) mt_app_act(body, ha_order[i]);
 
     mt.timer = lv_timer_create(mt_tick, 1000, NULL);
     mt.pet_timer = lv_timer_create(mt_pet_tick, 220, NULL);

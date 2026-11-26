@@ -3304,6 +3304,7 @@ int main(void) {
             assert(find_label(pages[npages-1],"Play") || has_text(pages[npages-1],"Play"));
             lv_obj_t *pb=NULL;for(lv_obj_t *l=find_label(pages[npages-1],LV_SYMBOL_PLAY "  Play");l;l=NULL){pb=l;while(pb&&!lv_obj_has_flag(pb,LV_OBJ_FLAG_CLICKABLE))pb=lv_obj_get_parent(pb);}
             assert(pb);int st=test_status;lv_obj_send_event(pb,LV_EVENT_CLICKED,NULL);frame(200);
+            for(int i=0;i<400&&lf.ord;i++)frame(50);   /* a long one fills in after the music starts */
             assert(queued==songs);
             test_status=st;if(np_open)np_hide(0);frame(300);page_pop();frame(400);
         }
@@ -5696,7 +5697,10 @@ int main(void) {
         lv_obj_t *r=lv_obj_get_child(host,i);
         if((intptr_t)lv_obj_get_user_data(r)==9999){lv_obj_send_event(r,LV_EVENT_CLICKED,NULL);found=true;}
     }
-    assert(found && started==9999 && queued==10000);
+    /* the song tapped first, at once; the other 9,999 after it, filled in while it plays */
+    assert(found && started==0 && queued==100);
+    for(int i=0;i<400&&lf.ord;i++)frame(50);
+    assert(queued==10000);
     { /* Up Next over a 10,000-song queue reads file names only for its rows */
         int was_started=started,was_repeat=global_settings.repeat_mode;
         started=0;global_settings.repeat_mode=REPEAT_ALL;
@@ -5743,6 +5747,10 @@ int main(void) {
         assert(audio_seeks==seeks);
         lv_obj_send_event(np_seek,LV_EVENT_PRESSED,NULL);
         lv_obj_send_event(np_seek,LV_EVENT_RELEASED,NULL);
+        assert(audio_seeks==seeks);           /* a tap moved nothing: no seek (25 Nov) */
+        lv_obj_send_event(np_seek,LV_EVENT_PRESSED,NULL);
+        lv_slider_set_value(np_seek,lv_slider_get_value(np_seek)-100,LV_ANIM_OFF);   /* dragged back a little */
+        lv_obj_send_event(np_seek,LV_EVENT_RELEASED,NULL);
         assert(audio_seeks==seeks+1);
         int old_index=started;
         lv_obj_send_event(np_seek,LV_EVENT_PRESSED,NULL);
@@ -5753,6 +5761,7 @@ int main(void) {
         sl_track_path(0,test_track.path,sizeof test_track.path);
         test_track.elapsed=4*60*60*1000UL;
     }
+    np_update(false);frame(50);   /* the knob back where the song is, after the drag above */
     frame(50);np_update(false);assert(!lv_display_get_default()->inv_p);   /* no art: an idle tick repaints nothing */
     queued=6;started=2;first_index=0;for(int i=0;i<6;i++){queue_tracks[i]=i;queue_flags[i]=i!=2;}
     np_show();frame(500);shot("now-playing.ppm");
@@ -6189,7 +6198,7 @@ int main(void) {
         /* scrub the song: the drag previews, the release seeks, nothing unlocks */
         lv_area_t sk;lv_obj_get_coords(lp_track,&sk);int sy=(sk.y1+sk.y2)/2;
         sl_power_filter_touch(true,sk.x1+10,sy+15);
-        assert(lp_held==LP_SEEK && lp_scrub_ms>=0);
+        assert(lp_held==LP_SEEK && lp_scrub_ms<0);   /* touched: nothing moves until the finger does (25 Nov) */
         sl_power_filter_touch(true,(sk.x1+sk.x2)/2,sy-150);
         long target=lp_scrub_ms;
         assert(labs(target-(long)test_track.length/2)<(long)test_track.length/50);
@@ -6204,7 +6213,9 @@ int main(void) {
         lv_refr_now(disp);shot_now("lock-player-volume.ppm");  /* a frame would lift the finger */
         sl_power_filter_touch(false,0,0);assert(sl_power_is_locked());
         sl_power_filter_touch(true,vl.x1+(vl.x2-vl.x1)/4,vy);sl_power_filter_touch(false,0,0);
-        assert(volume_pct()>=22 && volume_pct()<=28);
+        assert(volume_pct()==100);   /* a tap on the bar leaves the volume (25 Nov) */
+        sl_power_filter_touch(true,vl.x1+(vl.x2-vl.x1)/2,vy);sl_power_filter_touch(true,vl.x1+(vl.x2-vl.x1)/4,vy);sl_power_filter_touch(false,0,0);
+        assert(volume_pct()>=22 && volume_pct()<=28);   /* a drag sets it */
         {   /* the keys on the lock screen: its own bar moves, no side bar */
             if(hud)lv_obj_add_flag(hud,LV_OBJ_FLAG_HIDDEN);
             lv_area_t f0,f1;lp_refresh();lv_obj_update_layout(lp_vol_fill);lv_obj_get_coords(lp_vol_fill,&f0);
@@ -6404,7 +6415,8 @@ int main(void) {
         test_bitmap=saved_bm;
     }
     lock_player_page();frame(300);shot("lock-player-settings.ppm");
-    lv_obj_send_event(lv_obj_get_child(lv_obj_get_child(lv_obj_get_child(pages[npages-1],1),1),1),LV_EVENT_CLICKED,NULL);   /* body, group, its second row */
+    {lv_obj_t *sm=find_label(pages[npages-1],"Small cover");while(sm&&!lv_obj_has_flag(sm,LV_OBJ_FLAG_CLICKABLE))sm=lv_obj_get_parent(sm);
+     assert(sm);lv_obj_send_event(sm,LV_EVENT_CLICKED,NULL);}   /* its Small cover row */
     assert(global_settings.sloppy_lock_player==1);global_settings.sloppy_lock_player=0;
     np_style_page();frame(300);shot("np-style-settings.ppm");page_pop();frame(300);
     {   /* the biggest text: every word stays inside its card, in every language */
@@ -7636,6 +7648,13 @@ int main(void) {
     }
     album_page(0);frame(500);shot("album.ppm");assert(find_label(pages[npages-1],"One album"));page_pop();frame(500);
     test_art_hue=0;album_page(0);frame(500);shot("album-red-cover.ppm");   /* a red sleeve: a red wash */
+    {   /* Cover and colour: its square is a size every album has a thumbnail for (220 had none:
+         * the cover never came and the note stayed, on every album; a user, 24 Nov) */
+        lv_obj_t *st[256];int sp=0,sq=0;st[sp++]=pages[npages-1];
+        while(sp){lv_obj_t *o=st[--sp];if(lv_obj_get_width(o)==SL_ART_GRID&&lv_obj_get_height(o)==SL_ART_GRID)sq++;
+            for(uint32_t i=0;i<lv_obj_get_child_count(o)&&sp<256;i++)st[sp++]=lv_obj_get_child(o,(int32_t)i);}
+        assert(sq>=1);
+    }
     { lv_color_t c=lv_obj_get_style_bg_color(pages[npages-1],0);
       assert(sl_zune() || (c.red>c.green && c.red>c.blue)); }
     page_pop();frame(400);test_art_hue=-1;
@@ -7948,7 +7967,7 @@ int main(void) {
     frame(600);assert(global_settings.sloppy_lock_wallpaper==3);
     wallpaper_page(false);frame(300);
     wall_body=lv_obj_get_child(lv_obj_get_child(pages[npages-1],1),1);
-    assert(lv_obj_get_child_count(wall_body)==9); /* nine previews */
+    assert(lv_obj_get_child_count(wall_body)==10); /* nine previews and Color (Your picture only once made) */
     lv_obj_scroll_to_y(lv_obj_get_parent(wall_body), 500, LV_ANIM_OFF);frame(100);
     shot("wallpaper-picker.ppm");
     lv_obj_send_event(lv_obj_get_child(wall_body,5),LV_EVENT_CLICKED,NULL);
@@ -8492,20 +8511,12 @@ int main(void) {
     int pet_start_x=lv_obj_get_x(mt.pet_canvas);
     frame(250);
     assert(lv_obj_get_x(mt.pet_canvas)>pet_start_x);
-    for(unsigned app=0;app<sizeof mt_apps;app++) {
-        bool in_picker=false;
-        for(unsigned option=0;option<sizeof mt_group_apps;option++)
-            if(mt_apps[app]==mt_group_apps[option]) in_picker=true;
-        for(unsigned option=0;option<sizeof mt_group_music;option++)   /* Cover Flow, Files */
-            if(mt_apps[app]==mt_group_music[option]) in_picker=true;
-        assert(in_picker);
-    }
     shot("tiles-default.ppm");
     lv_obj_scroll_to_y(mt.body,700,LV_ANIM_OFF);frame(300);shot("tiles-pet-live.ppm");
     lv_obj_scroll_to_y(mt.body,0,LV_ANIM_OFF);frame(300);
     {   /* the apps list is the cards home's list */
         uint32_t rows=0;for(uint32_t k=0;k<lv_obj_get_child_count(mt.body);k++)if(lv_obj_get_height(lv_obj_get_child(mt.body,k))==78)rows++;
-        assert(rows==sizeof mt_apps);
+        assert(rows==HA_N);   /* every app, in the arranged order */
     }
     {   /* the editing tests below start from the earlier eight-tile start */
         static const uint8_t legacy[][2]={{TL_MUSIC,SZ_WIDE},{TL_CLOCK,SZ_MED},{TL_PLAYLISTS,SZ_MED},{TL_PLAYROOM,SZ_MED},
@@ -10454,6 +10465,73 @@ int main(void) {
         page_pop();frame(400);global_settings.sloppy_usb_classic=u0;
         printf("PASS: Customization: the USB mode screen, the dog or the classic plug.\n");
     }
+    {   /* wallpaper: one Color, picked on the wheel; words on it white only when it is dark */
+        while(npages>1){page_pop();frame(300);}
+        int hw0=global_settings.sloppy_home_wallpaper,wc0=global_settings.sloppy_wall_color;
+        wallpaper_page(false);frame(400);
+        lv_obj_t *c=find_label(pages[npages-1],"Color");while(c&&!lv_obj_has_flag(c,LV_OBJ_FLAG_CLICKABLE))c=lv_obj_get_parent(c);
+        assert(c);lv_obj_send_event(c,LV_EVENT_CLICKED,NULL);frame(400);
+        assert(accent_for_wall==1&&find_label(pages[npages-1],"Wallpaper color"));
+        accent_set_rgb(0x2a1f6b);accent_preview_update();lv_obj_send_event(accent_preview,LV_EVENT_CLICKED,NULL);frame(700);
+        assert(global_settings.sloppy_home_wallpaper==WALL_COLOR&&global_settings.sloppy_wall_color==0x2a1f6b&&wallpaper_dark(WALL_COLOR));
+        while(npages>1){page_pop();frame(300);}frame(400);shot("wallpaper-color-dark.ppm");
+        global_settings.sloppy_wall_color=0xf2e9c9;assert(!wallpaper_dark(WALL_COLOR));
+        global_settings.sloppy_home_wallpaper=hw0;global_settings.sloppy_wall_color=wc0;appearance_reload(NULL);frame(600);
+        while(npages>1){page_pop();frame(300);}
+        printf("PASS: wallpaper: Color from the wheel, home and lock; white words only on a dark one.\n");
+    }
+    {   /* sliders: a tap on the bar moves nothing, a drag does (25 Nov: everywhere) */
+        lv_obj_t *sl=lv_slider_create(lv_screen_active());lv_obj_set_size(sl,300,20);lv_obj_set_pos(sl,90,700);
+        lv_slider_set_range(sl,0,100);lv_slider_set_value(sl,50,LV_ANIM_OFF);lv_obj_move_foreground(sl);frame(50);
+        touch_at(330,710,true);frame(60);touch_at(330,710,false);frame(60);
+        assert(lv_slider_get_value(sl)==50);   /* tapped at 80%: still 50 */
+        touch_at(240,710,true);for(int x=250;x<=330;x+=20)touch_at(x,710,true);touch_at(330,710,false);frame(60);
+        printf("slider: a drag to 80%% gave %d\n",(int)lv_slider_get_value(sl));
+        assert(lv_slider_get_value(sl)>70);
+        lv_obj_delete(sl);frame(50);
+        printf("PASS: sliders: a tap on the bar leaves the value; a drag moves it.\n");
+    }
+    {   /* the sliders' - and + (a step a tap) and Reset back to the default (a user, GitHub #3) */
+        while(npages>1){page_pop();frame(300);}
+        int b0=global_settings.bass;
+        sound_page();frame(400);
+        lv_obj_t *bl=find_label(pages[npages-1],"Bass");assert(bl);lv_obj_t *row=lv_obj_get_parent(bl);
+        lv_obj_t *sl=NULL,*mi=NULL,*pl=NULL,*rs=NULL;
+        for(uint32_t i=0;i<lv_obj_get_child_count(row);i++){lv_obj_t *o=lv_obj_get_child(row,(int32_t)i);
+            if(lv_obj_check_type(o,&lv_slider_class))sl=o;
+            else if(lv_obj_check_type(o,&lv_label_class)&&!strcmp(lv_label_get_text(o),"Reset"))rs=o;
+            else if(lv_obj_get_child_count(o)&&lv_obj_check_type(lv_obj_get_child(o,0),&lv_label_class)){
+                const char *t=lv_label_get_text(lv_obj_get_child(o,0));if(!strcmp(t,LV_SYMBOL_PLUS))pl=o;else if(!strcmp(t,LV_SYMBOL_MINUS))mi=o;}}
+        assert(lv_obj_check_type(sl,&lv_slider_class)&&mi&&pl&&rs);
+        int v0=lv_slider_get_value(sl);
+        lv_obj_send_event(pl,LV_EVENT_SHORT_CLICKED,NULL);lv_obj_send_event(pl,LV_EVENT_RELEASED,NULL);frame(100);
+        assert(lv_slider_get_value(sl)==v0+1&&global_settings.bass==v0+1&&!lv_obj_has_flag(rs,LV_OBJ_FLAG_HIDDEN));
+        lv_obj_send_event(mi,LV_EVENT_SHORT_CLICKED,NULL);lv_obj_send_event(mi,LV_EVENT_SHORT_CLICKED,NULL);frame(100);
+        assert(lv_slider_get_value(sl)==v0-1);
+        lv_obj_send_event(rs,LV_EVENT_CLICKED,NULL);frame(100);
+        assert(lv_slider_get_value(sl)==0&&global_settings.bass==0&&lv_obj_has_flag(rs,LV_OBJ_FLAG_HIDDEN));
+        shot("sliders-steps.ppm");
+        global_settings.bass=b0;page_pop();frame(400);
+        printf("PASS: sliders: - and + step, Reset back to the default.\n");
+    }
+    {   /* Customization > Lock screen off: a wake goes straight back in, no swipe (a user, 24 Nov) */
+        bool lo0=global_settings.sloppy_lock_off,run0=sl_power_running;
+        sl_power_running=true;global_settings.sloppy_lock_off=true;
+        sl_power_lock("test");assert(sl_power.mode==SL_POWER_DARK);
+        sl_power_state_touch(&sl_power,true,240,400,sl_ms());sl_power_apply();
+        assert(sl_power.mode==SL_POWER_ACTIVE&&!sl_power_is_locked());
+        sl_power_state_touch(&sl_power,false,240,400,sl_ms());frame(100);
+        sl_power_lock("test");sl_power_filter_button(BUTTON_POWER);sl_power_filter_button(BUTTON_POWER|BUTTON_REL);
+        assert(sl_power.mode==SL_POWER_ACTIVE);   /* Power on a dark screen: straight in */
+        global_settings.sloppy_lock_off=false;
+        sl_power_lock("test");sl_power_state_touch(&sl_power,true,240,400,sl_ms());sl_power_apply();
+        assert(sl_power.mode==SL_POWER_LOCKED);   /* on: the lock screen as before */
+        sl_power_state_touch(&sl_power,false,240,400,sl_ms());
+        sl_power.mode=SL_POWER_ACTIVE;sl_power_apply();frame(400);
+        global_settings.sloppy_lock_off=lo0;sl_power_running=run0;
+        lock_player_page();frame(300);assert(find_label(pages[npages-1],"Lock screen"));shot("lock-screen-settings.ppm");page_pop();frame(400);
+        printf("PASS: Customization: the lock screen can be off; a tap, a key or Power goes straight back in.\n");
+    }
     {   /* the Cards home's apps and games, put in order by dragging (23 Nov) */
         while(npages>1){page_pop();frame(300);}
         int st0=global_settings.sloppy_home_style;global_settings.sloppy_home_style=0;appearance_reload(NULL);frame(600);
@@ -10475,6 +10553,23 @@ int main(void) {
         #undef HA_NTH
         global_settings.sloppy_home_style=st0;appearance_reload(NULL);frame(600);while(npages>1){page_pop();frame(300);}
         printf("PASS: home: apps and games dragged into order, the list follows and the order is kept.\n");
+    }
+    {   /* the same order, and a way to arrange it, on the Tiles and List homes */
+        while(npages>1){page_pop();frame(300);}
+        int st0=global_settings.sloppy_home_style;
+        ha_load();uint8_t o0[HA_N];memcpy(o0,ha_order,sizeof o0);
+        uint8_t x=ha_order[0];ha_order[0]=ha_order[5];ha_order[5]=x;ha_save();
+        global_settings.sloppy_home_style=2;appearance_reload(NULL);frame(800);while(npages>1){page_pop();frame(300);}
+        char low[64];
+        assert(has_text(pages[0],sl_lower(ha_defs[ha_order[0]].name,low,sizeof low))&&has_text(pages[0],"arrange apps"));
+        shot("home-list-apps.ppm");
+        action(ACT_ARRANGE);frame(400);assert(find_label(pages[npages-1],"Arrange apps and games"));page_pop();frame(400);
+        global_settings.sloppy_home_style=1;appearance_reload(NULL);frame(800);while(npages>1){page_pop();frame(300);}
+        assert(sl_home_tiles()&&has_text(pages[0],"apps"));
+        lv_obj_scroll_to_y(mt.body,5000,LV_ANIM_OFF);frame(200);shot("home-tiles-apps.ppm");
+        memcpy(ha_order,o0,sizeof o0);ha_save();
+        global_settings.sloppy_home_style=st0;appearance_reload(NULL);frame(800);while(npages>1){page_pop();frame(300);}
+        printf("PASS: home: Tiles and List show the arranged order, each with its way to Arrange.\n");
     }
     {   /* torture (sloppy_torture.inc): the R1's self-run, here on the harness's clock;
          * SLOPPY_TORTURE=<minutes> for a longer one (under ASan, say) */
@@ -11625,7 +11720,9 @@ int main(void) {
                 page_pop();frame(600);assert(npages==n0&&!shot_view_px); }
             frame(5000);assert(!sc.up);
             /* the control centre's tile: the panel closes first, then the page is taken */
-            nbanner_hide_now();pop_hide_now();frame(600);
+            nbanner_hide_now();pop_hide_now();
+            global_settings.sloppy_night_dim=0;sl_night_apply();   /* the veil is left out of screenshots: none here to compare */
+            frame(600);
             static uint16_t before[W*H];memcpy(before,pixels,sizeof before);
             ccx_open();ccx_grow();
             touch_at(400,300,true);for(int x=380;x>=160;x-=20)touch_at(x,300,true);touch_at(160,300,false);ccx_settle();   /* its page */

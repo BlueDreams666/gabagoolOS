@@ -68,6 +68,14 @@ static int q_move(int x, int y)
 }
 
 /* Queue a song at the end of the queue, or at its front for Play next. */
+/* Room left in the play list: Rockbox's cap (10,000) less what it holds.
+ * Each insert past it shows "Playlist Buffer Full" for 2 s and holds the
+ * player meanwhile, so the loops stop before it (none when no cap is set). */
+static int q_room(void)
+{
+    int cap = playlist_get_current()->max_playlist_size;
+    return cap > 0 ? cap - playlist_amount() : 1 << 30;
+}
 static int q_insert(const char *path, bool front, bool sync)
 {
     int run = front ? 0 : q_run();
@@ -171,8 +179,9 @@ static void q_drop(void)
 static int q_restore(void)
 {
     int put = 0;
-    for (int i = 0; i < q_kept_n; i++)
+    for (int i = 0; i < q_kept_n && q_room() > 0; i++)
         if (q_insert(q_kept_pool + q_kept_off[i], false, false) >= 0) put++;
+        else break;
     if (q_kept_n) playlist_sync(NULL);
     q_kept_n = 0;
     return put;

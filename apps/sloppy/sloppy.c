@@ -804,6 +804,7 @@ static void mini_update(void);
 static bool qp_is_visible(void);
 static void qp_drag_to(int dy);
 static void sl_torture_boot(void);                    /* sloppy_torture.inc */
+static void ha_arrange_page(void);                    /* Arrange apps and games (sloppy_settings.inc) */
 static void sl_torture_poll(void);
 static void qp_glass_early(void);
 static void qp_release(int dy, int vy);
@@ -1748,8 +1749,10 @@ static void heard_ask(const char *what, bool skip);
 static int album_chain = -1;          /* last album queued by play-through, as its albums_by_title spot */
 /* A new list keeps what the user queued: note it before playlist_create()
  * wipes the old list, and queue it again once the new one plays. */
+static unsigned lf_gen;                  /* a new list ends the one being filled (play_list_now) */
 static int sl_new_list(const char *dir)
 {
+    lf_gen++;
     if (audio_status() & AUDIO_STATUS_PLAY) q_keep();
     else q_kept_n = 0;
     int result = playlist_create(dir, NULL);
@@ -1801,16 +1804,102 @@ static void sl_set_shuffle(bool on)
     else playlist_sort(NULL, true);
     if (playing) q_restore();
 }
+static bool play_list_now(const int *tracks, int n, int start, bool shuffle);
 static bool play_list(const int *tracks, int n, int start, bool shuffle)
 {
     if (!tracks || n <= 0 || start < 0 || start >= n) return false;
     album_chain = -1;
     for (int i = 0; i < n; i++)
         if (tracks[i] < 0 || tracks[i] >= sl_lib.n_tracks) return false;
+    return play_list_now(tracks, n, start, shuffle);
+}
+/* A long list starts at once: the first LF_FIRST songs go in, the music
+ * starts, and the rest follow LF_STEP at a time from a timer. Every song
+ * in before the first note held a tap in a 15,789-song Songs list for
+ * seconds (a user, GitHub #1: "starts 1-5 s late"). The list is laid out
+ * here from the song picked (shuffled here too), so nothing after has to
+ * move; it stops at the list's room. */
+#define LF_FIRST 100
+#define LF_STEP 200
+static struct { int *ord, n, at, cap; unsigned gen; lv_timer_t *timer; } lf;
+static bool quiz_clip_on(void);         /* sloppy_quiz.inc */
+static int lf_insert(const int *ord, int i, char *path)
+{
+    const struct sl_track *tr = &sl_lib.tracks[ord[i]];
+    if (i && tr->cue && sl_lib.tracks[ord[i - 1]].cue && sl_track_same_file(ord[i], ord[i - 1]))
+        return 0;                          /* a cue sheet's run: its file once */
+    return playlist_insert_track(NULL, sl_track_path(ord[i], path, MAX_PATH), PLAYLIST_INSERT_LAST, false, false) < 0 ? -1 : 1;
+}
+static void lf_stop(void)
+{
+    if (lf.timer) { lv_timer_delete(lf.timer); lf.timer = NULL; }
+    free(lf.ord);
+    lf.ord = NULL;
+}
+static void lf_tick(lv_timer_t *t)
+{
+    (void)t;
+    if (!lf.ord || lf.gen != lf_gen) { lf_stop(); return; }
+    /* another list took over (radio, a podcast, a server's songs): it
+     * shrank well below what this one had put in, so it is not ours */
+    if (playlist_amount() + 50 < lf.cap) { sl_log("play: another list took over; the rest not added"); lf_stop(); return; }
+    if (quiz_clip_on()) return;            /* Your taste's clip counts the list: after it */
     char path[MAX_PATH];
+    int end = lf.at + LF_STEP < lf.n ? lf.at + LF_STEP : lf.n, added = 0;
+    for (; lf.at < end; lf.at++)
+    {
+        if (q_room() <= 0) { sl_log("play: the list is full at %d songs", playlist_amount()); lf.at = lf.n; break; }
+        int r = lf_insert(lf.ord, lf.at, path);
+        if (r < 0) { sl_log("play: stopped adding at %d", lf.at); lf.at = lf.n; break; }
+        added += r;
+    }
+    lf.cap = playlist_amount();            /* what it holds now: the take-over check */
+    if (lf.at >= lf.n)
+    {
+        playlist_sync(NULL);               /* the card's copy, once, at the end */
+        sl_log("play: the rest is in, %d songs", playlist_amount());
+        lf_stop();
+    }
+    (void)added;
+}
+static bool play_list_now(const int *tracks, int n, int start, bool shuffle)
+{
+    char path[MAX_PATH];
+    lf_gen++;                              /* any list still filling stops */
+    lf_stop();
     sl_log("play %d tracks from %d%s: %s", n, start, shuffle ? " shuffled" : "", sl_track_path(tracks[start], path, sizeof path));
     snprintf(path, sizeof path, "%d songs", n);
     sl_doing_is(shuffle ? "starting a shuffle" : "starting music", path);
+    if (n > LF_FIRST * 2)
+    {
+        /* laid out here: from the song picked to the end, then the start
+         * (in order); or the song picked first and the rest shuffled */
+        int *ord = malloc((size_t)n * sizeof *ord);
+        if (ord)
+        {
+            for (int i = 0; i < n; i++) ord[i] = tracks[(start + i) % n];
+            if (shuffle)
+            {
+                srand(sl_shuffle_seed());
+                for (int i = n - 1; i > 1; i--) { int j = 1 + rand() % i, x = ord[i]; ord[i] = ord[j]; ord[j] = x; }
+            }
+            if (sl_new_list(NULL) < 0) { free(ord); toast_warn("Could not create playlist"); return false; }
+            int i = 0;
+            for (; i < LF_FIRST; i++)
+                if (lf_insert(ord, i, path) < 0)
+                {
+                    free(ord);
+                    sl_abort_list();
+                    toast_warn("Could not load all songs. Check card space.");
+                    return false;
+                }
+            long from = sl_lib.tracks[ord[0]].cue ? sl_lib.tracks[ord[0]].start : 0;
+            sl_start_list_at(0, (unsigned long)from);
+            lf.ord = ord; lf.n = n; lf.at = i; lf.gen = lf_gen; lf.cap = playlist_amount();
+            lf.timer = lv_timer_create(lf_tick, 40, NULL);
+            return true;
+        }
+    }
     if (sl_new_list(NULL) < 0)
     {
         toast_warn("Could not create playlist");
@@ -2754,7 +2843,7 @@ static void np_btn_cb(lv_event_t *e)
     }
 }
 static char np_seek_path[MAX_PATH];
-static int np_seek_index;
+static int np_seek_index, np_seek_from;   /* where the knob was at the touch: a tap that moved nothing seeks nothing */
 static void np_seek_cb(lv_event_t *e)
 {
     lv_event_code_t c = lv_event_get_code(e);
@@ -2766,12 +2855,13 @@ static void np_seek_cb(lv_event_t *e)
         {
             strlcpy(np_seek_path, id3->path, sizeof np_seek_path);
             np_seek_index = q_cur();
+            np_seek_from = lv_slider_get_value(np_seek);
         }
     }
     else if (c == LV_EVENT_RELEASED)
     {
         if (id3 && np_seek_path[0] && np_seek_index == q_cur() &&
-            !strcmp(np_seek_path, id3->path) && id3->length)
+            !strcmp(np_seek_path, id3->path) && id3->length && lv_slider_get_value(np_seek) != np_seek_from)
         {
             long cs, cl;
             cue_now(id3, &cs, &cl);
@@ -4127,7 +4217,7 @@ static void sb_set_ink(uint32_t c)
 static void statusbar_retheme(void)
 {
     if (!sb) return;
-    sb_on_wall = npages <= 1 && wallpaper_id(false) >= 5;
+    sb_on_wall = npages <= 1 && wallpaper_dark(wallpaper_id(false));
     uint32_t c = sb_on_wall || (np_open && np_status_on()) ? 0xffffff : C_TEXT;   /* over Now Playing's cover: white */
     /* a page with its own dark stage in the light theme (the games, the
      * quiz) or its own light one in a dark theme: ink for what is under it */
@@ -4749,9 +4839,44 @@ static void album_big_poll(lv_timer_t *t)
     lv_anim_set_exec_cb(&an, album_big_fade);
     lv_anim_start(&an);
 }
+/* Its thumbnail not made yet (an album just added, the first art pass):
+ * looked for again twice a second for 30 s, not given up at once, which
+ * left the note on the page until it was opened again */
+static void album_big_cover(lv_obj_t *box, int a);
+struct album_big_wait { lv_obj_t *box; int album, tries; lv_timer_t *timer; };
+static void album_big_wait_gone(lv_event_t *e)
+{
+    struct album_big_wait *w = lv_event_get_user_data(e);
+    if (w->timer) lv_timer_delete(w->timer);
+    free(w);
+}
+static void album_big_wait_tick(lv_timer_t *t)
+{
+    struct album_big_wait *w = lv_timer_get_user_data(t);
+    if (sl_art_src(w->album, SL_ART_GRID) || sl_art_no_cover(w->album) || ++w->tries >= 60)
+    {
+        lv_timer_delete(t);
+        w->timer = NULL;
+        lv_obj_remove_event_cb_with_user_data(w->box, album_big_wait_gone, w);
+        lv_obj_t *box = w->box;
+        int a = w->album;
+        bool came = sl_art_src(a, SL_ART_GRID) != NULL;
+        free(w);
+        if (came) album_big_cover(box, a);   /* now; given up after 30 s, the note stays */
+    }
+}
 static void album_big_cover(lv_obj_t *box, int a)
 {
-    if (!sl_art_apply_scaled(box, a, lv_obj_get_style_width(box, 0))) return;   /* no cover: the placeholder, nothing to sharpen */
+    if (!sl_art_apply_scaled(box, a, lv_obj_get_style_width(box, 0)))
+    {
+        if (sl_art_no_cover(a) || sl_art_src(a, SL_ART_GRID)) return;   /* no cover: the placeholder, nothing to sharpen */
+        struct album_big_wait *w = calloc(1, sizeof *w);
+        if (!w) return;
+        w->box = box; w->album = a;
+        w->timer = lv_timer_create(album_big_wait_tick, 500, w);
+        lv_obj_add_event_cb(box, album_big_wait_gone, LV_EVENT_DELETE, w);
+        return;
+    }
     for (uint32_t i = 0; i < lv_obj_get_child_count(box); i++)            /* the note under it goes */
         if (!lv_obj_check_type(lv_obj_get_child(box, i), &lv_image_class)) { lv_obj_delete(lv_obj_get_child(box, i)); i--; }
     struct album_big *ab = calloc(1, sizeof *ab);
@@ -4827,7 +4952,10 @@ static void album_page(int a)
     /* Library options > Album page > Big cover: the cover across the page,
      * the words under it from its edge; the cover's own pixels come from
      * the cover thread, the thumbnail scaled up showing until they do */
-    int cs = big ? W - 2 * SL_GUTTER : 220;
+    /* Cover and colour: the grid's own thumbnail size, one every album has.
+     * 220 had none (thumbnails come in SL_ART_GRID and smaller), so the
+     * cover never came and the note stayed, on every album (a user, 24 Nov) */
+    int cs = big ? W - 2 * SL_GUTTER : SL_ART_GRID;
     if (big)
     {
         lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
@@ -5346,7 +5474,7 @@ static lv_obj_t *sl_pager(lv_obj_t *body)
     lv_obj_set_size(bar, lv_pct(100), 64);
     return bar;
 }
-enum { ACT_MUSIC = 1, ACT_ALL, ACT_ALBUMS, ACT_ARTISTS, ACT_SOON, ACT_CLASSIC, ACT_SYSTEM, ACT_REBUILD, ACT_BLUETOOTH, ACT_PET, ACT_RAGDOLL, ACT_PLAYLISTS, ACT_FILES, ACT_GAMES, ACT_LIBRARY, ACT_SHUFFLE, ACT_NOW, ACT_SNAKE, ACT_RADIO, ACT_SPOON, ACT_QUIZ, ACT_COIN, ACT_MAGIC, ACT_CHESS, ACT_COVERFLOW, ACT_FORYOU, ACT_SEARCH, ACT_SPECTRUM, ACT_LOVED, ACT_VISUALIZER, ACT_CLICKER, ACT_ARCADE, ACT_DOOM, ACT_MARIO, ACT_GENRES, ACT_YEARS, ACT_METRONOME, ACT_BOOKS, ACT_WEBRADIO, ACT_SPACEY, ACT_2048, ACT_SUDOKU, ACT_POINTS, ACT_FLAPPY, ACT_ALBUMARTISTS, ACT_FAVALBUMS, ACT_RECENTALBUMS, ACT_PODCASTS, ACT_EBOOKS, ACT_SUBSONIC };
+enum { ACT_MUSIC = 1, ACT_ALL, ACT_ALBUMS, ACT_ARTISTS, ACT_SOON, ACT_CLASSIC, ACT_SYSTEM, ACT_REBUILD, ACT_BLUETOOTH, ACT_PET, ACT_RAGDOLL, ACT_PLAYLISTS, ACT_FILES, ACT_GAMES, ACT_LIBRARY, ACT_SHUFFLE, ACT_NOW, ACT_SNAKE, ACT_RADIO, ACT_SPOON, ACT_QUIZ, ACT_COIN, ACT_MAGIC, ACT_CHESS, ACT_COVERFLOW, ACT_FORYOU, ACT_SEARCH, ACT_SPECTRUM, ACT_LOVED, ACT_VISUALIZER, ACT_CLICKER, ACT_ARCADE, ACT_DOOM, ACT_MARIO, ACT_GENRES, ACT_YEARS, ACT_METRONOME, ACT_BOOKS, ACT_WEBRADIO, ACT_SPACEY, ACT_2048, ACT_SUDOKU, ACT_POINTS, ACT_FLAPPY, ACT_ALBUMARTISTS, ACT_FAVALBUMS, ACT_RECENTALBUMS, ACT_PODCASTS, ACT_EBOOKS, ACT_SUBSONIC, ACT_ARRANGE };
 /* An empty library says what to do about it, and offers to do it */
 static lv_obj_t *card_row(lv_obj_t *parent, const char *t1, const char *t2, intptr_t ud);
 /* The one empty state: a quiet icon, what is missing in a line, and what
@@ -6526,6 +6654,7 @@ static void action(int k)
     }
     switch (k)
     {
+        case ACT_ARRANGE: ha_arrange_page(); break;   /* the List and Tiles homes' way in */
         case ACT_MUSIC:   music_page(); break;
         case ACT_ALL:     songs_page(); break;
         case ACT_ALBUMS:  albums_page(); break;
@@ -6867,67 +6996,9 @@ static void home_music_card(lv_obj_t *grid)
 }
 #include "sloppy_refresh.inc"
 static int hist_recent_albums(int *albums, int max);
-#include "sloppy_zune.inc"
-#include "sloppy_metro.inc"
-#include "sloppy_spectrum.inc"
-#include "sloppy_visualizer.inc"
-#include "sloppy_npwave.inc"
-#include "sloppy_gabagool.inc"
-
-static void reset_all_settings_cancel_cb(lv_event_t *e)
-{
-    (void)e;
-    page_pop();
-}
-
-static void reset_all_settings_apply_cb(lv_event_t *e)
-{
-    (void)e;
-    /* Rockbox owns the persisted preferences, including GabagoolOS theme and
-     * playback choices. The tile arrangement is a separate preference file. */
-    settings_reset();
-    settings_save();
-    settings_apply(true);
-    settings_apply_skins();
-
-    bool tiles_reset = true;
-    int fd = open(MT_FILE, O_RDONLY);
-    if (fd >= 0)
-    {
-        close(fd);
-        tiles_reset = remove(MT_FILE) == 0;
-    }
-
-    /* The running GabagoolOS session keeps touch and display ownership after
-     * Rockbox applies its defaults. */
-    touchscreen_set_mode(TOUCHSCREEN_POINT);
-    FOR_NB_SCREENS(i)
-        viewportmanager_theme_enable(i, false, NULL);
-    if (sl_power_running) { sl_power_take_display(); sl_power_apply(); }
-
-    appearance_reload_soon(true); /* return to Settings */
-    toast(tiles_reset ? "Settings restored" : "Settings restored; tiles could not reset");
-}
-
-static void reset_all_settings_page(void)
-{
-    lv_obj_t *p, *body = page_new("Reset all settings?", &p);
-    set_confirm(body, "RESTORE DEFAULTS",
-        "This restores system, playback, sound and appearance settings, plus your pinned tile layout. "
-        "Music, playlists, pet and game progress stay on the player.",
-        "Keep my settings", "Go back without changing anything", reset_all_settings_cancel_cb,
-        "Reset all settings", "Restore the defaults now", reset_all_settings_apply_cb, true);
-    page_push(p);
-}
-
-static void reset_all_settings_open_cb(lv_event_t *e)
-{
-    (void)e;
-    reset_all_settings_page();
-}
-
-/* The Cards home's apps and games: in the order the user put them
- * (Arrange apps and games, the pencil by their heading), kept in apps.txt
+static void appearance_reload_soon(bool settings_only);
+/* The home's apps and games, on every home layout (Cards, Tiles, List):
+ * in the order the user put them (Arrange apps and games), kept in apps.txt
  * as their places in ha_defs; one added since comes at the end. */
 #define HA_FILE ROCKBOX_DIR "/sloppy/apps.txt"
 #define HA_N 20
@@ -7009,13 +7080,79 @@ static void ha_rows(void)
 static void ha_refresh_async(void *unused)
 {
     (void)unused;
-    if (!ha_dirty || !ha_body || !npages || ha_body != lv_obj_get_child(pages[0], 0)) { ha_dirty = false; return; }
+    if (!ha_dirty) return;
+    if (global_settings.sloppy_home_style == 1 || global_settings.sloppy_home_style == 2)
+    {
+        ha_dirty = false;
+        appearance_reload_soon(false);     /* Tiles and List: the home built again, its list in the new order */
+        return;
+    }
+    if (!ha_body || !npages || ha_body != lv_obj_get_child(pages[0], 0)) { ha_dirty = false; return; }
     ha_dirty = false;
     while (lv_obj_get_child_count(ha_body) > ha_first) lv_obj_delete(lv_obj_get_child(ha_body, (int32_t)ha_first));
     ha_rows();
 }
 static void ha_arrange_page(void);   /* sloppy_settings.inc */
 static void ha_arrange_cb(lv_event_t *e) { (void)e; ha_arrange_page(); }
+#include "sloppy_zune.inc"
+#include "sloppy_metro.inc"
+#include "sloppy_spectrum.inc"
+#include "sloppy_visualizer.inc"
+#include "sloppy_npwave.inc"
+#include "sloppy_gabagool.inc"
+
+static void reset_all_settings_cancel_cb(lv_event_t *e)
+{
+    (void)e;
+    page_pop();
+}
+
+static void reset_all_settings_apply_cb(lv_event_t *e)
+{
+    (void)e;
+    /* Rockbox owns the persisted preferences, including GabagoolOS theme and
+     * playback choices. The tile arrangement is a separate preference file. */
+    settings_reset();
+    settings_save();
+    settings_apply(true);
+    settings_apply_skins();
+
+    bool tiles_reset = true;
+    int fd = open(MT_FILE, O_RDONLY);
+    if (fd >= 0)
+    {
+        close(fd);
+        tiles_reset = remove(MT_FILE) == 0;
+    }
+
+    /* The running GabagoolOS session keeps touch and display ownership after
+     * Rockbox applies its defaults. */
+    touchscreen_set_mode(TOUCHSCREEN_POINT);
+    FOR_NB_SCREENS(i)
+        viewportmanager_theme_enable(i, false, NULL);
+    if (sl_power_running) { sl_power_take_display(); sl_power_apply(); }
+
+    appearance_reload_soon(true); /* return to Settings */
+    toast(tiles_reset ? "Settings restored" : "Settings restored; tiles could not reset");
+}
+
+static void reset_all_settings_page(void)
+{
+    lv_obj_t *p, *body = page_new("Reset all settings?", &p);
+    set_confirm(body, "RESTORE DEFAULTS",
+        "This restores system, playback, sound and appearance settings, plus your pinned tile layout. "
+        "Music, playlists, pet and game progress stay on the player.",
+        "Keep my settings", "Go back without changing anything", reset_all_settings_cancel_cb,
+        "Reset all settings", "Restore the defaults now", reset_all_settings_apply_cb, true);
+    page_push(p);
+}
+
+static void reset_all_settings_open_cb(lv_event_t *e)
+{
+    (void)e;
+    reset_all_settings_page();
+}
+
 
 static void home_page(void)
 {
@@ -7065,15 +7202,15 @@ static void home_page(void)
     lv_obj_t *head = section(hr, "APPS & GAMES");
     lv_obj_set_style_pad_top(head, SL_GUTTER + SL_SP_S, 0);
     lv_obj_t *pen = icon_btn(hr, LV_SYMBOL_EDIT, 44, ha_arrange_cb, NULL);
-    if (wallpaper_id(false) >= 5) lv_obj_set_style_text_color(lv_obj_get_child(pen, 0), lv_color_hex(0xdde3ea), 0);
+    if (wallpaper_dark(wallpaper_id(false))) lv_obj_set_style_text_color(lv_obj_get_child(pen, 0), lv_color_hex(0xdde3ea), 0);
     /* it sits on the wallpaper, not a card: on the photos (all dark) it
      * goes white like the status bar, or the light theme's grey vanishes */
-    if (wallpaper_id(false) >= 5) lv_obj_set_style_text_color(head, lv_color_hex(0xdde3ea), 0);
+    if (wallpaper_dark(wallpaper_id(false))) lv_obj_set_style_text_color(head, lv_color_hex(0xdde3ea), 0);
     ha_load();
     ha_body = body;
     ha_first = lv_obj_get_child_count(body);
     ha_rows();
-    ptr_attach(p, body, wallpaper_id(false) >= 5 ? 0xffffff : C_TEXT);
+    ptr_attach(p, body, wallpaper_dark(wallpaper_id(false)) ? 0xffffff : C_TEXT);
     pages[npages++] = p;
 }
 
@@ -8743,6 +8880,23 @@ static void log_start_facts(void)
         if (sscanf(line, "MemAvailable: %ld", &avail) != 1) sscanf(line, "Shmem: %ld", &shm);
     if (fp) fclose(fp);
     sl_log("start: %ld KiB of memory available, %ld held in /tmp and shared memory", avail, shm);
+    /* Can the R1 play out through USB-C to a DAC? That needs the kernel's
+     * USB host side and its USB audio driver: what this one has, once a
+     * start (a user asked, 24 Nov). */
+    {
+        static const char *const look[] = { "/sys/class/udc", "/sys/class/usb_role", "/sys/bus/usb/drivers/snd-usb-audio",
+                                            "/sys/module/snd_usb_audio", "/proc/asound/cards", "/sys/bus/usb/devices/usb1" };
+        char b[200]; int n = 0;
+        b[0] = '\0';
+        for (unsigned i = 0; i < sizeof look / sizeof look[0]; i++)
+            n += snprintf(b + n, sizeof b - n > 0 ? sizeof b - n : 0, "%s%s %s", n ? "," : "", strrchr(look[i], '/') + 1,
+                          access(look[i], F_OK) ? "no" : "yes");
+        sl_log("start: USB: %s", b);
+        fp = fopen("/proc/asound/cards", "r");
+        for (int k = 0; fp && k < 6 && fgets(line, sizeof line, fp); k++)
+        { line[strcspn(line, "\n")] = '\0'; if (line[0]) sl_log("start: sound card %s", line); }
+        if (fp) fclose(fp);
+    }
 }
 #else
 static void log_start_facts(void) {}

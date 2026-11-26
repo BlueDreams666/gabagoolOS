@@ -164,6 +164,7 @@ static void quiz_aa_reclaim(void)
     quiz_aa_released = false;
 }
 
+static bool quiz_clip_on(void) { return quiz.clip.active; }
 static void quiz_restore_clip(void)
 {
     if (!quiz.clip.active) return;

@@ -623,8 +623,21 @@ static lv_obj_t *opt_chips(lv_obj_t *c, const char *const *names, int n, int sel
 }
 
 typedef void (*opt_format_fn)(char *b, int n, int value);
-struct opt_slider { opt_apply_fn apply; opt_format_fn format; };
+/* reset: a Reset by the value while it is off def (the sound's own sliders) */
+struct opt_slider { opt_apply_fn apply; opt_format_fn format; bool reset; int def; };
 
+/* Reset just before the value's words, however long they are (-12.0 dB, Right 100) */
+#define SET_VALUE_W 132                      /* room the value keeps at the far end */
+static void opt_reset_place(lv_obj_t *r)
+{
+    lv_obj_t *v = lv_obj_get_child(r, 1), *rs = lv_obj_get_child(r, -1);
+    const lv_font_t *f = &ss_semibold_18;
+    int32_t vw = lv_text_get_width(lv_label_get_text(v), (uint32_t)strlen(lv_label_get_text(v)), f, 0);
+    int32_t rw = lv_text_get_width(lv_label_get_text(rs), (uint32_t)strlen(lv_label_get_text(rs)), f, 0);
+    int32_t vx = lv_obj_get_x(v), vwbox = lv_obj_get_width(v);
+    int32_t x = set_rtl() ? vx + vw + SL_SP_S : vx + vwbox - vw - SL_SP_S - rw;
+    lv_obj_set_pos(rs, x, lv_obj_get_y(v));
+}
 static void opt_slider_cb(lv_event_t *e)
 {
     lv_obj_t *s = lv_event_get_current_target(e);
@@ -632,7 +645,9 @@ static void opt_slider_cb(lv_event_t *e)
     int v = lv_slider_get_value(s);
     char b[24];
     o->format(b, sizeof b, v);
-    label_if_changed(lv_obj_get_child(lv_obj_get_parent(s), 1), b);
+    lv_obj_t *r = lv_obj_get_parent(s);
+    label_if_changed(lv_obj_get_child(r, 1), b);
+    if (o->reset) { hidden_if_changed(lv_obj_get_child(r, -1), v == o->def); opt_reset_place(r); }   /* Reset: the row's last */
     o->apply(v);
     if (lv_event_get_code(e) == LV_EVENT_RELEASED && settings_save() != 0)
         toast_warn("Could not save settings");
@@ -640,7 +655,6 @@ static void opt_slider_cb(lv_event_t *e)
 /* A name and its value over a slider. The track runs along the words'
  * column; the knob at either end stays inside the card. Children: name,
  * value, slider. Returns the row. */
-#define SET_VALUE_W 132                      /* room the value keeps at the far end */
 static lv_obj_t *set_slider_row(lv_obj_t *c, const char *label, const char *value, uint32_t value_color)
 {
     int vw = SET_VALUE_W, lw = SET_INNER - 2 * SL_INSET - vw - SL_SP_S;
@@ -667,6 +681,51 @@ static lv_obj_t *set_slider_row(lv_obj_t *c, const char *label, const char *valu
     set_sep(c, r, SL_INSET);
     return r;
 }
+/* - and +: a step each tap, steps on while held; then saved, as a drag's
+ * let-go is (small sliders on a small screen: a user asked, GitHub #3) */
+#define OPT_STEP_W 44
+static void opt_step(lv_obj_t *btn, int dir)
+{
+    lv_obj_t *s = lv_obj_get_child(lv_obj_get_parent(btn), 2);
+    int v = lv_slider_get_value(s) + dir;
+    if (v < lv_slider_get_min_value(s) || v > lv_slider_get_max_value(s)) return;
+    lv_slider_set_value(s, v, LV_ANIM_OFF);
+    lv_obj_send_event(s, LV_EVENT_VALUE_CHANGED, NULL);
+}
+static void opt_step_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t *b = lv_event_get_current_target(e);
+    int dir = (int)(intptr_t)lv_event_get_user_data(e);
+    /* LVGL sends a tap's RELEASED before its SHORT_CLICKED: a tap steps,
+     * then saves; a hold steps as it goes and saves when let go */
+    lv_obj_t *s = lv_obj_get_child(lv_obj_get_parent(b), 2);
+    if (code == LV_EVENT_SHORT_CLICKED)
+    {
+        opt_step(b, dir);
+        lv_obj_send_event(s, LV_EVENT_RELEASED, NULL);
+    }
+    else if (code == LV_EVENT_LONG_PRESSED || code == LV_EVENT_LONG_PRESSED_REPEAT)
+    {
+        opt_step(b, dir);
+        lv_obj_set_user_data(b, (void *)1);   /* held: its let-go saves */
+    }
+    else if (code == LV_EVENT_RELEASED && lv_obj_get_user_data(b))
+    {
+        lv_obj_set_user_data(b, NULL);
+        lv_obj_send_event(s, LV_EVENT_RELEASED, NULL);
+    }
+}
+static void opt_step_none(lv_event_t *e) { (void)e; }
+static void opt_reset_cb(lv_event_t *e)
+{
+    lv_obj_t *r = lv_obj_get_parent(lv_event_get_current_target(e));
+    lv_obj_t *s = lv_obj_get_child(r, 2);
+    const struct opt_slider *o = lv_event_get_user_data(e);
+    lv_slider_set_value(s, o->def, LV_ANIM_OFF);
+    lv_obj_send_event(s, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_send_event(s, LV_EVENT_RELEASED, NULL);
+}
 static lv_obj_t *opt_slider(lv_obj_t *c, const char *label, int min, int max, int value,
                             const struct opt_slider *o)
 {
@@ -679,6 +738,29 @@ static lv_obj_t *opt_slider(lv_obj_t *c, const char *label, int min, int max, in
     lv_slider_set_value(s, value < min ? min : value > max ? max : value, LV_ANIM_OFF);
     lv_obj_add_event_cb(s, opt_slider_cb, LV_EVENT_VALUE_CHANGED, (void *)o);
     lv_obj_add_event_cb(s, opt_slider_cb, LV_EVENT_RELEASED, (void *)o);
+    /* the track between a - and a + (children 3, 4): the low end's key at
+     * the slider's low end, which is the right in Hebrew and Arabic */
+    int sx = SL_INSET + OPT_STEP_W + SL_SP_S, cy = lv_obj_get_y(s) + SL_TRACK_H / 2;
+    lv_obj_set_width(s, SET_INNER - 2 * sx);
+    lv_obj_set_x(s, sx);
+    for (int k = 0; k < 2; k++)
+    {
+        lv_obj_t *b = icon_btn(r, k ? LV_SYMBOL_PLUS : LV_SYMBOL_MINUS, OPT_STEP_W, opt_step_none, NULL);   /* its steps: opt_step_cb */
+        lv_obj_set_style_text_color(lv_obj_get_child(b, 0), lv_color_hex(C_TEXT), 0);   /* on the card, light or dark */
+        bool right = (k == 1) != set_rtl();
+        lv_obj_set_pos(b, right ? SET_INNER - SL_INSET - OPT_STEP_W : SL_INSET, cy - OPT_STEP_W / 2);
+        lv_obj_add_event_cb(b, opt_step_cb, LV_EVENT_ALL, (void *)(intptr_t)(k ? 1 : -1));
+    }
+    if (o->reset)
+    {
+        /* Reset (the row's last), beside the value's own words, while it is off its default */
+        lv_obj_t *rs = text(r, "Reset", &ss_semibold_18, C_ACCENT_TXT);
+        lv_obj_add_flag(rs, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(rs, SL_SP_S);
+        lv_obj_add_event_cb(rs, opt_reset_cb, LV_EVENT_CLICKED, (void *)o);
+        hidden_if_changed(rs, value == o->def);
+        opt_reset_place(r);
+    }
     return r;
 }
 
@@ -757,7 +839,7 @@ static const char *set_v_home(void)
 static const char *set_v_set_layout(void) { return global_settings.sloppy_settings_tiles == 1 ? "Tiles" : "List"; }
 static const char *set_v_icon(void) { return global_settings.sloppy_skull_icon ? "Angular skull" : "Classic cog"; }
 static const char *set_v_usb(void) { return global_settings.sloppy_usb_classic ? "Classic" : "Gabagool"; }
-static const char *set_v_lock_player(void) { return global_settings.sloppy_lock_player ? "Small cover" : "Big cover"; }   /* the names on its page */
+static const char *set_v_lock_player(void) { return global_settings.sloppy_lock_off ? "Off" : global_settings.sloppy_lock_player ? "Small cover" : "Big cover"; }   /* the names on its page */
 static const char *set_v_np(void) { return global_settings.sloppy_np_style == 3 ? "Waveform" : global_settings.sloppy_np_style == 2 ? "Centred" : global_settings.sloppy_np_style ? "Classic" : "Glass"; }
 static const char *set_v_cf(void) { return global_settings.sloppy_cf_vertical ? "Vertical" : "Horizontal"; }
 static const char *lang_name_now(void);
@@ -774,7 +856,7 @@ static const struct set_entry set_custom_entries[] = {
     { LV_SYMBOL_USB, 0x7a5bd6, "USB mode screen", set_v_usb, 0x2002c },
     { LV_SYMBOL_IMAGE, 0xd93fa0, "Home wallpaper", NULL, 0x20006 },
     { LV_SYMBOL_IMAGE, 0x2d7ff0, "Lock wallpaper", NULL, 0x20007 },
-    { LV_SYMBOL_PLAY, 0xe8408a, "Lock screen player", set_v_lock_player, 0x2000b },
+    { LV_SYMBOL_PLAY, 0xe8408a, "Lock screen", set_v_lock_player, 0x2000b },
     { LV_SYMBOL_AUDIO, 0x2f8de4, "Now Playing", set_v_np, 0x20016 },
     { LV_SYMBOL_IMAGE, 0xb8743a, "Cover Flow", set_v_cf, 0x2001a },
     { LV_SYMBOL_EYE_CLOSE, 0x3aa856, "Screensaver", set_v_saver, 0x20028 },
@@ -1564,11 +1646,11 @@ static void fmt_pct(char *b, int n, int v) { snprintf(b, n, "%d%%", v); }
 /* ------------------------------------------------------------------ sound */
 #ifdef AUDIOHW_HAVE_BASS
 static void snd_bass(int v) { global_settings.bass = v; tone_shelves_apply(); }   /* with Temperature on top */
-static const struct opt_slider snd_bass_o = { snd_bass, fmt_db };
+static const struct opt_slider snd_bass_o = { snd_bass, fmt_db, true, 0 };
 #endif
 #ifdef AUDIOHW_HAVE_TREBLE
 static void snd_treble(int v) { global_settings.treble = v; tone_shelves_apply(); }
-static const struct opt_slider snd_treble_o = { snd_treble, fmt_db };
+static const struct opt_slider snd_treble_o = { snd_treble, fmt_db, true, 0 };
 #endif
 static void snd_balance(int v) { global_settings.balance = v; sound_set(SOUND_BALANCE, v); }
 static void fmt_balance(char *b, int n, int v)
@@ -1576,7 +1658,7 @@ static void fmt_balance(char *b, int n, int v)
     if (v) snprintf(b, n, "%s %d", v < 0 ? "Left" : "Right", v < 0 ? -v : v);
     else strlcpy(b, "Center", n);
 }
-static const struct opt_slider snd_balance_o = { snd_balance, fmt_balance };
+static const struct opt_slider snd_balance_o = { snd_balance, fmt_balance, true, 0 };
 /* The DSP applies a width only in its custom channel mode: the slider
  * picks that mode as it leaves 100 % and plain stereo as it comes back.
  * Mono (R14) is the DSP's own mono mode; the modes only Classic Rockbox
@@ -1600,7 +1682,7 @@ static void snd_width(int v)
     sound_set(SOUND_STEREO_WIDTH, v);
     snd_channels_apply(global_settings.channel_config == SOUND_CHAN_MONO);
 }
-static const struct opt_slider snd_width_o = { snd_width, fmt_pct };
+static const struct opt_slider snd_width_o = { snd_width, fmt_pct, true, 100 };
 static void snd_mono(int on)
 {
     if (!snd_channels_ours()) global_settings.channel_config = SOUND_CHAN_STEREO;   /* the switch takes over */
@@ -1628,7 +1710,7 @@ static int rg_choice(void)
 }
 static void rg_noclip(int on) { global_settings.replaygain_settings.noclip = on; replaygain_update(); }
 static void rg_preamp(int v) { global_settings.replaygain_settings.preamp = v * 10; replaygain_update(); }
-static const struct opt_slider rg_preamp_o = { rg_preamp, fmt_db };
+static const struct opt_slider rg_preamp_o = { rg_preamp, fmt_db, true, 0 };
 
 /* playback speed, kept at the same pitch */
 static const int speed_steps[] = { 75, 100, 125, 150, 200 };

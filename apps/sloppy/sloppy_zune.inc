@@ -164,7 +164,7 @@ static void zn_deleted(lv_event_t *e)
 static void zune_home_page(void)
 {
     memset(&zn, 0, sizeof zn);
-    zn.ink = wallpaper_id(false) >= 5 ? 0xffffff : C_TEXT;   /* on the photos, white like the status bar */
+    zn.ink = wallpaper_dark(wallpaper_id(false)) ? 0xffffff : C_TEXT;   /* on the photos, white like the status bar */
     lv_obj_t *p = zn.page = box(ui_screen());
     lv_obj_add_style(p, &st_page, 0);
     lv_obj_set_size(p, W, H);
@@ -230,25 +230,17 @@ static void zune_home_page(void)
     zn_history(body);
     zn_heading(body, "Apps");
     zn_app(body, "Cover Flow", "Your albums, flipping by", ACT_COVERFLOW);
-    zn_app(body, "Files", "Every folder on the card", ACT_FILES);
-    zn_app(body, "Tamagotchi", "A little friend, always growing", ACT_PET);
-    zn_app(body, "Ragdoll", "Grab, toss and watch it tumble", ACT_RAGDOLL);
-    zn_app(body, "Snake", "Classic walls or level challenge", ACT_SNAKE);
-    zn_app(body, "2048", "Slide the tiles, join the twins", ACT_2048);
-    zn_app(body, "Sudoku", "Four levels, with notes and hints", ACT_SUDOKU);
-    zn_app(body, "24 Points", "Make 24 from four cards", ACT_POINTS);
-    zn_app(body, "Flappy Bird", "Tap to flap through the pipes", ACT_FLAPPY);
-    zn_app(body, "Sloppy FM", "Tap to tune and grow your station", ACT_RADIO);
-    zn_app(body, "Freaky Spoon", "Bounce up with a very strange spoon", ACT_SPOON);
-    zn_app(body, "Music Bip Bop Smarty", "Music, movies and TV trivia", ACT_QUIZ);
-    zn_app(body, "Flip a Coin", "A quick call for heads or tails", ACT_COIN);
-    zn_app(body, "Magic 8 Ball", "Ask a question and tap the ball", ACT_MAGIC);
-    zn_app(body, "Chess", "Play the computer or a friend", ACT_CHESS);
-    zn_app(body, "Clicker", "Count anything, one tap at a time", ACT_CLICKER);
-    zn_app(body, "Arcade", "Game Boy games from your card, and Doom", ACT_ARCADE);
-    zn_app(body, "Spectrum", NULL, ACT_SPECTRUM);
-    zn_app(body, "Visualizer", NULL, ACT_VISUALIZER);
-    zn_app(body, "Spacey Lines", NULL, ACT_SPACEY);
+    ha_load();                             /* the same order as every home's (Arrange apps and games) */
+    for (int i = 0; i < HA_N; i++)
+        zn_app(body, ha_defs[ha_order[i]].name, ha_defs[ha_order[i]].sub, ha_defs[ha_order[i]].act);
+    {
+        lv_obj_t *r = zn_row(body, ACT_ARRANGE);
+        lv_obj_set_style_pad_ver(r, 6, 0);
+        char low[64];
+        const char *t = sl_lower(sl_tr("arrange apps"), low, sizeof low);
+        zn_label(r, t, sl_zune_font(t, &ss_regular_34));
+        zn_slide_in(r);
+    }
 
     zn.timer = lv_timer_create(zn_tick, 1000, NULL);
     lv_obj_add_event_cb(p, zn_deleted, LV_EVENT_DELETE, NULL);

@@ -731,6 +731,7 @@ static bool bt_ctl_run(const char *arg1, const char *arg2, const char *success_s
 }
 static bool bt_ctl_run_for(const char *arg1, const char *arg2, const char *success_str, int timeout_ms)
 {
+    bt_ctl_reply[0] = '\0';             /* no earlier answer read as this one's (the NotReady retries) */
     int fds[2], status = -1;
     pid_t pid;
     char output[512] = "";
@@ -1578,11 +1579,25 @@ static void bt_connect_device(const struct bt_device *device)
      * more try a second later, unless the first already used its time. */
     long connect_from = bt_ms();
     bool linked = bt_ctl_run("connect", mac, "Connection successful");
-    if (!linked && bt_ms() - connect_from < 10000)
+    /* "NotReady": the controller said it was on but is not up yet (a user's
+     * R1, 24 Nov: refused 0.2 s after power on, every try, never connected).
+     * It gets time and another power on; up to three more tries while each
+     * answers quickly (one that waited out its time is not tried again). */
+    for (int tries = 0; !linked && tries < 3 && bt_ms() - connect_from < 10000; tries++)
     {
-        hiby_debug_log("connect: retrying %s", mac);
-        bt_sleep(HZ);
+        bool not_ready = strstr(bt_ctl_reply, "NotReady") != NULL;
+        hiby_debug_log("connect: retrying %s%s", mac, not_ready ? " (controller not ready yet)" : "");
+        if (not_ready)
+        {
+            bt_sleep(2 * HZ);
+            bt_ctl_run("power", "on", "power on succeeded");
+            bt_sleep(HZ / 2);
+        }
+        else bt_sleep(HZ);
+        long try_from = bt_ms();
         linked = bt_ctl_run("connect", mac, "Connection successful");
+        connect_from = try_from;           /* each try gets its own 10 s */
+        if (!linked && !strstr(bt_ctl_reply, "NotReady")) break;   /* any other refusal: one retry, as before */
     }
     if (!linked)
     {

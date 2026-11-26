@@ -198,7 +198,8 @@ static void lv_slider_event(const lv_obj_class_t * class_p, lv_event_t * e)
         update_knob_pos(obj, true);
     }
     else if(code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
-        update_knob_pos(obj, false);
+        /*GabagoolOS: only a drag moves it; a tap on the bar leaves the value*/
+        if(slider->dragging) update_knob_pos(obj, false);
         slider->dragging = false;
         slider->value_to_set = NULL;
 

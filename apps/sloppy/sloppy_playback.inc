@@ -5721,7 +5721,11 @@ static void q_add_many(const int *l, int n)
     if (!something_playing()) { if (play_list(l, n, 0, false)) np_show_auto(); return; }
     int ok = 0;
     char path[MAX_PATH];
-    for (int i = 0; i < n; i++) if (q_insert(sl_track_path(l[i], path, sizeof path), false, true) >= 0) ok++;
+    /* to the list's room, and saved once at the end, not after every song */
+    for (int i = 0; i < n && q_room() > 0; i++)
+        if (q_insert(sl_track_path(l[i], path, sizeof path), false, false) >= 0) ok++;
+        else break;
+    if (ok) playlist_sync(NULL);
     char b[128];
     snprintf(b, sizeof b, sl_tr(ok == 1 ? "Added %d song to the queue" : "Added %d songs to the queue"), ok);
     ok == n ? toast(b) : toast_warn("Could not queue every song");

@@ -821,6 +821,9 @@ static bool arcade_key(int b, bool rel)
         return (b & (BUTTON_LEFT | BUTTON_RIGHT)) || b == BUTTON_PLAY || b == BUTTON_NEXT || b == BUTTON_PREV;
     unsigned k = arc_keys_of(b);
     if (!k) return b == BUTTON_PLAY || b == BUTTON_NEXT || b == BUTTON_PREV;   /* a headset's keys do nothing here */
+    /* upright, a volume key with Play or Next held is still the volume's:
+     * the game takes its keys from the code and lets the event go on */
+    bool others = !arc_opt.side && (b & ~(BUTTON_LEFT | BUTTON_RIGHT));
     if (rel)
     {
         arc.keys &= ~k;
@@ -833,7 +836,7 @@ static bool arcade_key(int b, bool rel)
         arc.keys = k;                      /* all held now (one let go as another went down is in it) */
     }
     arc_show_keys();
-    return true;
+    return !others;
 }
 
 /* ---- running ---- */
@@ -846,6 +849,7 @@ static void arc_pause(bool on)
     {
         arc.t0 = lv_tick_get();
         arc.frames = 0;
+        arc.latch = arc.released = arc.gap = arc.seen = 0;   /* nothing pressed while paused comes through after */
         arc.hidden_saved = false;
         arc_sound_start();
     }

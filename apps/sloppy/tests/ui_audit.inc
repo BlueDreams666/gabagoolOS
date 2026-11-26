@@ -3314,7 +3314,7 @@ static void c_big_cover_tests(void) {
     assert(ta.x1 == ca.x1 && ta.y1 > ca.y2);                /* the title under the cover, from its edge */
     page_pop(); frame(400);
     global_settings.sloppy_album_layout = 0;
-    album_page(2); frame(300); assert(lv_obj_get_width(lv_obj_get_child(lv_obj_get_child(top_body(), 0), 0)) == 220); page_pop(); frame(400);
+    album_page(2); frame(300); assert(lv_obj_get_width(lv_obj_get_child(lv_obj_get_child(top_body(), 0), 0)) == SL_ART_GRID); page_pop(); frame(400);
     b4_library_done(); test_real_art = ra;
     printf("PASS: Big cover: the album's cover across its page, made sharp by the cover thread, the words under it.\n");
 }

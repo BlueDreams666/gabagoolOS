@@ -190,6 +190,7 @@ static const struct sq_setting sq_settings[] = {
     { "Loved songs", "Customization", "heart star favourite favorite love", 0x20016 },
     { "Cover Flow", "Customization", "vertical horizontal upright sideways albums", 0x2001a },
     { "USB mode screen", "Customization", "usb computer dog gabagool classic plug picture", 0x2002c },
+    { "Lock screen", "Customization", "lock screen off disable swipe unlock no lock wake straight", 0x2000b },
     { "Screensaver", "Customization", "screen saver idle floating cover square album clock burn in always on display", 0x20028 },
     { "Language", "Customization", "english spanish french german hebrew arabic chinese", 0x20013 },
     { "Text size", "Customization", "font large bigger smaller", 0x20014 },

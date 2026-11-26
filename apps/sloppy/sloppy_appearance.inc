@@ -15,6 +15,8 @@ static const uint32_t accent_presets[] = { 0x72d8cd, 0x5aa9ff, 0xa78bfa, 0xff6fb
                                            0xf36f73, 0xff9f43, 0xf1ce62, 0x7bd88f };
 static lv_obj_t *accent_swatches[ARRAYLEN(accent_presets)];
 static lv_color_hsv_t accent_pick;
+static int accent_for_wall;               /* 0 the accent; 1 home, 2 lock: the Colour wallpaper's */
+static uint32_t accent_now(void) { return accent_for_wall ? (uint32_t)global_settings.sloppy_wall_color & 0xffffff : C_ACCENT & 0xffffff; }
 static bool appearance_reload_pending;
 static bool appearance_reload_settings_only;
 static lv_timer_t *appearance_reload_timer;
@@ -40,6 +42,7 @@ static void appearance_page(void);
  * RGB565 (sl_wall_start), so it loads in one read, home and lock alike.
  * In memory only while one of them shows it. */
 #define WALL_CUSTOM 9
+#define WALL_COLOR 10                     /* one colour, picked on a wheel */
 #define WALL_CUSTOM_FILE ROCKBOX_DIR "/sloppy/wallpaper.rgb565"
 static uint16_t *wall_custom_px;
 static uint16_t wall_custom_small[60 * 100];
@@ -104,9 +107,16 @@ static int wallpaper_id(bool lock)
     int id = lock ? global_settings.sloppy_lock_wallpaper :
                     global_settings.sloppy_home_wallpaper;
     if (id == WALL_CUSTOM && !wallpaper_custom_load()) return 0;   /* gone from the card: plain */
-    return id >= 0 && id <= WALL_CUSTOM ? id : 0;
+    return id >= 0 && id <= WALL_COLOR ? id : 0;
 }
 
+/* Words on it go white: the photos, and a Colour dark enough */
+static bool wallpaper_dark(int id)
+{
+    if (id != WALL_COLOR) return id >= 5;
+    uint32_t c = (uint32_t)global_settings.sloppy_wall_color;
+    return ((c >> 16 & 255) * 299 + (c >> 8 & 255) * 587 + (c & 255) * 114) / 1000 < 140;
+}
 static lv_image_dsc_t wallpaper_images[4][2];
 
 static const lv_image_dsc_t *wallpaper_image(int id, bool preview)
@@ -426,6 +436,11 @@ static void wallpaper_draw_id(lv_layer_t *layer, const lv_area_t *area, int id, 
     if (preview)
         wallpaper_rect(layer, a.x1, a.y1, a.x2, a.y2, C_BG, LV_OPA_COVER, 0);
     if (!id || lv_area_get_width(&a) <= 0 || lv_area_get_height(&a) <= 0) return;
+    if (id == WALL_COLOR)
+    {
+        wallpaper_rect(layer, a.x1, a.y1, a.x2, a.y2, (uint32_t)global_settings.sloppy_wall_color & 0xffffff, LV_OPA_COVER, 0);
+        return;
+    }
     if (id == WALL_CUSTOM)
     {
         if (!wallpaper_custom_load()) return;
@@ -862,7 +877,18 @@ static void settings_icon_fill(lv_obj_t *parent, bool skull)
         lv_obj_add_event_cb(s, skull_draw, LV_EVENT_DRAW_MAIN, NULL);
     }
     if (parent == home_settings_icon && lv_obj_get_child_count(parent))
-        lv_obj_set_style_transform_scale(lv_obj_get_child(parent, 0), home_icon_small ? 200 : 292, 0);
+    {
+        /* scaled about its own middle: from its corner, the skull sat off
+         * centre in the Cards home's square */
+        lv_obj_t *g = lv_obj_get_child(parent, 0);
+        if (home_icon_small)               /* the Cards home's square (the Tiles' were placed for it as they are) */
+        {
+            lv_obj_update_layout(g);
+            lv_obj_set_style_transform_pivot_x(g, lv_obj_get_width(g) / 2, 0);
+            lv_obj_set_style_transform_pivot_y(g, lv_obj_get_height(g) / 2, 0);
+        }
+        lv_obj_set_style_transform_scale(g, home_icon_small ? 200 : 292, 0);
+    }
 }
 
 static void icon_choice_cb(lv_event_t *e)
@@ -1316,13 +1342,21 @@ static void cf_style_page(void)
     page_push(p);
 }
 
+static void lock_on_apply(int on)
+{
+    global_settings.sloppy_lock_off = !on;
+    if (settings_save() != 0) toast_warn("Could not save the lock screen setting");
+}
 static void lock_player_page(void)
 {
     static const char *const names[] = { "Big cover", "Small cover" };
     static const char *const notes[] = { "Art fills the middle of the screen",
                                          "Art beside the song, more wallpaper" };
-    lv_obj_t *p, *body = page_new("Lock screen player", &p);
+    lv_obj_t *p, *body = page_new("Lock screen", &p);
     int choice = global_settings.sloppy_lock_player == 1 ? 1 : 0;
+    /* off: a tap, a key or Power on a dark screen goes straight back in */
+    set_switch(set_group(body, "Lock screen"), "Lock screen", "Swipe up to unlock when the screen wakes. Off: straight back to where you were",
+               !global_settings.sloppy_lock_off, lock_on_apply);
     lv_obj_t *g = set_group(body, "Layout");
     for (int i = 0; i < 2; i++)
         lock_player_sketch(lv_obj_get_child(set_pick(g, names[i], notes[i], i == choice, lock_player_cb,
@@ -1422,7 +1456,7 @@ static void accent_preview_update(void)
 {
     uint32_t color = accent_pick_rgb();
     uint32_t ink = sl_ink_on(color);     /* the stronger of the two, by contrast (white on Zule's pink was 2.9:1 at 80 %) */
-    bool same = color == (C_ACCENT & 0xffffff);
+    bool same = color == accent_now();
     char hex[12];
     snprintf(hex, sizeof hex, "#%06lX", (unsigned long)color);
     lv_label_set_text(accent_preview_label, sl_tr(same ? "CURRENT COLOR" : "USE THIS COLOR"));
@@ -1505,6 +1539,18 @@ static void accent_apply_cb(lv_event_t *e)
 {
     (void)e;
     uint32_t color = accent_pick_rgb();
+    if (accent_for_wall)
+    {
+        /* the Colour wallpaper, there whether or not the colour moved */
+        global_settings.sloppy_wall_color = (int)color;
+        if (accent_for_wall == 2) global_settings.sloppy_lock_wallpaper = WALL_COLOR;
+        else global_settings.sloppy_home_wallpaper = WALL_COLOR;
+        if (global_settings.sloppy_home_wallpaper != WALL_CUSTOM && global_settings.sloppy_lock_wallpaper != WALL_CUSTOM)
+            wallpaper_custom_free();
+        sfx_play(SFX_START);
+        appearance_changed();
+        return;
+    }
     if (color == (C_ACCENT & 0xffffff)) return;
     global_settings.sloppy_accent_color = color;
     sfx_play(SFX_START);
@@ -1547,11 +1593,12 @@ static void accent_page_deleted(lv_event_t *e)
     (void)e;
     sl_give_back(accent_wheel_pixels, sizeof accent_wheel_pixels);
 }
-static void accent_page(void)
+static void accent_page_as(int for_wall)
 {
-    lv_obj_t *p, *body = page_new("Accent color", &p);
+    accent_for_wall = for_wall;
+    lv_obj_t *p, *body = page_new(for_wall ? "Wallpaper color" : "Accent color", &p);
     lv_obj_add_event_cb(p, accent_page_deleted, LV_EVENT_DELETE, NULL);
-    accent_set_rgb(C_ACCENT);
+    accent_set_rgb(accent_now());
     /* the wheel and its brightness, one card; the presets, another; the
      * button that wears the colour under them */
     lv_obj_t *g = set_group(body, "Color wheel");
@@ -1643,12 +1690,15 @@ static void accent_page(void)
     accent_preview_update();
     page_push(p);
 }
+static void accent_page(void) { accent_page_as(0); }
 
+static void accent_page_as(int for_wall);
 static void wallpaper_choice_cb(lv_event_t *e)
 {
     int choice = (int)(intptr_t)lv_event_get_user_data(e);
     bool lock = choice >= 16;
     int id = choice & 15;
+    if (id == WALL_COLOR) { accent_page_as(lock ? 2 : 1); return; }   /* the wheel: Use this color sets it */
     if (lock) global_settings.sloppy_lock_wallpaper = id;
     else global_settings.sloppy_home_wallpaper = id;
     if (global_settings.sloppy_home_wallpaper != WALL_CUSTOM && global_settings.sloppy_lock_wallpaper != WALL_CUSTOM)
@@ -1698,12 +1748,12 @@ static void wallpaper_page(bool lock)
 {
     static const char *const names[] = { "Plain", "Soft glow", "Fine grid",
                                          "Constellation", "Waves", "Orion nebula",
-                                         "Eagle nebula", "Red roots", "Nexus live", "Your picture" };
+                                         "Eagle nebula", "Red roots", "Nexus live", "Your picture", "Color" };
     lv_obj_t *p, *body = page_new(lock ? "Lock wallpaper" : "Home wallpaper", &p);
     lv_obj_t *g = set_group(body, "Background");
-    for (int i = 0; i <= WALL_CUSTOM; i++)
+    for (int i = 0; i <= WALL_COLOR; i++)
     {
-        if (i == WALL_CUSTOM && !wallpaper_custom_load()) break;   /* none made yet */
+        if (i == WALL_CUSTOM && !wallpaper_custom_load()) continue;   /* none made yet */
         lv_obj_t *row = set_pick(g, names[i], NULL, wallpaper_id(lock) == i, wallpaper_choice_cb,
                                  (void *)(intptr_t)(i | (lock ? 16 : 0)));
         /* drawn on a child, so the screen's rounded corners clip it */

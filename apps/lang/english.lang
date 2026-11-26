@@ -20217,3 +20217,17 @@
     *: "Classic USB mode screen"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_SLOPPY_LOCK_OFF
+  desc: GabagoolOS: no lock screen, a wake goes straight back to the player
+  user: core
+  <source>
+    *: "No lock screen"
+  </source>
+  <dest>
+    *: "No lock screen"
+  </dest>
+  <voice>
+    *: "No lock screen"
+  </voice>
+</phrase>

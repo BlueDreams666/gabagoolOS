@@ -443,9 +443,11 @@ struct user_settings
 #ifdef HAVE_SLOPPY_UI
     bool sloppy_skull_icon;
     bool sloppy_usb_classic;     /* USB mode: Rockbox's plug, not the dog */
+    bool sloppy_lock_off;        /* no lock screen: a wake goes straight back in */
     int sloppy_theme;            /* 0 dark, 1 light, 2 true dark, 3 Zune */
     int sloppy_home_style;       /* 0 cards, 1 tiles, 2 list */
     int sloppy_accent_color;
+    int sloppy_wall_color;       /* the Colour wallpaper (home and lock) */
     int sloppy_home_wallpaper;
     int sloppy_lock_wallpaper;
     int sloppy_sfx_volume;       /* effects and interface sounds, 0-100 %; never music */

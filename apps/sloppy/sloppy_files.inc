@@ -295,8 +295,10 @@ static void fm_queue_paths(const struct fm_paths *ps, bool next)
     if (!ps->count) { toast("No songs here"); return; }
     if (!something_playing()) { fm_play_paths(ps, 0, false); return; }
     int ok = 0;
-    for (int i = next ? ps->count - 1 : 0; next ? i >= 0 : i < ps->count; i += next ? -1 : 1)   /* Play next: last first, so they play in order */
-        if (q_insert(fm_paths_at(ps, i), next, true) >= 0) ok++;
+    for (int i = next ? ps->count - 1 : 0; (next ? i >= 0 : i < ps->count) && q_room() > 0; i += next ? -1 : 1)   /* Play next: last first, so they play in order */
+        if (q_insert(fm_paths_at(ps, i), next, false) >= 0) ok++;
+        else break;
+    if (ok) playlist_sync(NULL);           /* once, not after every song */
     char b[128], num[16];
     if (next && ps->count == 1) strlcpy(b, sl_tr("Plays next"), sizeof b);
     else if (ps->capped) snprintf(b, sizeof b, sl_tr("Added the first %s songs"), sl_fmt_count(num, sizeof num, ok));

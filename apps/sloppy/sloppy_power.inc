@@ -62,10 +62,12 @@ static void sl_power_overlay_drag(int dy)
     lv_obj_set_y(sl_power_overlay, dy > 0 ? -dy : 0);
 }
 
+static bool wallpaper_dark(int id);      /* sloppy_appearance.inc */
 static bool sl_power_image_wallpaper(void)
 {
-    return global_settings.sloppy_lock_wallpaper >= 5 &&
-           global_settings.sloppy_lock_wallpaper <= 9;   /* the photos and your picture */
+    return (global_settings.sloppy_lock_wallpaper >= 5 &&
+            global_settings.sloppy_lock_wallpaper <= 9) ||   /* the photos and your picture */
+           (global_settings.sloppy_lock_wallpaper == 10 && wallpaper_dark(10));   /* a dark Colour */
 }
 
 /* the Now Playing card (sloppy_lockplayer.inc) and its controls */
@@ -290,6 +292,11 @@ static void sl_power_apply(void)
 {
     if (!sl_power_running || sl_power_suspended)
         return;
+    /* Lock screen off (Customization > Lock screen): every way into it (a
+     * tap, a key, Power on a dark screen) lands back where the player was.
+     * The screensaver keeps its place over it while music plays. */
+    if (global_settings.sloppy_lock_off && sl_power.mode == SL_POWER_LOCKED && !sl_power.saver)
+        sl_power.mode = SL_POWER_ACTIVE;
     wallpaper_screen_dark = sl_power.mode == SL_POWER_DARK;
     sl_power_set_drawing(!wallpaper_screen_dark);
     int level = global_settings.brightness;
@@ -564,7 +571,7 @@ static bool sl_power_filter_touch(bool down, int x, int y)
             slider_pending = false;
             sl_power.swallow_touch = true;
         }
-        if (control >= LP_SEEK)
+        if (control >= LP_SEEK && !slider_pending)   /* only a drag moves a bar: a tap on it leaves it */
             lp_drag(control, x);
         else if (control >= 0 && (dx > 24 || dx < -24 || dy > 24 || dy < -24))
         {
@@ -581,10 +588,11 @@ static bool sl_power_filter_touch(bool down, int x, int y)
     if (!down)
     {
         int tapped = control;
+        bool only_tapped = slider_pending;   /* a bar touched and let go, never dragged */
         lp_press(control, false);
         control = -1;
         slider_pending = false;
-        if (tapped >= LP_SEEK)
+        if (tapped >= LP_SEEK && !only_tapped)
             lp_activate(tapped);        /* commit the new song position */
         else if (dragging && sl_power_is_locked() && sl_power_overlay)
         {
@@ -610,8 +618,23 @@ static void sl_keys_lock_toggle(void)
     sl_keys_note(sl_keys_locked ? "Buttons locked" : "Buttons unlocked");
 }
 static void sl_torture_stop(const char *why);     /* sloppy_torture.inc */
+/* which volume keys are down, from every key event: a press reports all
+ * the keys held, a release the ones let go. Only Volume up's own codes
+ * once counted, so it let go together with another key (a game's keys,
+ * sideways) stayed down here, and every press of Power after took a
+ * screenshot (23 Nov). Every key event comes here first, Clicker's and
+ * those in USB mode too; the power key's own leave it be. */
+static bool sl_vol_up_down, sl_vol_down_down;
+static void sl_vol_keys_seen(long btn)
+{
+    unsigned key = btn & ~(BUTTON_REL | BUTTON_REPEAT);
+    if (!(key & (BUTTON_UP | BUTTON_DOWN | BUTTON_LEFT | BUTTON_RIGHT))) return;
+    if (!(btn & BUTTON_REL)) { sl_vol_up_down = (key & BUTTON_UP) != 0; sl_vol_down_down = (key & BUTTON_DOWN) != 0; }
+    else { if (key & BUTTON_UP) sl_vol_up_down = false; if (key & BUTTON_DOWN) sl_vol_down_down = false; }
+}
 static bool sl_power_filter_button(long btn)
 {
+    sl_vol_keys_seen(btn);
     if (!sl_power_running || sl_power_suspended) return false;
     if (btn != BUTTON_NONE) sl_torture_stop("a key");   /* a person: the run ends */
     bool released = (btn & BUTTON_REL) != 0;
@@ -622,17 +645,8 @@ static bool sl_power_filter_button(long btn)
     /* (Rockbox may report the two held as one code, both bits set) */
     /* Volume up held, then Power: the same, in Sonix's order. The power
      * press is taken as a hold already used, so its release does nothing */
-    static bool up_down, down_down, down_combo;
-    /* which volume keys are down, from every key event: a press reports all
-     * the keys held, a release the ones let go. Only Volume up's own codes
-     * once counted, so it let go together with another key (a game's keys,
-     * sideways) stayed down here, and every press of Power after took a
-     * screenshot (23 Nov). The power key's own events leave it be. */
-    if (key & (BUTTON_UP | BUTTON_DOWN | BUTTON_LEFT | BUTTON_RIGHT))
-    {
-        if (!released) { up_down = (key & BUTTON_UP) != 0; down_down = (key & BUTTON_DOWN) != 0; }
-        else { if (key & BUTTON_UP) up_down = false; if (key & BUTTON_DOWN) down_down = false; }
-    }
+    static bool down_combo;
+    bool up_down = sl_vol_up_down, down_down = sl_vol_down_down;
     if (key == BUTTON_POWER && down_down && !released && !repeated && !sl_power.power_down && !po_is_open())
     {
         sl_power.power_down = sl_power.power_fired = true;

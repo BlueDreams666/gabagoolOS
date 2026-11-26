@@ -180,6 +180,7 @@ static bool clicker_key(long btn)
 {
     int key = btn & ~(BUTTON_REL | BUTTON_REPEAT);
     if ((key != BUTTON_UP && key != BUTTON_DOWN) || !clicker_on_top()) return false;
+    sl_vol_keys_seen(btn);                 /* its volume keys still count as let go (Power's screenshot) */
     if (sl_power_running && !sl_power_suspended)
     {
         sl_power.ignored_keys &= ~(uint32_t)key;

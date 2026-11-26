@@ -80,7 +80,7 @@ static void tt_home(void)
     if (np_open) np_hide(0);
     if (spa.active) spa_close();
     if (cf.active) cf_close();
-    while (npages > tt.base && npages > 1) page_pop();
+    while (npages > tt.base && npages > 1) { int n = npages; page_pop(); if (npages == n) break; }   /* a page that will not go (the pet mid-care) */
 }
 
 static void sl_torture_stop(const char *why)
