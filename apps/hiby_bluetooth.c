@@ -53,6 +53,7 @@
 #include "splash.h"
 #include "gui/list.h"
 #include "pcm-alsa.h"
+#include <alsa/asoundlib.h>   /* bt_alsa_opens: does the BlueALSA device open */
 #include "yesno.h"
 
 /* HiBy hosted build provides dynamic output routing helper in its
@@ -114,6 +115,8 @@ static unsigned int bt_bt_playback_dev_next = 0;
 static char bt_active_codec[16];
 
 static bool bt_wait_for_bluealsa_pcm(const char *mac, int timeout_ticks);
+static void bt_log_pcm_list(void);
+static bool bt_alsa_opens(const char *dev);
 static void bt_set_active_codec(const char *mac);
 static bool bt_bluealsa_pcm_ready(const char *mac);
 static bool bt_is_connected(const char *mac);
@@ -1048,9 +1051,17 @@ static bool bt_route_to_bluetooth(const char *mac, const char* codec)
 
     if (!bt_wait_for_bluealsa_pcm(mac, HZ * 6))
     {
-        hiby_debug_log("route: no BlueALSA A2DP PCM for %s", mac);
-        bt_route_to_local();
-        return false;
+        /* An older system (HiBy 1.6) may have no bluealsa-cli, or one that
+         * lists its PCMs another way: ask ALSA itself before giving up. */
+        bt_log_pcm_list();
+        if (!bt_alsa_opens(bt_playback_dev))
+        {
+            hiby_debug_log("route: no BlueALSA A2DP PCM for %s", mac);
+            bt_route_to_local();
+            return false;
+        }
+        hiby_debug_log("route: %s opens though bluealsa-cli does not list it", bt_playback_dev);
+        codec = codec ? codec : "";     /* bt_set_active_codec asks bluealsa-cli too */
     }
 
     if (!codec)
@@ -1189,6 +1200,35 @@ static bool bt_get_active_mac(char *mac_out, size_t mac_out_len)
     }
 
     return false;
+}
+
+/* what bluealsa-cli lists, and which BlueALSA runs, for the log */
+static void bt_log_pcm_list(void)
+{
+    char line[160];
+    int n = 0;
+    FILE *fp = bt_popen("bluealsa-cli list-pcms 2>&1; echo \"exit $?\"; pgrep -a bluealsa 2>&1", "r");
+    if (!fp) return;
+    while (fgets(line, sizeof(line), fp) && n++ < 8)
+    {
+        bt_trim(line);
+        hiby_debug_log("route: pcms: %s", line);
+    }
+    bt_pclose(fp);
+}
+
+/* the ALSA device opens: BlueALSA has its PCM, whatever bluealsa-cli says */
+static bool bt_alsa_opens(const char *dev)
+{
+    snd_pcm_t *pcm;
+    int err = snd_pcm_open(&pcm, dev, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
+    if (err < 0)
+    {
+        hiby_debug_log("route: %s does not open: %s", dev, snd_strerror(err));
+        return false;
+    }
+    snd_pcm_close(pcm);
+    return true;
 }
 
 static bool bt_wait_for_bluealsa_pcm(const char *mac, int timeout_ticks)

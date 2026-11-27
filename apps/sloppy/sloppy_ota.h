@@ -24,7 +24,7 @@
 
 /* This build's version: what an update must be newer than. Raise it with
  * every release (make-update.py's --version is the next one). */
-#define SL_VERSION "1.2.1"
+#define SL_VERSION "1.2.2"
 
 #define SL_OTA_EXT ".gbupdate"
 #define SL_OTA_DIR "/.rockbox/update"          /* under the card's root */

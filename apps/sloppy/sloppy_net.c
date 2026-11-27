@@ -3955,6 +3955,21 @@ static __attribute__((unused)) int scr_status(const char *out)
     return h ? atoi(h + 9) : 0;
 }
 
+#ifndef NET_DEMO
+/* an answer's body into a fixed buffer, the rest dropped */
+struct scr_buf { char *b; size_t cap, len; };
+static bool scr_buf_add(void *ctx, const char *data, size_t n)
+{
+    struct scr_buf *sb = ctx;
+    size_t room = sb->cap - 1 - sb->len;
+    if (n > room) n = room;
+    memcpy(sb->b + sb->len, data, n);
+    sb->len += n;
+    sb->b[sb->len] = '\0';
+    return true;
+}
+static void scr_reason(const char *out, char *r, size_t n);
+#endif
 /* One HTTPS request; body NULL for a GET. Returns the HTTP status, or -1
  * with no answer; out gets wget's report and the answer's body. The token
  * is an argument of the shell, so it never passes through a log. */
@@ -3980,9 +3995,40 @@ static int scr_http_as(const char *url, const char *body, char *out, size_t cap,
         "exec /usr/bin/wget -q -S -T 20 -U GabagoolOS -O - --post-data \"$2\" \"$3\" 2>&1" :
         "exec /usr/bin/wget -q -S -T 20 -U GabagoolOS -O - --header \"$1\" \"$3\" 2>&1",
         "wget", auth, body ? body : "", url, NULL };
+    uint32_t t0 = net_ms();
     net_run(out, cap, 30000, argv);
     status = scr_status(out);
-    if (!status) status = -1;
+    if (!status)
+    {
+        /* wget's own TLS got no answer: once more through the system's
+         * OpenSSL, as the radio and updates go, and say which answered */
+        char why[96], hdr[112] = "";
+        scr_reason(out, why, sizeof why);
+        if (auth[0]) snprintf(hdr, sizeof hdr, "%s\r\n", auth);
+        struct scr_buf sb = { out, cap, 0 };
+        struct sl_net_req r;
+        memset(&r, 0, sizeof r);
+        r.method = body ? "POST" : "GET"; r.url = url; r.ua = "GabagoolOS"; r.headers = hdr;
+        r.body = body; r.ctype = listenbrainz ? "application/json" : "application/x-www-form-urlencoded";
+        r.timeout_ms = 20000; r.sink = scr_buf_add; r.ctx = &sb;
+        out[0] = '\0';
+        uint32_t t1 = net_ms();
+        status = sl_net_http_req(&r);
+        memset(hdr, 0, sizeof hdr);
+        scr_say("net: wget gave no answer in %u ms (%s); OpenSSL: %s%d in %u ms", (unsigned)(t1 - t0), why,
+                r.https_failed ? "TLS failed, " : "", status, (unsigned)(net_ms() - t1));
+        if (status > 0)
+        {
+            /* scr_status reads the status line, as wget's -S printed it */
+            char line[24];
+            int n = snprintf(line, sizeof line, "  HTTP/1.1 %d\n", status);
+            size_t keep = sb.len + (size_t)n < cap ? sb.len : cap - 1 - (size_t)n;
+            memmove(out + n, out, keep);
+            memcpy(out, line, (size_t)n);
+            out[n + keep] = '\0';
+        }
+        else status = -1;
+    }
 #endif
     /* whatever came back, the token is not in it (a Last.fm answer is
      * only read for its numbers and a new session, never logged) */

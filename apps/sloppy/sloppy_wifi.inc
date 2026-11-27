@@ -509,6 +509,8 @@ static void wf_tick_update(void)
     lv_timer_resume(wf_tick_timer);
 }
 static void wf_tick_start(void) { wf_tick_update(); }
+/* the next tick asks wpa_cli how the link is */
+static void wf_check_soon(void) { wf_next_status = sl_ms(); }
 
 /* ---------------------------------------------------------------- the page */
 static void wf_power_cb(lv_event_t *e)

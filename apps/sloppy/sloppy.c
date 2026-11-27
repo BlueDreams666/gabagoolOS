@@ -805,6 +805,7 @@ static bool qp_is_visible(void);
 static void qp_drag_to(int dy);
 static void sl_torture_boot(void);                    /* sloppy_torture.inc */
 static void ha_arrange_page(void);                    /* Arrange apps and games (sloppy_settings.inc) */
+static void wf_check_soon(void);                      /* sloppy_wifi.inc */
 static void sl_torture_poll(void);
 static void qp_glass_early(void);
 static void qp_release(int dy, int vy);
@@ -8197,6 +8198,7 @@ static void handle_button(long btn)
             sl_log_hold(false);
             sl_log("usb: back after %u s, battery %d%% %d mV", (unsigned)((sl_ms() - usb_from) / 1000),
                    battery_level(), battery_voltage());
+            wf_check_soon();              /* the link may have dropped meanwhile: ask now, not in 30 s */
 #if defined(HIBY_R1) && !defined(SIMULATOR)
             int handover = usb_card_handover_error();
             if (handover > 0)

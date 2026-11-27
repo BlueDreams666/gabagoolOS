@@ -9,7 +9,7 @@
 </picture>
 </a>
 
-**[Download 1.2.1](https://github.com/BlueDreams666/gabagoolOS/releases/latest)** &nbsp;·&nbsp;
+**[Download 1.2.2](https://github.com/BlueDreams666/gabagoolOS/releases/latest)** &nbsp;·&nbsp;
 [Website](https://bluedreams666.github.io/gabagoolOS/) &nbsp;·&nbsp;
 [How to install](#no-funny-business) &nbsp;·&nbsp;
 [Questions](#you-got-questions) &nbsp;·&nbsp;
@@ -109,10 +109,13 @@ We test every screen so you don't run into anything weird.
 
 Three steps, about ten minutes. Back up your card first, just in case.
 
-1. **Download** `GabagoolOS-1.2.1-HiBy-R1.zip` and `GabagoolOS-1.2.1-boot-menu.upt`
+1. **Download** `GabagoolOS-1.2.2-HiBy-R1.zip` and `GabagoolOS-1.2.2-boot-menu.upt`
    from the [latest release](https://github.com/BlueDreams666/gabagoolOS/releases/latest).
 2. **Copy them to your card.** Unzip the zip onto the card. Put the `.upt` file
-   on the card too, and rename it `r1.upt`.
+   on the card too, and rename it `r1.upt`. The card must end up with a
+   `.rockbox` folder at its top. Its name starts with a dot, so some computers
+   (Chromebooks, Windows, Linux) hide it or skip it: turn on showing hidden
+   files and check it is there, or the R1 says it cannot load Rockbox.
 3. **On the R1,** go to System > Firmware update > Via SD card.
 
 Done! Your R1 now starts in GabagoolOS, and from now on it updates itself

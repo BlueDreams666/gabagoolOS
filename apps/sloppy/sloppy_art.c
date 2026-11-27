@@ -166,8 +166,74 @@ static void *stb_worker(void *arg)
 
 /* Hand a cover to the thread: false when it cannot be tried at all (not an
  * image stb reads, too big for the memory there is, no thread). */
-static bool stb_start(int album, const char *path, long off, long size)
+/* An Ogg file's picture (Vorbis or Opus): a FLAC picture block in base64,
+ * in a comment that runs across Ogg pages. The tags give where its picture
+ * starts only roughly (base64's padding, and a page header can fall before
+ * it), so the text is read from a little earlier, the pages' headers taken
+ * out, and decoded from whichever of the next few letters gives a JPEG or
+ * PNG. n is what was read, and then what the picture is. */
+static int stb_b64(int c)
 {
+    return c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 :
+           c == '+' ? 62 : c == '/' ? 63 : -1;
+}
+static size_t stb_b64_decode(const unsigned char *t, size_t n, unsigned char *out, size_t cap)
+{
+    size_t o = 0;
+    unsigned acc = 0;
+    int bits = 0;
+    for (size_t i = 0; i < n && o < cap; i++)
+    {
+        int v = stb_b64(t[i]);
+        if (v < 0) break;                    /* '=' or the comment's end */
+        acc = (acc << 6) | (unsigned)v;
+        bits += 6;
+        if (bits >= 8) { bits -= 8; out[o++] = (unsigned char)(acc >> bits); }
+    }
+    return o;
+}
+#define STB_OGG_BACK 64                     /* letters read before where the tags say */
+static bool stb_ogg_picture(unsigned char *b, long *n)
+{
+    long len = 0;
+    for (long i = 0; i < *n; )
+    {
+        if (i + 27 <= *n && !memcmp(b + i, "OggS", 4) && !b[i + 4])   /* base64 has no zero byte */
+        {
+            long skip = 27 + b[i + 26];
+            if (i + skip > *n) break;
+            i += skip;
+            continue;
+        }
+        b[len++] = b[i++];
+    }
+    /* every start up to just past the rough one: decoded from a letter on
+     * base64's grid, the picture begins within its first three bytes */
+    for (long s = 0; s <= STB_OGG_BACK + 8 && s + 16 <= len; s++)
+    {
+        unsigned char head[12];
+        size_t got = stb_b64_decode(b + s, 16, head, sizeof head);
+        for (size_t k = 0; k + 4 <= got && k < 3; k++)
+            if ((head[k] == 0xff && head[k + 1] == 0xd8 && head[k + 2] == 0xff) || !memcmp(head + k, "\x89PNG", 4))
+            {
+                size_t out = stb_b64_decode(b + s, (size_t)(len - s), b, (size_t)len);   /* writes behind what it reads */
+                if (out <= k) return false;
+                memmove(b, b + k, out - k);
+                *n = (long)(out - k);
+                return true;
+            }
+    }
+    return false;
+}
+
+static bool stb_start(int album, const char *path, long off, long size, bool ogg_b64)
+{
+    if (ogg_b64)
+    {
+        long back = off < STB_OGG_BACK ? off : STB_OGG_BACK;   /* a little before, for the start's slack */
+        off -= back;
+        size += back;
+    }
     if (sj_state() || size <= 0 || size > STB_FILE_MAX) return false;
     unsigned char *in = malloc((size_t)size);
     if (!in) return false;
@@ -181,6 +247,7 @@ static bool stb_start(int album, const char *path, long off, long size)
         else got += r;
     }
     if (fd >= 0) close(fd);
+    if (ok && ogg_b64) ok = stb_ogg_picture(in, &size);
     int w, h, comp;
     if (ok) ok = stbi_info_from_memory(in, (int)size, &w, &h, &comp) && w > 0 && h > 0;
     if (ok)
@@ -897,7 +964,7 @@ const char *sl_art_src(int album, int size)
 }
 /* ------------------------------------------------------ making thumbs */
 /* the first cover Rockbox could not decode, for stb_image to try */
-static struct { bool have; char path[MAX_PATH]; long off, size; } stb_cand;
+static struct { bool have, ogg_b64; char path[MAX_PATH]; long off, size; } stb_cand;
 
 /* Rockbox threads on the R1 take turns on one OS thread (sigaltstack
  * threads): a switch happens only at a yield or a wait. The decoders yield
@@ -954,7 +1021,7 @@ static bool decode_art(struct art_job *j, struct bitmap *bm, int size, unsigned 
         if (meta && id3.has_embedded_albumart)
         {
             struct mp3_albumart *aa = &id3.albumart;
-            if ((aa->type & AA_CLEAR_FLAGS_MASK) == AA_TYPE_PNG)
+            if ((aa->type & AA_CLEAR_FLAGS_MASK) == AA_TYPE_PNG && !(aa->type & AA_FLAG_VORBIS_BASE64))
                 rc = clip_png_fd(fd, aa->pos, aa->size, bm, (int)work_size, format);
             else if ((aa->type & AA_CLEAR_FLAGS_MASK) == AA_TYPE_JPG)
             {
@@ -965,6 +1032,7 @@ static bool decode_art(struct art_job *j, struct bitmap *bm, int size, unsigned 
             else if (!stb_cand.have && aa->size > 0)
             {
                 stb_cand.have = true;
+                stb_cand.ogg_b64 = (aa->type & AA_FLAG_VORBIS_BASE64) != 0;
                 strlcpy(stb_cand.path, track, sizeof stb_cand.path);
                 stb_cand.off = aa->pos;
                 stb_cand.size = aa->size;
@@ -997,6 +1065,7 @@ static bool decode_art(struct art_job *j, struct bitmap *bm, int size, unsigned 
                     if (end > 0)
                     {
                         stb_cand.have = true;
+                        stb_cand.ogg_b64 = false;
                         strlcpy(stb_cand.path, artpath, sizeof stb_cand.path);
                         stb_cand.off = 0;
                         stb_cand.size = (long)end;
@@ -1195,7 +1264,7 @@ static void make_album(void)
     if (job_stale()) aj.again = true;
     else if (!decoded)
     {
-        if (stb_cand.have && stb_start(aj.album, stb_cand.path, stb_cand.off, stb_cand.size))
+        if (stb_cand.have && stb_start(aj.album, stb_cand.path, stb_cand.off, stb_cand.size, stb_cand.ogg_b64))
         { aj.state = AJ_STB; return; }
         miss_note();
     }
